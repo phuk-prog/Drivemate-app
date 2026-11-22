@@ -657,7 +657,11 @@ public final class MainActivity extends Activity implements LocationListener {
             showError("Waiting for a fresh GPS fix. Enable device location, then try again.");
             return;
         }
+        if (route != null || active) stopNavigation(false);
         destination = selected;
+        places.addRecent(selected);
+        followLocation = false;
+        followButton.setText("GPS ○");
         destinationInput.setText(selected.title);
         if (destinationPin == null) {
             destinationPin = new Marker(map);
@@ -687,21 +691,18 @@ public final class MainActivity extends Activity implements LocationListener {
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
-                    active = true;
                     route = calculated;
                     offRouteSince = 0;
                     spokenDistanceIndex = -1;
                     spokenCloseIndex = -1;
                     spokenNowIndex = -1;
-                    showRoute(calculated);
-                    getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                    stopButton.setVisibility(View.VISIBLE);
-                    setStatus("Navigating to " + destination.title
-                            + (calculated.trafficDelaySeconds > 0
-                            ? " · traffic +" + Math.round(calculated.trafficDelaySeconds / 60f) + " min"
-                            : " · live traffic considered"));
-                    if (firstRoute) say("Route ready. Follow the directions.");
-                    if (currentLocation != null) updateGuidance(currentLocation);
+                    showRoute(calculated, firstRoute);
+                    if (firstRoute) {
+                        showPreview(calculated);
+                    } else {
+                        setStatus("Route updated with latest traffic");
+                        if (currentLocation != null) updateGuidance(currentLocation);
+                    }
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -714,7 +715,7 @@ public final class MainActivity extends Activity implements LocationListener {
         });
     }
 
-    private void showRoute(TomTomApi.Route calculated) {
+    private void showRoute(TomTomApi.Route calculated, boolean preview) {
         if (routeLine != null) map.getOverlays().remove(routeLine);
         routeLine = new Polyline();
         List<GeoPoint> geometry = new ArrayList<>(calculated.points.size());
@@ -734,7 +735,17 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         map.invalidate();
-        if (followLocation) centreOnLocation(true);
+        if (preview) {
+            double north = -90, south = 90, east = -180, west = 180;
+            for (GeoMath.Point point : calculated.points) {
+                north = Math.max(north, point.lat);
+                south = Math.min(south, point.lat);
+                east = Math.max(east, point.lon);
+                west = Math.min(west, point.lon);
+            }
+            final BoundingBox box = new BoundingBox(north, east, south, west);
+            map.post(() -> map.zoomToBoundingBox(box, true, dp(80)));
+        } else if (followLocation) centreOnLocation(true);
     }
 
     private void updateGuidance(Location fix) {
