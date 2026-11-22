@@ -6,6 +6,21 @@ The 22 November 2026 reference screenshots informed the navy/cyan design: a larg
 
 **Important:** The package identity now matches original Drivemate (`com.drivemate.android`), but its former signing certificate is unknown. You may need to uninstall the older Drivemate install **once**, and also remove the separately installed `com.drivemate.app` DriveMate GPS package. From this release onward, only APKs signed with the owner's **same private signing key** can update in place; see [Updating and signing](docs/UPDATING-AND-SIGNING.md). Never put the keystore in this public repo.
 
+## v1.2.2 — Junction-focused driving view
+
+Changes based on actual DriveMate screenshots from an Android phone:
+
+- **Driving camera now follows the upcoming manoeuvre**: during an active trip it looks ahead along TomTom's route geometry and dynamically adjusts zoom according to the remaining distance to the next turn and the vehicle speed.
+- **Driver and next junction visible together**: map camera accounts for header and guidance-card occlusion and positions the car lower in the usable map area. The map follows the road heading for an ahead-up view, with bounded camera rotation.
+- Route line reduced from 8dp to 5dp with rounded joins/caps, so it obscures less of roundabouts and side roads. TomTom's original route geometry is left intact.
+- Search keyboard is dismissed on Find; when the keyboard is showing, large dashboard and map controls are hidden rather than overlapping the search field.
+- Speeds below approximately 2 mph are treated as zero to reduce stopped-GPS jitter. ETA uses 24-hour UK clock formatting.
+- Camera geometry and route interpolation/bearing tests added.
+
+**Important limitations:** the road camera uses TomTom REST geometry and GPS rather than a certified map-matching navigation SDK. At roundabouts or on parallel roads, GPS geometry may still snap to the wrong segment. Distinguishing a true routing problem from a display/position problem requires an anonymised TomTom route response and controlled device testing. This release is not validated for real-road use. Do not manipulate the screen while driving.
+
+Version code 100202, app ID `com.drivemate.android`, for installation over the privately signed v1.2.x versions when signed with the same owner's certificate.
+
 ## v1.2 additions
 
 - Install display name **DriveMate** and branded adaptive launcher icon.
