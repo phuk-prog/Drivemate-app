@@ -97,6 +97,25 @@ public final class MainActivity extends Activity implements LocationListener {
                     say("GPS signal lost. Waiting for location.");
                 }
             }
+            boolean available = hasInternet();
+            if (available != online) {
+                online = available;
+                if (!online) {
+                    connectionWarned = true;
+                    if (active) {
+                        setStatus("Internet unavailable · keeping current route on screen");
+                        say("Internet connection lost. Following the last known route.");
+                    }
+                } else {
+                    connectionWarned = false;
+                    if (active) {
+                        setStatus("Internet restored · TomTom available");
+                        if (!routing && SystemClock.elapsedRealtime() - lastRouteRequest > 60000) {
+                            planRoute(false);
+                        }
+                    }
+                }
+            }
             gpsHandler.postDelayed(this, 5000);
         }
     };
@@ -983,7 +1002,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
-        GeoPoint point = new GeoPoint(fix.getLatitude(), fix.getLongitude());
+        GeoMath.Point filteredPosition = smoother.update(gpsPoint(fix),
+                fix.hasAccuracy() ? fix.getAccuracy() : 60,
+                fix.hasSpeed() ? fix.getSpeed() : 0, fix.getTime());
+        GeoPoint point = new GeoPoint(filteredPosition.lat, filteredPosition.lon);
         if (userPin == null) {
             userPin = new Marker(map);
             userPin.setTitle("Your live GPS position");
@@ -992,10 +1014,15 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         userPin.setPosition(point);
-        if (fix.hasBearing()) userPin.setRotation(fix.getBearing());
+        if (fix.hasBearing()) userPin.setRotation((float) smoother.heading(
+                fix.getBearing(), fix.hasSpeed() ? fix.getSpeed() : 0));
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
+        if (gpsAccuracyText != null) {
+            gpsAccuracyText.setText(fix.hasAccuracy()
+                    ? "±" + Math.round(fix.getAccuracy()) + "m" : "GPS");
+        }
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
             setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
         }
@@ -1075,12 +1102,27 @@ public final class MainActivity extends Activity implements LocationListener {
         lastCameraUpdate = now;
     }
 
+    private boolean hasInternet() {
+        ConnectivityManager manager = (ConnectivityManager)
+                getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) return false;
+        Network network = manager.getActiveNetwork();
+        NetworkCapabilities caps = network == null ? null : manager.getNetworkCapabilities(network);
+        return caps != null
+                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
     private void searchDestination() {
         if (apiKey.isEmpty()) {
             showKeyDialog();
             return;
         }
-        String query = destinationInput.getText().toString().trim();
+        if (!hasInternet()) {
+            showError("No internet · connect to search TomTom destinations.");
+            return;
+        }
+        String query = SearchQuery.clean(destinationInput.getText().toString());
         if (query.length() < 2) {
             destinationInput.setError("Enter an address or postcode");
             return;
