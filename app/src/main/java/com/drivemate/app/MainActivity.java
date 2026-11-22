@@ -781,7 +781,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                             + "around a GPS fix. Online use fetches missing tiles individually. "
                                             + "TomTom routing still needs internet. "
                                             + "Map data © OpenStreetMap contributors, ODbL 1.0.")
-                                    .setPositiveButton("Prefetch nearby", (dialog, button) -> {
+                                    .setPositiveButton("Prefetch nearby", (d, button) -> {
                                         if (vectorMap != null && currentLocation != null)
                                             vectorMap.prefetch(gpsPoint(currentLocation));
                                     })
