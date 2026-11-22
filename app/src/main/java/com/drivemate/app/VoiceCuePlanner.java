@@ -12,9 +12,9 @@ public final class VoiceCuePlanner {
 
     public static int stage(String mode, double distanceMeters, float speedMps) {
         double d = Math.max(0, distanceMeters);
-        double now = Math.max(40, Math.min(100, speedMps * 4.0));
-        double close = Math.max(170, Math.min(420, speedMps * 14));
-        double early = Math.max(650, Math.min(1300, speedMps * 35));
+        double now = Math.max(55, Math.min(120, speedMps * 4.5));
+        double close = Math.max(250, Math.min(500, speedMps * 14));
+        double early = Math.max(950, Math.min(1500, speedMps * 40));
         if (d <= now) return 3;
         if (MINIMAL.equals(mode)) return 0;
         if (d <= close) return 2;
