@@ -178,6 +178,11 @@ public final class DriveTileServer implements AutoCloseable {
         if (path.exists() && path.length() > 0 && path.length() < MAX_TILE_BYTES) {
             cachedHits.incrementAndGet();
             path.setLastModified(System.currentTimeMillis());
+            Runnable callback = onFirstTile;
+            if (callback != null) {
+                onFirstTile = null;
+                callback.run();
+            }
             return readBytes(path, MAX_TILE_BYTES);
         }
         byte[] tile = reader().tile(z, x, y);
@@ -320,6 +325,7 @@ public final class DriveTileServer implements AutoCloseable {
      */
     private static final class RangeSource implements PmTilesReader.Source {
         final File directory;
+        private long dataStarts;
         RangeSource(File directory) { this.directory = directory; }
         @Override public long size() { return SOURCE_SIZE; }
 
@@ -328,8 +334,14 @@ public final class DriveTileServer implements AutoCloseable {
                     || offset > SOURCE_SIZE - length)
                 throw new IOException("PMTiles range outside verified release bounds");
             File local = new File(directory, offset + "-" + length + ".part");
-            if (local.isFile() && local.length() == length)
-                return readBytes(local, 4 * 1024 * 1024);
+            if (local.isFile() && local.length() == length) {
+                byte[] cached = readBytes(local, 4 * 1024 * 1024);
+                if (offset == 0 && cached.length >= 127) {
+                    dataStarts = java.nio.ByteBuffer.wrap(cached)
+                            .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(56);
+                }
+                return cached;
+            }
             HttpURLConnection connection = (HttpURLConnection) new URL(SOURCE).openConnection();
             connection.setInstanceFollowRedirects(true);
             connection.setConnectTimeout(10000);
@@ -361,7 +373,14 @@ public final class DriveTileServer implements AutoCloseable {
                 if (buffer.size() != length)
                     throw new IOException("Server returned an incomplete map range");
                 byte[] bytes = buffer.toByteArray();
-                storeAtomically(local, bytes);
+                if (offset == 0 && bytes.length >= 127) {
+                    dataStarts = java.nio.ByteBuffer.wrap(bytes)
+                            .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(56);
+                }
+                // Do not double-cache every road tile's compressed bytes:
+                // the decompressed tile cache already has an LRU size cap.
+                if (offset == 0 || (dataStarts > 0 && offset < dataStarts))
+                    storeAtomically(local, bytes);
                 return bytes;
             } finally { connection.disconnect(); }
         }
