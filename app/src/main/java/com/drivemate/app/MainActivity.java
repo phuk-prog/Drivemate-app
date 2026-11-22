@@ -37,6 +37,7 @@ import org.osmdroid.config.Configuration;
 import org.osmdroid.tileprovider.MapTileProviderBasic;
 import org.osmdroid.tileprovider.tilesource.XYTileSource;
 import org.osmdroid.util.GeoPoint;
+import org.osmdroid.util.BoundingBox;
 import org.osmdroid.util.MapTileIndex;
 import org.osmdroid.views.MapView;
 import org.osmdroid.views.overlay.Marker;
@@ -75,6 +76,15 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView etaText;
     private TextView speedText;
     private Button stopButton;
+    private Button startButton;
+    private Button saveButton;
+    private Button repeatButton;
+    private Button refreshButton;
+    private Button unitsButton;
+    private TextView routeSummary;
+    private DestinationStore places;
+    private boolean metricUnits;
+    private String nextInstruction = "";
 
     private LocationManager locationManager;
     private Location currentLocation;
@@ -106,6 +116,8 @@ public final class MainActivity extends Activity implements LocationListener {
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         apiKey = settings.getString("tomtom_key", "");
         voiceEnabled = settings.getBoolean("voice", true);
+        metricUnits = settings.getBoolean("metric_units", false);
+        places = new DestinationStore(this);
         trafficEnabled = settings.getBoolean("traffic", true);
         buildScreen();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
@@ -151,6 +163,10 @@ public final class MainActivity extends Activity implements LocationListener {
             return false;
         });
         search.addView(destinationInput, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button saved = chip("★");
+        saved.setContentDescription("Saved and recent destinations");
+        saved.setOnClickListener(v -> showSavedDestinations());
+        search.addView(saved, new LinearLayout.LayoutParams(dp(45), dp(48)));
         Button find = chip("GO");
         find.setOnClickListener(v -> searchDestination());
         search.addView(find, new LinearLayout.LayoutParams(dp(70), dp(48)));
@@ -192,6 +208,19 @@ public final class MainActivity extends Activity implements LocationListener {
             if (voiceEnabled) say("Voice guidance on.");
         });
         tools.addView(voiceButton, new LinearLayout.LayoutParams(0, dp(44), 1));
+        unitsButton = chip(metricUnits ? "km/m" : "mi/yd");
+        unitsButton.setOnClickListener(v -> {
+            metricUnits = !metricUnits;
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putBoolean("metric_units", metricUnits).apply();
+            unitsButton.setText(metricUnits ? "km/m" : "mi/yd");
+            if (currentLocation != null) {
+                speedText.setText(NavigationUnits.displaySpeed(currentLocation.getSpeed(), metricUnits));
+                if (active) updateGuidance(currentLocation);
+            }
+            if (route != null && !active) showPreview(route);
+        });
+        tools.addView(unitsButton, new LinearLayout.LayoutParams(0, dp(44), 1));
         FrameLayout.LayoutParams toolsPos = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP);
         toolsPos.setMargins(dp(10), dp(82), dp(10), 0);
         frame.addView(tools, toolsPos);
@@ -208,17 +237,44 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams directionPos = new LinearLayout.LayoutParams(-1, -2);
         directionPos.topMargin = dp(7);
         bottom.addView(instructionText, directionPos);
+        routeSummary = text("", 13, Color.rgb(196, 228, 255), false);
+        routeSummary.setVisibility(View.GONE);
+        bottom.addView(routeSummary);
         LinearLayout details = new LinearLayout(this);
         details.setGravity(Gravity.CENTER_VERTICAL);
         distanceText = text("Distance: —", 13, Color.WHITE, false);
         details.addView(distanceText, new LinearLayout.LayoutParams(0, -2, 1));
         etaText = text("ETA: —", 13, Color.WHITE, false);
         details.addView(etaText, new LinearLayout.LayoutParams(0, -2, 1));
-        speedText = text("0 mph", 17, Color.WHITE, true);
+        speedText = text(metricUnits ? "0 km/h" : "0 mph", 17, Color.WHITE, true);
         details.addView(speedText);
         LinearLayout.LayoutParams detailPos = new LinearLayout.LayoutParams(-1, -2);
         detailPos.topMargin = dp(12);
         bottom.addView(details, detailPos);
+        LinearLayout actions = new LinearLayout(this);
+        actions.setGravity(Gravity.CENTER);
+        startButton = chip("▶ Start navigation");
+        startButton.setVisibility(View.GONE);
+        startButton.setOnClickListener(v -> startNavigation());
+        actions.addView(startButton, new LinearLayout.LayoutParams(0, dp(45), 2));
+        saveButton = chip("★ Save place");
+        saveButton.setVisibility(View.GONE);
+        saveButton.setOnClickListener(v -> saveCurrentDestination());
+        actions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        repeatButton = chip("Repeat voice");
+        repeatButton.setVisibility(View.GONE);
+        repeatButton.setOnClickListener(v -> {
+            if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
+            else say(nextInstruction);
+        });
+        actions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        refreshButton = chip("Refresh route");
+        refreshButton.setVisibility(View.GONE);
+        refreshButton.setOnClickListener(v -> planRoute(false));
+        actions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        LinearLayout.LayoutParams actionsPos = new LinearLayout.LayoutParams(-1, -2);
+        actionsPos.topMargin = dp(10);
+        bottom.addView(actions, actionsPos);
         stopButton = chip("End navigation");
         stopButton.setVisibility(View.GONE);
         stopButton.setOnClickListener(v -> stopNavigation(false));
@@ -399,13 +455,15 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         userPin.setPosition(point);
         if (fix.hasBearing()) userPin.setRotation(fix.getBearing());
-        speedText.setText(String.format(Locale.UK, "%.0f mph",
-                Math.max(0, fix.getSpeed() * 2.2369362921)));
+        speedText.setText(NavigationUnits.displaySpeed(fix.getSpeed(), metricUnits));
+        if (!active && !routing && destination == null && fix.hasAccuracy()) {
+            setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
+        }
         if (followLocation && SystemClock.elapsedRealtime() - lastCameraUpdate > 1400) {
             centreOnLocation(false);
             lastCameraUpdate = SystemClock.elapsedRealtime();
         }
-        if (route != null && !routing) updateGuidance(fix);
+        if (active && route != null && !routing) updateGuidance(fix);
         map.invalidate();
     }
 
