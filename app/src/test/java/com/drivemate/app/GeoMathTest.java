@@ -35,4 +35,26 @@ public class GeoMathTest {
         GeoMath.Progress p = GeoMath.project(Arrays.asList(), new GeoMath.Point(0, 0));
         assertTrue(Double.isInfinite(p.offRouteMetres));
     }
+
+    @Test public void interpolatedRoadPointIsBetweenVertices() {
+        GeoMath.Point a = new GeoMath.Point(53.0, -2.0);
+        GeoMath.Point b = new GeoMath.Point(53.01, -2.0);
+        double total = GeoMath.distance(a, b);
+        GeoMath.Point midpoint = GeoMath.pointAtDistance(Arrays.asList(a, b), total / 2);
+        assertEquals(53.005, midpoint.lat, 0.00001);
+        assertEquals(-2.0, midpoint.lon, 0.00001);
+    }
+
+    @Test public void interpolationClampsOutsideRoute() {
+        GeoMath.Point a = new GeoMath.Point(53.0, -2.0);
+        GeoMath.Point b = new GeoMath.Point(53.01, -2.0);
+        assertEquals(a.lat, GeoMath.pointAtDistance(Arrays.asList(a, b), -10).lat, 0);
+        assertEquals(b.lat, GeoMath.pointAtDistance(Arrays.asList(a, b), 100000).lat, 0);
+    }
+
+    @Test public void bearingPointsTowardsEast() {
+        assertEquals(90, GeoMath.bearingDegrees(
+                new GeoMath.Point(53, -2.0),
+                new GeoMath.Point(53, -1.99)), 0.5);
+    }
 }

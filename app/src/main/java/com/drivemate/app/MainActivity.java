@@ -11,7 +11,9 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.graphics.Paint;
+import java.text.SimpleDateFormat;
 import android.graphics.Path;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
@@ -34,6 +36,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -91,6 +94,9 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     };
     private MapView map;
+    private View speedBadgeView;
+    private boolean keyboardOpen;
+    private boolean homeMode = true;
     private LinearLayout homePanel;
     private LinearLayout navigationPanel;
     private LinearLayout recentList;
@@ -174,6 +180,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void buildScreen() {
         getWindow().setStatusBarColor(DARK);
         getWindow().setNavigationBarColor(DARK);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
@@ -207,7 +214,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.2.0", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.2.2", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -397,6 +404,7 @@ public final class MainActivity extends Activity implements LocationListener {
         speedBadgePos = new FrameLayout.LayoutParams(dp(86), dp(86), Gravity.BOTTOM | Gravity.LEFT);
         speedBadgePos.leftMargin = dp(12);
         frame.addView(speedBadge, speedBadgePos);
+        speedBadgeView = speedBadge;
 
         followButton = chip("◎");
         followButton.setContentDescription("Centre map on my GPS position");
@@ -406,12 +414,27 @@ public final class MainActivity extends Activity implements LocationListener {
         followButton.setOnClickListener(v -> {
             followLocation = true;
             followButton.setText("◎");
-            if (currentLocation != null) centreOnLocation(true);
+            if (currentLocation != null && active && route != null) {
+                lastCameraUpdate = 0;
+                updateGuidance(currentLocation);
+            } else if (currentLocation != null) {
+                centreOnLocation(true);
+            }
         });
         gpsButtonPos = new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.BOTTOM | Gravity.RIGHT);
         gpsButtonPos.rightMargin = dp(13);
         frame.addView(followButton, gpsButtonPos);
         setContentView(frame);
+        frame.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            Rect visible = new Rect();
+            frame.getWindowVisibleDisplayFrame(visible);
+            int rootHeight = frame.getRootView().getHeight();
+            boolean imeNow = rootHeight - visible.bottom > dp(160);
+            if (imeNow != keyboardOpen) {
+                keyboardOpen = imeNow;
+                setHomeVisible(homeMode);
+            }
+        });
         setHomeVisible(true);
         refreshHomePanel();
     }
@@ -433,14 +456,21 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void setHomeVisible(boolean show) {
+        homeMode = show;
         if (homePanel == null || navigationPanel == null) return;
-        homePanel.setVisibility(show ? View.VISIBLE : View.GONE);
-        navigationPanel.setVisibility(show ? View.GONE : View.VISIBLE);
+        homePanel.setVisibility(show && !keyboardOpen ? View.VISIBLE : View.GONE);
+        navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
+        if (speedBadgeView != null) {
+            speedBadgeView.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
+        }
+        if (followButton != null) {
+            followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
+        }
         if (speedBadgePos != null && gpsButtonPos != null) {
             speedBadgePos.bottomMargin = dp(show ? 320 : 225);
             gpsButtonPos.bottomMargin = dp(show ? 327 : 230);
         }
-        if (show) refreshHomePanel();
+        if (show && !keyboardOpen) refreshHomePanel();
     }
 
     private void refreshHomePanel() {
@@ -817,11 +847,13 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         userPin.setPosition(point);
         if (fix.hasBearing()) userPin.setRotation(fix.getBearing());
-        speedText.setText(NavigationUnits.displaySpeed(fix.getSpeed(), metricUnits));
+        float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
+                ? fix.getSpeed() : 0f;
+        speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
             setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
         }
-        if (followLocation && SystemClock.elapsedRealtime() - lastCameraUpdate > 1400) {
+        if (!active && followLocation && SystemClock.elapsedRealtime() - lastCameraUpdate > 1400) {
             centreOnLocation(false);
             lastCameraUpdate = SystemClock.elapsedRealtime();
         }
@@ -856,6 +888,47 @@ public final class MainActivity extends Activity implements LocationListener {
                 new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
     }
 
+    /**
+     * During active guidance keep the vehicle in the lower part of the visible
+     * map, with the next manoeuvre and exit road above it. The camera uses
+     * road geometry rather than a noisy stopped-vehicle compass bearing.
+     */
+    private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
+                                     double nextJunctionOffsetMetres) {
+        if (!active || !followLocation || route == null || gpsLost
+                || (fix.hasAccuracy() && fix.getAccuracy() > 55)
+                || progress.offRouteMetres > 110) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastCameraUpdate < 2400) return;
+        if (map.getHeight() < dp(350)) return;
+
+        int headerHeight = dp(145);
+        int bottomPanelHeight = navigationPanel.getHeight() > 0
+                ? navigationPanel.getHeight() + dp(18) : dp(245);
+        NavigationCamera.Frame camera = NavigationCamera.calculate(
+                route.points, gpsPoint(fix), progress.alongMetres,
+                nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
+                map.getHeight(), headerHeight, bottomPanelHeight);
+
+        // Avoid rapid zoom flicker when fixes vary slightly in position.
+        if (Math.abs(map.getZoomLevelDouble() - camera.zoom) >= 0.12) {
+            map.getController().setZoom(camera.zoom);
+        }
+
+        float wantedOrientation = (float) -camera.roadBearingDegrees;
+        float currentOrientation = map.getMapOrientation();
+        float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
+        // Turns/roundabouts rotate smoothly, never a sudden full spin.
+        float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
+        if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+
+        map.getController().animateTo(
+                new GeoPoint(camera.center.lat, camera.center.lon));
+        lastCameraUpdate = now;
+    }
+
     private void searchDestination() {
         if (apiKey.isEmpty()) {
             showKeyDialog();
@@ -867,6 +940,11 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         destinationInput.clearFocus();
+        InputMethodManager keyboard = (InputMethodManager)
+                getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (keyboard != null) {
+            keyboard.hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
+        }
         setStatus("Finding " + query + "…");
         GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
         final int searchId = ++requestGeneration;
@@ -1012,7 +1090,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setText("End navigation");
         setStatus("Navigating to " + destination.title);
         say("Navigation started. Follow the directions.");
-        centreOnLocation(true);
+        lastCameraUpdate = 0;
         updateGuidance(currentLocation);
     }
 
@@ -1089,7 +1167,9 @@ public final class MainActivity extends Activity implements LocationListener {
             geometry.add(new GeoPoint(point.lat, point.lon));
         routeLine.setPoints(geometry);
         routeLine.getOutlinePaint().setColor(BLUE);
-        routeLine.getOutlinePaint().setStrokeWidth(dp(8));
+        routeLine.getOutlinePaint().setStrokeWidth(dp(5));
+        routeLine.getOutlinePaint().setStrokeCap(Paint.Cap.ROUND);
+        routeLine.getOutlinePaint().setStrokeJoin(Paint.Join.ROUND);
         map.getOverlays().add(routeLine);
         // Keep the vehicle marker and destination pin above the route line.
         if (destinationPin != null) {
@@ -1102,6 +1182,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         map.invalidate();
         if (preview) {
+            map.setMapOrientation(0);
             double north = -90, south = 90, east = -180, west = 180;
             for (GeoMath.Point point : calculated.points) {
                 north = Math.max(north, point.lat);
@@ -1111,7 +1192,7 @@ public final class MainActivity extends Activity implements LocationListener {
             }
             final BoundingBox box = new BoundingBox(north, east, south, west);
             map.post(() -> map.zoomToBoundingBox(box, true, dp(80)));
-        } else if (followLocation) centreOnLocation(true);
+        }
     }
 
     private void updateGuidance(Location fix) {
@@ -1143,7 +1224,7 @@ public final class MainActivity extends Activity implements LocationListener {
         distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
         long seconds = Math.max(0, Math.round(route.timeSeconds
                 * (leftMetres / Math.max(1, route.lengthMetres))));
-        etaText.setText("ETA: " + DateFormat.getTimeInstance(DateFormat.SHORT, Locale.UK)
+        etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
                 .format(new Date(System.currentTimeMillis() + seconds * 1000)));
         int next = route.instructions.size() - 1;
         for (int i = 0; i < route.instructions.size(); i++) {
@@ -1156,6 +1237,7 @@ public final class MainActivity extends Activity implements LocationListener {
         double untilTurn = Math.max(0, step.routeOffsetMetres - progress.alongMetres);
         instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)
                 + " · " + step.message);
+        updateDrivingCamera(fix, progress, step.routeOffsetMetres);
         nextInstruction = "In " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
                 + ", " + step.message;
         if (untilTurn <= 65 && spokenNowIndex != next) {
@@ -1188,6 +1270,8 @@ public final class MainActivity extends Activity implements LocationListener {
             destinationPin = null;
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        map.setMapOrientation(0);
+        lastCameraUpdate = 0;
         stopButton.setVisibility(View.GONE);
         setHomeVisible(true);
         startButton.setVisibility(View.GONE);
