@@ -11,6 +11,8 @@ import java.util.List;
 public final class DestinationStore {
     private static final String FAVORITES = "dest_favorites";
     private static final String RECENTS = "dest_recents";
+    private static final String HOME = "dest_home";
+    private static final String WORK = "dest_work";
     private final SharedPreferences preferences;
 
     public DestinationStore(Context context) {
@@ -19,6 +21,24 @@ public final class DestinationStore {
 
     public List<TomTomApi.Destination> favorites() { return load(FAVORITES); }
     public List<TomTomApi.Destination> recent() { return load(RECENTS); }
+
+    public TomTomApi.Destination home() { return first(HOME); }
+    public TomTomApi.Destination work() { return first(WORK); }
+    public void setHome(TomTomApi.Destination place) { saveSingle(HOME, place); }
+    public void setWork(TomTomApi.Destination place) { saveSingle(WORK, place); }
+    public void clearRecent() { preferences.edit().remove(RECENTS).apply(); }
+
+    private TomTomApi.Destination first(String key) {
+        List<TomTomApi.Destination> result = load(key);
+        return result.isEmpty() ? null : result.get(0);
+    }
+
+    private void saveSingle(String key, TomTomApi.Destination place) {
+        List<TomTomApi.Destination> items = new ArrayList<>();
+        if (place != null) items.add(place);
+        store(key, items);
+    }
+
 
     public boolean isFavorite(TomTomApi.Destination target) {
         for (TomTomApi.Destination place : favorites()) if (same(place, target)) return true;
