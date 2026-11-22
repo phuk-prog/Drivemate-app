@@ -2,6 +2,8 @@ package com.drivemate.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
+import android.speech.RecognizerIntent;
 import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -13,6 +15,10 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableString;
+import android.text.style.ForegroundColorSpan;
+import android.widget.ImageView;
+import android.widget.ScrollView;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -63,7 +69,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private static final int LOCATION_PERMISSION = 10;
     private static final String PREFS = "drivemate_settings";
     private static final int BLUE = Color.rgb(24, 110, 235);
-    private static final int DARK = Color.rgb(21, 30, 45);
+    private static final int DARK = Color.rgb(10, 39, 59);
+    private static final int CYAN = Color.rgb(7, 214, 235);
+    private static final int VOICE_SEARCH_REQUEST = 12;
     private static final long ROUTE_REFRESH_MS = 300_000L;
 
     private final ExecutorService network = Executors.newSingleThreadExecutor();
@@ -83,6 +91,13 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     };
     private MapView map;
+    private LinearLayout homePanel;
+    private LinearLayout navigationPanel;
+    private LinearLayout recentList;
+    private Button homeTile;
+    private Button workTile;
+    private FrameLayout.LayoutParams speedBadgePos;
+    private FrameLayout.LayoutParams gpsButtonPos;
     private EditText destinationInput;
     private Button trafficButton;
     private Button voiceButton;
@@ -150,7 +165,16 @@ public final class MainActivity extends Activity implements LocationListener {
         ensureLocationPermission();
     }
 
+
+    /**
+     * Map-first DriveMate home screen, following the supplied reference:
+     * navy header, cyan road mark, white search, live map, speed/GPS badges,
+     * Home/Work/Favourites and recent destinations in a dark bottom panel.
+     */
     private void buildScreen() {
+        getWindow().setStatusBarColor(DARK);
+        getWindow().setNavigationBarColor(DARK);
+
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
         map = new MapView(this);
@@ -160,148 +184,292 @@ public final class MainActivity extends Activity implements LocationListener {
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         frame.addView(map, new FrameLayout.LayoutParams(-1, -1));
 
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.VERTICAL);
+        top.setElevation(dp(6));
+
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(15), dp(7), dp(14), dp(7));
+        header.setBackgroundColor(DARK);
+
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.drivemate_mark);
+        logo.setContentDescription("DriveMate road logo");
+        header.addView(logo, new LinearLayout.LayoutParams(dp(48), dp(51)));
+        LinearLayout branding = new LinearLayout(this);
+        branding.setOrientation(LinearLayout.VERTICAL);
+        branding.setPadding(dp(4), 0, 0, 0);
+        TextView brandName = text("DriveMate", 25, Color.WHITE, true);
+        SpannableString brand = new SpannableString("DriveMate");
+        brand.setSpan(new ForegroundColorSpan(Color.WHITE), 0, 5, 0);
+        brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
+        brandName.setText(brand);
+        branding.addView(brandName);
+        TextView subtitle = text("UK NAV  ·  v1.2.0", 10, Color.rgb(180, 222, 235), true);
+        subtitle.setLetterSpacing(0.11f);
+        branding.addView(subtitle);
+        header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
+        Button settings = chip("⚙");
+        settings.setTextSize(23);
+        settings.setContentDescription("DriveMate settings");
+        settings.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                Color.rgb(28, 68, 84)));
+        settings.setTextColor(Color.WHITE);
+        settings.setOnClickListener(v -> showSettings());
+        header.addView(settings, new LinearLayout.LayoutParams(dp(49), dp(49)));
+        top.addView(header, new LinearLayout.LayoutParams(-1, dp(68)));
+
         LinearLayout search = new LinearLayout(this);
         search.setGravity(Gravity.CENTER_VERTICAL);
-        search.setPadding(dp(8), dp(6), dp(8), dp(6));
-        search.setBackground(rounded(Color.WHITE, 16));
+        search.setPadding(dp(10), dp(5), dp(8), dp(5));
+        search.setBackground(rounded(Color.rgb(246, 251, 253), 16));
         search.setElevation(dp(5));
+        TextView searchGlyph = text("⌕", 29, Color.rgb(95, 128, 142), false);
+        searchGlyph.setGravity(Gravity.CENTER);
+        search.addView(searchGlyph, new LinearLayout.LayoutParams(dp(36), -1));
         destinationInput = new EditText(this);
         destinationInput.setSingleLine(true);
-        destinationInput.setTextSize(16);
-        destinationInput.setHint("Where to? Address or postcode");
-        destinationInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        destinationInput.setTextSize(17);
+        destinationInput.setPadding(dp(4), 0, 0, 0);
+        destinationInput.setBackgroundColor(Color.TRANSPARENT);
+        destinationInput.setHint("Where to?");
+        destinationInput.setInputType(InputType.TYPE_CLASS_TEXT |
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         destinationInput.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         destinationInput.setOnEditorActionListener((v, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEARCH
-                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+            if (actionId == EditorInfo.IME_ACTION_SEARCH ||
+                    (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
                 searchDestination();
                 return true;
             }
             return false;
         });
         search.addView(destinationInput, new LinearLayout.LayoutParams(0, dp(48), 1));
-        Button saved = chip("★");
-        saved.setContentDescription("Saved and recent destinations");
-        saved.setOnClickListener(v -> showSavedDestinations());
-        search.addView(saved, new LinearLayout.LayoutParams(dp(45), dp(48)));
-        Button find = chip("GO");
+        Button mic = chip("🎙");
+        mic.setContentDescription("Search by voice");
+        mic.setTextSize(19);
+        mic.setOnClickListener(v -> voiceSearch());
+        search.addView(mic, new LinearLayout.LayoutParams(dp(44), dp(43)));
+        Button find = chip("Find");
+        find.setTextColor(DARK);
+        find.setTextSize(14);
+        find.setBackgroundTintList(android.content.res.ColorStateList.valueOf(CYAN));
         find.setOnClickListener(v -> searchDestination());
-        search.addView(find, new LinearLayout.LayoutParams(dp(70), dp(48)));
-        FrameLayout.LayoutParams searchPos = new FrameLayout.LayoutParams(-1, dp(60), Gravity.TOP);
-        searchPos.setMargins(dp(10), dp(12), dp(10), 0);
-        frame.addView(search, searchPos);
+        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(62), dp(44));
+        findParams.leftMargin = dp(5);
+        search.addView(find, findParams);
+        LinearLayout.LayoutParams searchPos = new LinearLayout.LayoutParams(-1, dp(60));
+        searchPos.setMargins(dp(10), dp(11), dp(10), dp(7));
+        top.addView(search, searchPos);
 
-        LinearLayout tools = new LinearLayout(this);
-        tools.setGravity(Gravity.CENTER);
-        tools.setPadding(dp(5), dp(3), dp(5), dp(3));
-        tools.setBackground(rounded(Color.WHITE, 14));
-        tools.setElevation(dp(4));
-        Button key = chip("API key");
-        key.setOnClickListener(v -> showKeyDialog());
-        tools.addView(key, new LinearLayout.LayoutParams(0, dp(44), 1));
-        followButton = chip("GPS ✓");
-        followButton.setOnClickListener(v -> {
-            followLocation = !followLocation;
-            followButton.setText(followLocation ? "GPS ✓" : "GPS ○");
-            if (followLocation && currentLocation != null) centreOnLocation(true);
-        });
-        tools.addView(followButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-        trafficButton = chip(trafficEnabled ? "Traffic ✓" : "Traffic ○");
-        trafficButton.setOnClickListener(v -> {
-            trafficEnabled = !trafficEnabled;
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putBoolean("traffic", trafficEnabled).apply();
-            trafficButton.setText(trafficEnabled ? "Traffic ✓" : "Traffic ○");
-            configureTrafficTiles();
-        });
-        tools.addView(trafficButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-        voiceButton = chip(voiceEnabled ? "Voice ✓" : "Voice ○");
-        voiceButton.setOnClickListener(v -> {
-            voiceEnabled = !voiceEnabled;
-            if (!voiceEnabled && speech != null) speech.stop();
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putBoolean("voice", voiceEnabled).apply();
-            voiceButton.setText(voiceEnabled ? "Voice ✓" : "Voice ○");
-            if (voiceEnabled) say("Voice guidance on.");
-        });
-        tools.addView(voiceButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-        unitsButton = chip(metricUnits ? "km/m" : "mi/yd");
-        unitsButton.setOnClickListener(v -> {
-            metricUnits = !metricUnits;
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putBoolean("metric_units", metricUnits).apply();
-            unitsButton.setText(metricUnits ? "km/m" : "mi/yd");
-            if (currentLocation != null) {
-                speedText.setText(NavigationUnits.displaySpeed(currentLocation.getSpeed(), metricUnits));
-                if (active) updateGuidance(currentLocation);
-            }
-            if (route != null && !active) showPreview(route);
-        });
-        tools.addView(unitsButton, new LinearLayout.LayoutParams(0, dp(44), 1));
-        FrameLayout.LayoutParams toolsPos = new FrameLayout.LayoutParams(-1, dp(50), Gravity.TOP);
-        toolsPos.setMargins(dp(10), dp(82), dp(10), 0);
-        frame.addView(tools, toolsPos);
+        FrameLayout.LayoutParams topPos = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
+        frame.addView(top, topPos);
 
-        LinearLayout bottom = new LinearLayout(this);
-        bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setPadding(dp(15), dp(13), dp(15), dp(13));
-        bottom.setBackground(rounded(DARK, 18));
-        bottom.setElevation(dp(8));
-        banner = text("Ready to navigate", 13, Color.rgb(164, 214, 255), false);
-        bottom.addView(banner);
-        instructionText = text("Set your TomTom key, then search for a destination.", 20,
+        // Driving controls become visible on the navigation panel, not on home.
+        navigationPanel = new LinearLayout(this);
+        navigationPanel.setOrientation(LinearLayout.VERTICAL);
+        navigationPanel.setPadding(dp(15), dp(12), dp(15), dp(12));
+        navigationPanel.setBackground(rounded(DARK, 22));
+        navigationPanel.setElevation(dp(10));
+        banner = text("Ready to navigate", 12, CYAN, true);
+        navigationPanel.addView(banner);
+        instructionText = text("Search for a destination, then preview the route.", 19,
                 Color.WHITE, true);
-        LinearLayout.LayoutParams directionPos = new LinearLayout.LayoutParams(-1, -2);
-        directionPos.topMargin = dp(7);
-        bottom.addView(instructionText, directionPos);
-        routeSummary = text("", 13, Color.rgb(196, 228, 255), false);
+        LinearLayout.LayoutParams instructionPos = new LinearLayout.LayoutParams(-1, -2);
+        instructionPos.topMargin = dp(7);
+        navigationPanel.addView(instructionText, instructionPos);
+        routeSummary = text("", 13, Color.rgb(194, 226, 238), false);
         routeSummary.setVisibility(View.GONE);
-        bottom.addView(routeSummary);
+        navigationPanel.addView(routeSummary);
         LinearLayout details = new LinearLayout(this);
         details.setGravity(Gravity.CENTER_VERTICAL);
         distanceText = text("Distance: —", 13, Color.WHITE, false);
         details.addView(distanceText, new LinearLayout.LayoutParams(0, -2, 1));
         etaText = text("ETA: —", 13, Color.WHITE, false);
         details.addView(etaText, new LinearLayout.LayoutParams(0, -2, 1));
-        speedText = text(metricUnits ? "0 km/h" : "0 mph", 17, Color.WHITE, true);
-        details.addView(speedText);
-        LinearLayout.LayoutParams detailPos = new LinearLayout.LayoutParams(-1, -2);
-        detailPos.topMargin = dp(12);
-        bottom.addView(details, detailPos);
-        LinearLayout actions = new LinearLayout(this);
-        actions.setGravity(Gravity.CENTER);
-        startButton = chip("▶ Start navigation");
+        LinearLayout.LayoutParams detailsPos = new LinearLayout.LayoutParams(-1, -2);
+        detailsPos.topMargin = dp(10);
+        navigationPanel.addView(details, detailsPos);
+        LinearLayout navActions = new LinearLayout(this);
+        navActions.setGravity(Gravity.CENTER);
+        startButton = chip("▶ Start");
         startButton.setVisibility(View.GONE);
+        startButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(CYAN));
         startButton.setOnClickListener(v -> startNavigation());
-        actions.addView(startButton, new LinearLayout.LayoutParams(0, dp(45), 2));
-        saveButton = chip("★ Save place");
+        navActions.addView(startButton, new LinearLayout.LayoutParams(0, dp(45), 2));
+        saveButton = chip("★ Save");
         saveButton.setVisibility(View.GONE);
         saveButton.setOnClickListener(v -> saveCurrentDestination());
-        actions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        repeatButton = chip("Repeat voice");
+        navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        repeatButton = chip("🔊 Repeat");
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
             if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
             else say(nextInstruction);
         });
-        actions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        refreshButton = chip("Refresh route");
+        navActions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        refreshButton = chip("↻ Refresh");
         refreshButton.setVisibility(View.GONE);
         refreshButton.setOnClickListener(v -> planRoute(false));
-        actions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        LinearLayout.LayoutParams actionsPos = new LinearLayout.LayoutParams(-1, -2);
-        actionsPos.topMargin = dp(10);
-        bottom.addView(actions, actionsPos);
+        navActions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        LinearLayout.LayoutParams navActionsPos = new LinearLayout.LayoutParams(-1, -2);
+        navActionsPos.topMargin = dp(10);
+        navigationPanel.addView(navActions, navActionsPos);
         stopButton = chip("End navigation");
+        stopButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                Color.rgb(42, 80, 100)));
+        stopButton.setTextColor(Color.WHITE);
         stopButton.setVisibility(View.GONE);
         stopButton.setOnClickListener(v -> stopNavigation(false));
-        LinearLayout.LayoutParams stopPos = new LinearLayout.LayoutParams(-1, dp(43));
-        stopPos.topMargin = dp(10);
-        bottom.addView(stopButton, stopPos);
-        FrameLayout.LayoutParams panelPos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
-        panelPos.setMargins(dp(10), 0, dp(10), dp(12));
-        frame.addView(bottom, panelPos);
+        LinearLayout.LayoutParams stopPos = new LinearLayout.LayoutParams(-1, dp(42));
+        stopPos.topMargin = dp(8);
+        navigationPanel.addView(stopButton, stopPos);
+        FrameLayout.LayoutParams navPanelPos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        navPanelPos.setMargins(dp(8), 0, dp(8), dp(9));
+        frame.addView(navigationPanel, navPanelPos);
+        navigationPanel.setVisibility(View.GONE);
+
+        homePanel = new LinearLayout(this);
+        homePanel.setOrientation(LinearLayout.VERTICAL);
+        homePanel.setPadding(dp(13), dp(15), dp(13), dp(10));
+        homePanel.setBackground(rounded(DARK, 23));
+        homePanel.setElevation(dp(9));
+        LinearLayout homeHeading = new LinearLayout(this);
+        TextView heading = text("YOUR DESTINATIONS", 12, Color.rgb(189, 227, 239), true);
+        heading.setLetterSpacing(.08f);
+        homeHeading.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView ready = text("READY FOR THE ROAD", 10, CYAN, true);
+        homeHeading.addView(ready);
+        homePanel.addView(homeHeading);
+
+        LinearLayout tiles = new LinearLayout(this);
+        homeTile = quickTile("⌂", "Home");
+        workTile = quickTile("▣", "Work");
+        Button savedPlaces = quickTile("★", "Saved Places");
+        homeTile.setOnClickListener(v -> openQuickDestination(true));
+        homeTile.setOnLongClickListener(v -> { configureQuickDestination(true); return true; });
+        workTile.setOnClickListener(v -> openQuickDestination(false));
+        workTile.setOnLongClickListener(v -> { configureQuickDestination(false); return true; });
+        savedPlaces.setOnClickListener(v -> showSavedDestinations());
+        tiles.addView(homeTile, new LinearLayout.LayoutParams(0, dp(74), 1));
+        LinearLayout.LayoutParams workPos = new LinearLayout.LayoutParams(0, dp(74), 1);
+        workPos.setMargins(dp(6), 0, dp(6), 0);
+        tiles.addView(workTile, workPos);
+        tiles.addView(savedPlaces, new LinearLayout.LayoutParams(0, dp(74), 1));
+        LinearLayout.LayoutParams tilesPos = new LinearLayout.LayoutParams(-1, -2);
+        tilesPos.topMargin = dp(10);
+        homePanel.addView(tiles, tilesPos);
+
+        TextView recentTitle = text("RECENT DESTINATIONS", 12,
+                Color.rgb(189, 227, 239), true);
+        recentTitle.setLetterSpacing(.07f);
+        LinearLayout.LayoutParams recentHeaderPos = new LinearLayout.LayoutParams(-1, -2);
+        recentHeaderPos.topMargin = dp(12);
+        homePanel.addView(recentTitle, recentHeaderPos);
+
+        ScrollView recentScroll = new ScrollView(this);
+        recentScroll.setFillViewport(false);
+        recentScroll.setVerticalScrollBarEnabled(false);
+        recentList = new LinearLayout(this);
+        recentList.setOrientation(LinearLayout.VERTICAL);
+        recentScroll.addView(recentList);
+        LinearLayout.LayoutParams recentPos = new LinearLayout.LayoutParams(-1, dp(147));
+        recentPos.topMargin = dp(3);
+        homePanel.addView(recentScroll, recentPos);
+        FrameLayout.LayoutParams homePos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        homePos.setMargins(dp(4), 0, dp(4), 0);
+        frame.addView(homePanel, homePos);
+
+        LinearLayout speedBadge = new LinearLayout(this);
+        speedBadge.setOrientation(LinearLayout.VERTICAL);
+        speedBadge.setGravity(Gravity.CENTER);
+        GradientDrawable speedBackground = rounded(DARK, 100);
+        speedBackground.setStroke(dp(3), CYAN);
+        speedBadge.setBackground(speedBackground);
+        speedBadge.setElevation(dp(6));
+        TextView gpsLabel = text("GPS", 10, Color.WHITE, true);
+        speedBadge.addView(gpsLabel);
+        speedText = text(metricUnits ? "0 km/h" : "0 mph", 16, Color.WHITE, true);
+        speedText.setGravity(Gravity.CENTER);
+        speedBadge.addView(speedText);
+        speedBadgePos = new FrameLayout.LayoutParams(dp(86), dp(86), Gravity.BOTTOM | Gravity.LEFT);
+        speedBadgePos.leftMargin = dp(12);
+        frame.addView(speedBadge, speedBadgePos);
+
+        followButton = chip("◎");
+        followButton.setContentDescription("Centre map on my GPS position");
+        followButton.setTextSize(27);
+        followButton.setTextColor(Color.WHITE);
+        followButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(DARK));
+        followButton.setOnClickListener(v -> {
+            followLocation = true;
+            followButton.setText("◎");
+            if (currentLocation != null) centreOnLocation(true);
+        });
+        gpsButtonPos = new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.BOTTOM | Gravity.RIGHT);
+        gpsButtonPos.rightMargin = dp(13);
+        frame.addView(followButton, gpsButtonPos);
         setContentView(frame);
+        setHomeVisible(true);
+        refreshHomePanel();
+    }
+
+    private Button quickTile(String symbol, String label) {
+        Button button = new Button(this);
+        button.setAllCaps(false);
+        button.setText(symbol + "\n" + label);
+        button.setTextSize(14);
+        button.setTextColor(Color.WHITE);
+        button.setPadding(0, 0, 0, 0);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        GradientDrawable background = rounded(Color.rgb(25, 69, 85), 12);
+        background.setStroke(dp(1), CYAN);
+        button.setBackground(background);
+        return button;
+    }
+
+    private void setHomeVisible(boolean show) {
+        if (homePanel == null || navigationPanel == null) return;
+        homePanel.setVisibility(show ? View.VISIBLE : View.GONE);
+        navigationPanel.setVisibility(show ? View.GONE : View.VISIBLE);
+        if (speedBadgePos != null && gpsButtonPos != null) {
+            speedBadgePos.bottomMargin = dp(show ? 320 : 225);
+            gpsButtonPos.bottomMargin = dp(show ? 327 : 230);
+        }
+        if (show) refreshHomePanel();
+    }
+
+    private void refreshHomePanel() {
+        if (places == null || recentList == null) return;
+        TomTomApi.Destination home = places.home();
+        TomTomApi.Destination work = places.work();
+        homeTile.setContentDescription(home == null ? "Set Home" : "Navigate Home to " + home);
+        workTile.setContentDescription(work == null ? "Set Work" : "Navigate Work to " + work);
+        recentList.removeAllViews();
+        List<TomTomApi.Destination> recents = places.recent();
+        if (recents.isEmpty()) {
+            TextView empty = text("No recent journeys yet. Find a destination to begin.",
+                    12, Color.rgb(202, 219, 224), false);
+            empty.setPadding(dp(2), dp(18), dp(2), dp(8));
+            recentList.addView(empty);
+        } else {
+            for (TomTomApi.Destination item : recents) {
+                TextView row = text("↺    " + item.title, 14, Color.WHITE, false);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setSingleLine(true);
+                row.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                row.setPadding(dp(7), dp(8), dp(6), dp(8));
+                row.setOnClickListener(v -> selectDestination(item));
+                recentList.addView(row, new LinearLayout.LayoutParams(-1, dp(44)));
+                View line = new View(this);
+                line.setBackgroundColor(Color.rgb(40, 86, 104));
+                recentList.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+            }
+        }
     }
 
     private int dp(float dp) {
