@@ -1244,10 +1244,14 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
+        arrowView.setVisibility(View.GONE);
+        followingText.setVisibility(View.GONE);
+        roadText.setVisibility(View.GONE);
         instructionText.setText("Review your route before driving.");
         distanceText.setText("Distance: " + NavigationUnits.displayDistance(
                 calculated.lengthMetres, metricUnits));
         etaText.setText("Drive: " + NavigationUnits.duration(calculated.timeSeconds));
+        timeLeftText.setText("");
         startButton.setVisibility(View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
         saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save place");
@@ -1266,6 +1270,12 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        if (tracker == null) tracker = new RouteTracker(route);
+        tracker.markRerouteAttempt(SystemClock.elapsedRealtime());
+        currentCueStep = -1;
+        highestCueStage = 0;
+        lastManeuverIndex = -1;
+        arrowView.setVisibility(View.VISIBLE);
         setHomeVisible(false);
         followLocation = true;
         followButton.setText("◎");
@@ -1311,6 +1321,10 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void planRoute(boolean firstRoute) {
         if (routing || destination == null || currentLocation == null || apiKey.isEmpty()) return;
+        if (!hasInternet()) {
+            showError("No internet · following the last available route.");
+            return;
+        }
         routing = true;
         lastRouteRequest = SystemClock.elapsedRealtime();
         final int plannedGeneration = ++requestGeneration;
@@ -1324,7 +1338,14 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
                     route = calculated;
+                    tracker = new RouteTracker(calculated);
+                    tracker.markRerouteAttempt(lastRouteRequest);
                     offRouteSince = 0;
+                    currentCueStep = -1;
+                    highestCueStage = 0;
+                    lastManeuverIndex = -1;
+                    junctionHoldUntil = 0;
+                    smoothedCameraZoom = Double.NaN;
                     spokenDistanceIndex = -1;
                     spokenCloseIndex = -1;
                     spokenNowIndex = -1;
@@ -1332,7 +1353,8 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (firstRoute) {
                         showPreview(calculated);
                     } else {
-                        setStatus("Route updated with latest traffic");
+                        setStatus("Route updated · latest TomTom traffic considered");
+                        if (active) say("Updated route ready.");
                         if (currentLocation != null) updateGuidance(currentLocation);
                     }
                 });
@@ -1461,6 +1483,16 @@ public final class MainActivity extends Activity implements LocationListener {
         map.setMapOrientation(0);
         lastCameraUpdate = 0;
         stopButton.setVisibility(View.GONE);
+        arrowView.setVisibility(View.GONE);
+        followingText.setVisibility(View.GONE);
+        roadText.setVisibility(View.GONE);
+        timeLeftText.setText("Time: —");
+        tracker = null;
+        smoother.reset();
+        highestCueStage = 0;
+        currentCueStep = -1;
+        lastManeuverIndex = -1;
+        smoothedCameraZoom = Double.NaN;
         setHomeVisible(true);
         startButton.setVisibility(View.GONE);
         saveButton.setVisibility(View.GONE);
@@ -1496,7 +1528,10 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void say(String message) {
         if (voiceEnabled && speechReady && speech != null) {
-            speech.speak(message, TextToSpeech.QUEUE_FLUSH, null, "drivemate-guidance");
+            Bundle voiceParameters = new Bundle();
+            voiceParameters.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, speechVolume);
+            speech.speak(message, TextToSpeech.QUEUE_FLUSH,
+                    voiceParameters, "drivemate-guidance");
         }
     }
 
