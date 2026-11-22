@@ -1297,20 +1297,33 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void planRoute(boolean firstRoute) {
         if (routing || destination == null || currentLocation == null || apiKey.isEmpty()) return;
+        if (!hasNetwork()) {
+            setStatus("No internet · current route retained; traffic updates paused");
+            if (route == null) showError("Connect to the internet to calculate a route.");
+            return;
+        }
+        if (System.currentTimeMillis() - currentLocation.getTime() > 20000) {
+            setStatus("Waiting for a fresh GPS position; current route retained");
+            return;
+        }
         routing = true;
         lastRouteRequest = SystemClock.elapsedRealtime();
         final int plannedGeneration = ++requestGeneration;
         final GeoMath.Point start = gpsPoint(currentLocation);
         final GeoMath.Point end = destination.point;
+        final String keyForRequest = apiKey;
         setStatus(firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = TomTomApi.route(apiKey, start, end);
+                TomTomApi.Route calculated = TomTomApi.route(keyForRequest, start, end);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
                     route = calculated;
                     offRouteSince = 0;
+                    previousInstructionIndex = 0;
+                    stabilizedAlong = -1;
+                    observedSpeed = 0;
                     spokenDistanceIndex = -1;
                     spokenCloseIndex = -1;
                     spokenNowIndex = -1;
@@ -1318,7 +1331,8 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (firstRoute) {
                         showPreview(calculated);
                     } else {
-                        setStatus("Route updated with latest traffic");
+                        setStatus("Route updated · latest TomTom traffic included");
+                        say("Updated route ready.");
                         if (currentLocation != null) updateGuidance(currentLocation);
                     }
                 });
@@ -1326,8 +1340,14 @@ public final class MainActivity extends Activity implements LocationListener {
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration) return;
                     routing = false;
-                    showError(error.getMessage());
-                    if (route == null) stopButton.setVisibility(View.GONE);
+                    if (route != null) {
+                        setStatus("Update failed · following last known route");
+                        Toast.makeText(this, "Route update unavailable: " + error.getMessage(),
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        showError(error.getMessage());
+                        stopButton.setVisibility(View.GONE);
+                    }
                 });
             }
         });
