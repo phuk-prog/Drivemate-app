@@ -6,6 +6,27 @@ The 22 November 2026 reference screenshots informed the navy/cyan design: a larg
 
 **Important:** The package identity now matches original Drivemate (`com.drivemate.android`), but its former signing certificate is unknown. You may need to uninstall the older Drivemate install **once**, and also remove the separately installed `com.drivemate.app` DriveMate GPS package. From this release onward, only APKs signed with the owner's **same private signing key** can update in place; see [Updating and signing](docs/UPDATING-AND-SIGNING.md). Never put the keystore in this public repo.
 
+## v1.3.0 — Twelve navigation improvements in one pass
+
+This version builds on the screenshots and DriveMate v1.2.2. It adds:
+
+1. A **compact 52dp next-turn arrow** for right/left/straight/slight/U-turn/roundabout, using TomTom coded maneuvers where available. It does not blanket the map.
+2. Junction-aware adaptive zoom with smooth transitions, short post-junction hold, saved close/auto/wide settings and optional **north-up** map.
+3. The **following maneuver** in a secondary line for close successive turns.
+4. Visual-only GPS smoothing and accuracy feedback. Raw GPS stays authoritative for navigation and off-route detection.
+5. Roundabout exit number and street/signpost text from TomTom, where provided, without modifying questionable route geometry.
+6. Traffic-aware remaining time estimated from cumulative TomTom guidance travel times, with bounded GPS-speed adjustment.
+7. More stable off-route detection using accuracy, movement, dwell and a 45-second reroute cooldown; in-progress route remains visible.
+8. Minimal, normal and detailed spoken warning modes, repeat instruction, and app-specific TTS volume.
+9. UK postcode normalisation, clear-search control, and compact filtered local favourite/recent suggestions.
+10. Internet/GPS status and recovery messages; current route remains visible when internet drops.
+11. Compact dashboard with arrival time, time remaining, distance remaining and a reasonably sized arrow.
+12. Persisted voice detail/volume, map orientation, zoom and existing traffic/units settings.
+
+The manual signed-release workflow in GitHub can sign updates with the existing DriveMate certificate. Build code `100300` retains Android application ID `com.drivemate.android`.
+
+This upgrade is a **testable prototype**, not an on-road-certified navigation system. In particular, route geometry near the user's photographed roundabout cannot be confirmed without source route data and physical testing. Navigation is foreground-only and online; offline routing, screen-off GPS and Android Auto remain out of scope.
+
 ## v1.2.2 — Junction-focused driving view
 
 Changes based on actual DriveMate screenshots from an Android phone:
