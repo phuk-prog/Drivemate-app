@@ -68,9 +68,10 @@ jobs:
           test -x "$SIGNER"
           CERT="$("$SIGNER" verify --print-certs --min-sdk-version 26 \
             app/build/outputs/apk/release/DriveMate-update.apk | \
-            sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
+            sed -nE 's/^(V[0-9.]+ Signer:|Signer #[0-9]+) certificate SHA-256 digest: ([[:xdigit:]]+)$/\2/p' | tr -d '\r' | tr '[:upper:]' '[:lower:]' | sort -u)"
           EXPECTED="9f11804f0c28f61be2588fc6e1663514cfcca6ad4da4e31e19e4186c029b1a38"
           if [[ "$CERT" != "$EXPECTED" ]]; then
+            echo "Expected signing certificate fingerprint was not found." >&2
             echo "Signing certificate does not match the DriveMate v1.2 update certificate." >&2
             exit 1
           fi
