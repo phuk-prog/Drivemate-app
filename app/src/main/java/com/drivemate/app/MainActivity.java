@@ -625,6 +625,10 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Set or change Home",
                 "Set or change Work",
                 "Clear recent destinations",
+                "Voice guidance detail: " + voiceMode,
+                "Voice guidance volume: " + Math.round(speechVolume * 100) + "%",
+                "Map orientation: " + (northUp ? "North up" : "Direction of travel"),
+                "Junction zoom: " + cameraMode,
                 "About DriveMate"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
@@ -678,7 +682,26 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 7:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.2")
+                            showVoiceModeOptions();
+                            break;
+                        case 8:
+                            showVoiceVolumeOptions();
+                            break;
+                        case 9:
+                            northUp = !northUp;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("north_up", northUp).apply();
+                            if (northUp) map.setMapOrientation(0);
+                            lastCameraUpdate = 0;
+                            if (active && currentLocation != null) updateGuidance(currentLocation);
+                            Toast.makeText(this, northUp ? "North-up map" :
+                                    "Direction-of-travel map", Toast.LENGTH_SHORT).show();
+                            break;
+                        case 10:
+                            showZoomOptions();
+                            break;
+                        case 11:
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.3")
                                     .setMessage("UK navigation using TomTom routing and traffic. " +
                                             "Keep the app in the foreground while driving. " +
                                             "Never rely on an untested navigation app as your only guidance.")
@@ -687,6 +710,51 @@ public final class MainActivity extends Activity implements LocationListener {
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
+    }
+
+    private void showVoiceModeOptions() {
+        String[] labels = {"Minimal — at the turn", "Normal — approaching and at turn",
+                "Detailed — early, approaching and at turn"};
+        int selected = VoiceCuePlanner.MINIMAL.equals(voiceMode) ? 0 :
+                VoiceCuePlanner.DETAILED.equals(voiceMode) ? 2 : 1;
+        new AlertDialog.Builder(this).setTitle("Voice instruction detail")
+                .setSingleChoiceItems(labels, selected, (dialog, position) -> {
+                    voiceMode = position == 0 ? VoiceCuePlanner.MINIMAL :
+                            position == 2 ? VoiceCuePlanner.DETAILED :
+                                    VoiceCuePlanner.NORMAL;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString("voice_mode", voiceMode).apply();
+                    highestCueStage = 0;
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void showVoiceVolumeOptions() {
+        String[] labels = {"Quiet (35%)", "Medium (60%)", "Normal (80%)", "Full (100%)"};
+        float[] levels = {0.35f, 0.6f, 0.8f, 1f};
+        new AlertDialog.Builder(this).setTitle("DriveMate voice volume")
+                .setItems(labels, (dialog, which) -> {
+                    speechVolume = levels[which];
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putFloat("speech_volume", speechVolume).apply();
+                    say("Voice volume test.");
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void showZoomOptions() {
+        String[] modes = {"Auto — speed and junction",
+                "Close — more junction detail", "Wide — more road ahead"};
+        int selected = "close".equals(cameraMode) ? 1 : "wide".equals(cameraMode) ? 2 : 0;
+        new AlertDialog.Builder(this).setTitle("Navigation map zoom")
+                .setSingleChoiceItems(modes, selected, (dialog, which) -> {
+                    cameraMode = which == 1 ? "close" : which == 2 ? "wide" : "auto";
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString("camera_mode", cameraMode).apply();
+                    smoothedCameraZoom = Double.NaN;
+                    lastCameraUpdate = 0;
+                    if (active && currentLocation != null) updateGuidance(currentLocation);
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
     }
 
     private void openQuickDestination(boolean home) {
