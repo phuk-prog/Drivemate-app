@@ -116,6 +116,12 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     };
     private MapView map;
+    private DriveTileServer driveTiles;
+    private VectorDriveMap vectorMap;
+    private Bundle vectorSavedState;
+    private boolean useLocalMap = true;
+    private boolean vectorTileReady;
+    private boolean autoFallback;
     private View speedBadgeView;
     private boolean keyboardOpen;
     private boolean homeMode = true;
@@ -211,7 +217,15 @@ public final class MainActivity extends Activity implements LocationListener {
         northUp = settings.getBoolean("north_up", false);
         closeZoom = settings.getBoolean("close_zoom", false);
         places = new DestinationStore(this);
-        trafficEnabled = settings.getBoolean("traffic", true);
+        trafficEnabled = settings.getBoolean("traffic", false);
+        useLocalMap = settings.getBoolean("drivemate_vector_map", true);
+        vectorSavedState = savedInstanceState;
+        try {
+            driveTiles = new DriveTileServer(this);
+        } catch (java.io.IOException e) {
+            driveTiles = null;
+            useLocalMap = false;
+        }
         buildScreen();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         speech = new TextToSpeech(this, status -> {
@@ -248,6 +262,36 @@ public final class MainActivity extends Activity implements LocationListener {
         map.getController().setZoom(15.5);
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         frame.addView(map, new FrameLayout.LayoutParams(-1, -1));
+        if (driveTiles != null) {
+            try {
+                vectorMap = new VectorDriveMap(this, vectorSavedState, driveTiles,
+                        apiKey, trafficEnabled, () -> {
+                            vectorTileReady = true;
+                            // If the user picked local mode, bring the vector map forward
+                            // once a real UK map tile has been successfully loaded.
+                            if (useLocalMap) updateMapVisibility();
+                        });
+                frame.addView(vectorMap.view(), new FrameLayout.LayoutParams(-1, -1));
+                updateMapVisibility();
+                // If the PMTiles host cannot supply map details, automatically
+                // fall back to the existing TomTom raster view after 15 seconds.
+                frame.postDelayed(() -> {
+                    if (useLocalMap && !vectorTileReady && !apiKey.isEmpty()
+                            && !isFinishing()) {
+                        autoFallback = true;
+                        updateMapVisibility();
+                        setStatus("DriveMate map unavailable · showing TomTom map instead");
+                    }
+                }, 15000);
+            } catch (Throwable error) {
+                vectorMap = null;
+                useLocalMap = false;
+                if (driveTiles != null) {
+                    driveTiles.close();
+                    driveTiles = null;
+                }
+            }
+        }
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
@@ -272,7 +316,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.3.2", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.4.0", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -540,6 +584,15 @@ public final class MainActivity extends Activity implements LocationListener {
         refreshHomePanel();
     }
 
+    private void updateMapVisibility() {
+        boolean vector = useLocalMap && !autoFallback && vectorMap != null;
+        if (vectorMap != null) vectorMap.setVisible(vector);
+        if (map != null) {
+            map.setVisibility(!vector && !apiKey.isEmpty()
+                    ? View.VISIBLE : View.INVISIBLE);
+        }
+    }
+
     private Button quickTile(String symbol, String label) {
         Button button = new Button(this);
         button.setAllCaps(false);
@@ -649,6 +702,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 northUp ? "Map orientation · north up" : "Map orientation · direction up",
                 closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
+                useLocalMap ? "Map · DriveMate local vector" : "Map · TomTom online raster",
+                "Nearby map cache & Wi-Fi prefetch",
                 "Set or change Home",
                 "Set or change Work",
                 "Clear recent destinations",
@@ -699,9 +754,42 @@ public final class MainActivity extends Activity implements LocationListener {
                             lastCameraUpdate = 0;
                             if (active && currentLocation != null) updateGuidance(currentLocation);
                             break;
-                        case 8: configureQuickDestination(true); break;
-                        case 9: configureQuickDestination(false); break;
-                        case 10:
+                        case 8:
+                            if (vectorMap == null) {
+                                Toast.makeText(this,
+                                        "DriveMate local map is unavailable on this device",
+                                        Toast.LENGTH_LONG).show();
+                                break;
+                            }
+                            useLocalMap = !useLocalMap;
+                            autoFallback = false;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("drivemate_vector_map", useLocalMap).apply();
+                            updateMapVisibility();
+                            if (useLocalMap && currentLocation != null) {
+                                vectorMap.setCamera(gpsPoint(currentLocation),
+                                        map.getZoomLevelDouble(), 0);
+                                vectorMap.prefetch(gpsPoint(currentLocation));
+                            }
+                            break;
+                        case 9:
+                            String stats = vectorMap == null ? "Local vector map unavailable"
+                                    : vectorMap.cacheStats();
+                            new AlertDialog.Builder(this).setTitle("DriveMate nearby map cache")
+                                    .setMessage(stats + "\n\nMaps are cached privately on your phone (up to 180 MB of street tiles). "
+                                            + "An approximately 20–30 km area is prefetched on unmetered Wi-Fi "
+                                            + "around a GPS fix. Online use fetches missing tiles individually. "
+                                            + "TomTom routing still needs internet. "
+                                            + "Map data © OpenStreetMap contributors, ODbL 1.0.")
+                                    .setPositiveButton("Prefetch nearby", (d, button) -> {
+                                        if (vectorMap != null && currentLocation != null)
+                                            vectorMap.prefetch(gpsPoint(currentLocation));
+                                    })
+                                    .setNegativeButton("Close", null).show();
+                            break;
+                        case 10: configureQuickDestination(true); break;
+                        case 11: configureQuickDestination(false); break;
+                        case 12:
                             new AlertDialog.Builder(this).setTitle("Clear recent destinations?")
                                     .setMessage("Favourites, Home and Work will be kept.")
                                     .setPositiveButton("Clear", (d, w) -> {
@@ -710,9 +798,11 @@ public final class MainActivity extends Activity implements LocationListener {
                                         refreshSearchSuggestions();
                                     }).setNegativeButton("Cancel", null).show();
                             break;
-                        case 11:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.3.2")
-                                    .setMessage("Online TomTom routing, traffic and spoken directions. " +
+                        case 13:
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.0")
+                                    .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
+                                            + "Cached vector tiles are map display only. "
+                                            + "Online TomTom routing, traffic and spoken directions. " +
                                             "Road-matching and route camera are experimental. " +
                                             "Keep DriveMate open; never use it as your sole navigator " +
                                             "before testing directions on a real device.")
@@ -941,7 +1031,8 @@ public final class MainActivity extends Activity implements LocationListener {
         if (apiKey.isEmpty()) return;
         map.setTileSource(tileSource("DriveMate-TomTom-Map",
                 "map/1/tile/basic/main/"));
-        map.setVisibility(View.VISIBLE);
+        if (vectorMap != null) vectorMap.setTomTomKey(apiKey);
+        updateMapVisibility();
         configureTrafficTiles();
         map.invalidate();
     }
@@ -959,6 +1050,7 @@ public final class MainActivity extends Activity implements LocationListener {
             trafficTiles.setLoadingLineColor(Color.TRANSPARENT);
             map.getOverlays().add(0, trafficTiles);
         }
+        if (vectorMap != null) vectorMap.setTraffic(trafficEnabled);
         map.invalidate();
     }
 
@@ -1030,6 +1122,10 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         userPin.setPosition(point);
+        if (vectorMap != null) {
+            vectorMap.setVehicle(smoothed);
+            vectorMap.prefetch(gpsPoint(fix));
+        }
         if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
@@ -1087,6 +1183,8 @@ public final class MainActivity extends Activity implements LocationListener {
         // A direct centre update follows the current location immediately.
         map.getController().setCenter(
                 new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
+        if (vectorMap != null)
+            vectorMap.setCamera(gpsPoint(currentLocation), map.getZoomLevelDouble(), 0);
         lastCameraCenter = gpsPoint(currentLocation);
     }
 
@@ -1146,6 +1244,9 @@ public final class MainActivity extends Activity implements LocationListener {
         // Immediate centre adjustment; no animations running behind live GPS.
         map.getController().setCenter(
                 new GeoPoint(camera.center.lat, camera.center.lon));
+        if (vectorMap != null)
+            vectorMap.setCamera(camera.center, boundedZoom,
+                    northUp ? 0 : camera.roadBearingDegrees);
         lastCameraCenter = camera.center;
         lastCameraUpdate = now;
     }
@@ -1346,6 +1447,7 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(destinationPin);
         }
         destinationPin.setPosition(new GeoPoint(selected.point.lat, selected.point.lon));
+        if (vectorMap != null) vectorMap.setDestination(selected.point);
         destinationPin.setTitle(selected.toString());
         planRoute(true);
     }
@@ -1453,6 +1555,10 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         map.invalidate();
+        if (vectorMap != null) {
+            if (preview) vectorMap.previewRoute(calculated.points);
+            else vectorMap.setRoute(calculated.points);
+        }
         if (preview) {
             map.setMapOrientation(0);
             double north = -90, south = 90, east = -180, west = 180;
@@ -1590,6 +1696,10 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         map.setMapOrientation(0);
+        if (vectorMap != null) {
+            vectorMap.setRoute(null);
+            vectorMap.setDestination(null);
+        }
         lastCameraUpdate = 0;
         stopButton.setVisibility(View.GONE);
         setHomeVisible(true);
@@ -1652,9 +1762,30 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override @SuppressWarnings("deprecation")
     public void onStatusChanged(String provider, int status, Bundle extras) { }
 
+    @Override public void onStart() {
+        super.onStart();
+        if (vectorMap != null) vectorMap.onStart();
+    }
+
+    @Override public void onStop() {
+        if (vectorMap != null) vectorMap.onStop();
+        super.onStop();
+    }
+
+    @Override public void onLowMemory() {
+        super.onLowMemory();
+        if (vectorMap != null) vectorMap.onLowMemory();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        if (vectorMap != null) vectorMap.onSaveInstanceState(state);
+        super.onSaveInstanceState(state);
+    }
+
     @Override public void onResume() {
         super.onResume();
         if (map != null) map.onResume();
+        if (vectorMap != null) vectorMap.onResume();
         startLocation();
         gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.postDelayed(gpsWatchdog, 5000);
@@ -1664,6 +1795,7 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
         if (map != null) map.onPause();
+        if (vectorMap != null) vectorMap.onPause();
         super.onPause();
     }
 
@@ -1674,6 +1806,8 @@ public final class MainActivity extends Activity implements LocationListener {
             speech.stop();
             speech.shutdown();
         }
+        if (vectorMap != null) vectorMap.onDestroy();
+        if (driveTiles != null) driveTiles.close();
         if (map != null) map.onDetach();
         super.onDestroy();
     }
