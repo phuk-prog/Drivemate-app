@@ -6,3 +6,5 @@ local.properties
 *.apk
 *.jks
 *.keystore
+app/src/main/assets/world-z0-6.pmtiles
+app/src/main/assets/world-z0-6.pmtiles.downloading
