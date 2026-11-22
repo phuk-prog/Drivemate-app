@@ -36,6 +36,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -939,6 +940,11 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         destinationInput.clearFocus();
+        InputMethodManager keyboard = (InputMethodManager)
+                getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (keyboard != null) {
+            keyboard.hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
+        }
         setStatus("Finding " + query + "…");
         GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
         final int searchId = ++requestGeneration;
