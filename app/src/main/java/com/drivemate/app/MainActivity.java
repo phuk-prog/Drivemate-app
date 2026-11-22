@@ -774,7 +774,7 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         double leftMetres = Math.max(0, route.lengthMetres - progress.alongMetres);
-        distanceText.setText("Left: " + humanDistance(leftMetres));
+        distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
         long seconds = Math.max(0, Math.round(route.timeSeconds
                 * (leftMetres / Math.max(1, route.lengthMetres))));
         etaText.setText("ETA: " + DateFormat.getTimeInstance(DateFormat.SHORT, Locale.UK)
@@ -788,27 +788,20 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         TomTomApi.Instruction step = route.instructions.get(next);
         double untilTurn = Math.max(0, step.routeOffsetMetres - progress.alongMetres);
-        instructionText.setText(humanDistance(untilTurn) + " · " + step.message);
+        instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)
+                + " · " + step.message);
+        nextInstruction = "In " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
+                + ", " + step.message;
         if (untilTurn <= 65 && spokenNowIndex != next) {
             spokenNowIndex = next;
             say(step.message);
         } else if (untilTurn <= 250 && untilTurn > 65 && spokenCloseIndex != next) {
             spokenCloseIndex = next;
-            say("In " + spokenDistance(untilTurn) + ", " + step.message);
+            say("In " + NavigationUnits.spokenDistance(untilTurn, metricUnits) + ", " + step.message);
         } else if (untilTurn <= 1000 && untilTurn > 250 && spokenDistanceIndex != next) {
             spokenDistanceIndex = next;
-            say("In " + spokenDistance(untilTurn) + ", " + step.message);
+            say("In " + NavigationUnits.spokenDistance(untilTurn, metricUnits) + ", " + step.message);
         }
-    }
-
-    private String humanDistance(double metres) {
-        if (metres >= 1000) return String.format(Locale.UK, "%.1f km", metres / 1000.0);
-        return Math.round(metres / 10.0) * 10 + " m";
-    }
-
-    private String spokenDistance(double metres) {
-        if (metres >= 1000) return String.format(Locale.UK, "%.1f kilometres", metres / 1000);
-        return Math.max(10, Math.round(metres / 10f) * 10) + " metres";
     }
 
     private void stopNavigation(boolean arrived) {
@@ -818,6 +811,7 @@ public final class MainActivity extends Activity implements LocationListener {
         route = null;
         destination = null;
         offRouteSince = 0;
+        nextInstruction = "";
         if (routeLine != null) {
             map.getOverlays().remove(routeLine);
             routeLine = null;
@@ -828,6 +822,13 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         stopButton.setVisibility(View.GONE);
+        startButton.setVisibility(View.GONE);
+        saveButton.setVisibility(View.GONE);
+        repeatButton.setVisibility(View.GONE);
+        refreshButton.setVisibility(View.GONE);
+        routeSummary.setVisibility(View.GONE);
+        followLocation = true;
+        followButton.setText("GPS ✓");
         distanceText.setText("Distance: —");
         etaText.setText("ETA: —");
         if (arrived) {
