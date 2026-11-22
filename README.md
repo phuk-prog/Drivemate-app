@@ -1,5 +1,24 @@
 # DriveMate — UK Navigation (Android)
 
+## DriveMate 1.4 — DriveMate Map + local street cache
+
+DriveMate now offers the own-brand **DriveMate Map** as a GPU-rendered
+MapLibre map alongside the previous TomTom raster map. A checksum-verified
+world overview is included inside the APK. Individual UK street tiles are
+extracted from the dated DriveMate Map PMTiles release on demand, saved
+privately in a **180 MB** capped cache, and nearby roads are prefetched on
+unmetered Wi-Fi. The app does **not** download the 1.87 GB UK archive in full.
+Settings lets you switch back to TomTom's map if vector detail cannot load.
+
+TomTom still supplies traffic-aware driving routes, location search, and
+spoken navigation; a downloaded street map is **not** offline routing.
+Current UK native detail is zoom 14, with vector overzoom on junctions;
+higher-resolution road data and real-device performance testing remain
+necessary.
+
+**[Read the v1.4 local-map technical notes](docs/DRIVEMATE-1.4-LOCAL-MAP.md)**,
+including map data attribution, download limitations and verification.
+
 **v1.3.1: all twelve navigation improvements, with a compact 52dp turn pictogram.**
 [Full v1.3 release notes](docs/DRIVEMATE-1.3-RELEASE-NOTES.md)
 cover the 12 approved improvements: turn symbols, next junction, smoother
