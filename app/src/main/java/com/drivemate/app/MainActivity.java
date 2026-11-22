@@ -1372,57 +1372,108 @@ public final class MainActivity extends Activity implements LocationListener {
     private void updateGuidance(Location fix) {
         if (!active || route == null || destination == null) return;
         GeoMath.Point current = gpsPoint(fix);
-        GeoMath.Progress progress = GeoMath.project(route.points, current);
-        if (fix.hasAccuracy() && fix.getAccuracy() < 35 && progress.offRouteMetres > 70) {
-            if (offRouteSince == 0) offRouteSince = SystemClock.elapsedRealtime();
-            if (SystemClock.elapsedRealtime() - offRouteSince > 9000
-                    && SystemClock.elapsedRealtime() - lastRouteRequest > 30000) {
+        GeoMath.Progress projected = GeoMath.project(route.points, current);
+        long now = SystemClock.elapsedRealtime();
+        float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
+
+        // Use precise fixes for detecting a genuine prolonged departure from
+        // the route. Do not reroute over one noisy fix or during API failures.
+        if (accuracy <= 35 && projected.offRouteMetres > 90) {
+            if (offRouteSince == 0) offRouteSince = now;
+            if (now - offRouteSince >= 12000
+                    && now - lastRerouteAttempt >= 45000
+                    && now - lastRouteRequest >= 30000 && !routing) {
                 offRouteSince = 0;
-                say("Recalculating route.");
+                lastRerouteAttempt = now;
+                setStatus("Off route · recalculating safely…");
+                say("Recalculating your route.");
                 planRoute(false);
                 return;
             }
-        } else offRouteSince = 0;
+        } else {
+            offRouteSince = 0;
+        }
 
+        double measured = projected.alongMetres;
+        double along = GuidanceLogic.monotonicProgress(stabilizedAlong, measured,
+                projected.offRouteMetres, accuracy);
+        stabilizedAlong = along;
+        if (fix.hasSpeed() && fix.getSpeed() >= 3) {
+            observedSpeed = observedSpeed == 0 ? fix.getSpeed()
+                    : 0.88 * observedSpeed + 0.12 * fix.getSpeed();
+        }
+        double leftMetres = Math.max(0, route.lengthMetres - along);
         double distanceToDestination = GeoMath.distance(current, destination.point);
-        if (distanceToDestination < 30 && (!fix.hasAccuracy() || fix.getAccuracy() < 40)) {
+        if (distanceToDestination < 30 && accuracy < 40 && leftMetres < 120) {
             stopNavigation(true);
             return;
         }
-        if (SystemClock.elapsedRealtime() - lastRouteRequest > ROUTE_REFRESH_MS
-                && route.lengthMetres - progress.alongMetres > 1500) {
+
+        if (now - lastRouteRequest > ROUTE_REFRESH_MS && leftMetres > 1500 && !routing) {
+            lastRerouteAttempt = now;
             planRoute(false);
             return;
         }
-        double leftMetres = Math.max(0, route.lengthMetres - progress.alongMetres);
+
         distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
-        long seconds = Math.max(0, Math.round(route.timeSeconds
-                * (leftMetres / Math.max(1, route.lengthMetres))));
+        long seconds = GuidanceLogic.remainingSeconds(leftMetres, route.lengthMetres,
+                route.timeSeconds, observedSpeed);
+        journeyTimeText.setText("Time: " + NavigationUnits.duration(seconds));
         etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
-                .format(new Date(System.currentTimeMillis() + seconds * 1000)));
-        int next = route.instructions.size() - 1;
-        for (int i = 0; i < route.instructions.size(); i++) {
-            if (route.instructions.get(i).routeOffsetMetres >= progress.alongMetres + 8) {
-                next = i;
-                break;
-            }
-        }
+                .format(new Date(System.currentTimeMillis() + seconds * 1000L)));
+
+        double[] offsets = new double[route.instructions.size()];
+        for (int i = 0; i < route.instructions.size(); i++)
+            offsets[i] = route.instructions.get(i).routeOffsetMetres;
+        int next = GuidanceLogic.nextInstructionIndex(offsets, along, previousInstructionIndex);
+        if (next < 0) return;
+        previousInstructionIndex = next;
         TomTomApi.Instruction step = route.instructions.get(next);
-        double untilTurn = Math.max(0, step.routeOffsetMetres - progress.alongMetres);
+        double untilTurn = Math.max(0, step.routeOffsetMetres - along);
+        String direction = GuidanceLogic.actionLine(step.message, step.junctionType,
+                step.exitNumber);
+        String glyph = GuidanceLogic.symbol(step.maneuver, step.junctionType,
+                step.turnAngleDegrees);
+        if ("↻".equals(glyph) && step.exitNumber > 0) {
+            maneuverIcon.setText("↻ " + step.exitNumber);
+            maneuverIcon.setTextSize(26);
+        } else {
+            maneuverIcon.setText(glyph);
+            maneuverIcon.setTextSize(45);
+        }
+        maneuverIcon.setVisibility(View.VISIBLE);
         instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)
-                + " · " + step.message);
-        updateDrivingCamera(fix, progress, step.routeOffsetMetres);
-        nextInstruction = "In " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
-                + ", " + step.message;
+                + " · " + direction);
+
+        if (next + 1 < route.instructions.size()) {
+            TomTomApi.Instruction after = route.instructions.get(next + 1);
+            double afterTurn = Math.max(0, after.routeOffsetMetres - step.routeOffsetMetres);
+            String followUp = GuidanceLogic.actionLine(after.message, after.junctionType,
+                    after.exitNumber);
+            nextTurnText.setText("Then "
+                    + GuidanceLogic.symbol(after.maneuver, after.junctionType,
+                            after.turnAngleDegrees) + " "
+                    + NavigationUnits.displayDistance(afterTurn, metricUnits)
+                    + " later · " + followUp);
+            nextTurnText.setVisibility(View.VISIBLE);
+        } else {
+            nextTurnText.setText("Continue towards your destination");
+            nextTurnText.setVisibility(View.VISIBLE);
+        }
+
+        nextInstruction = untilTurn <= 30 ? direction
+                : "In " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
+                + ", " + direction;
+        updateDrivingCamera(fix, projected, step.routeOffsetMetres);
         if (untilTurn <= 65 && spokenNowIndex != next) {
             spokenNowIndex = next;
-            say(step.message);
-        } else if (untilTurn <= 250 && untilTurn > 65 && spokenCloseIndex != next) {
+            if (GuidanceLogic.announce(speechMode, untilTurn, 2)) say(direction);
+        } else if (untilTurn > 65 && untilTurn <= 250 && spokenCloseIndex != next) {
             spokenCloseIndex = next;
-            say("In " + NavigationUnits.spokenDistance(untilTurn, metricUnits) + ", " + step.message);
-        } else if (untilTurn <= 1000 && untilTurn > 250 && spokenDistanceIndex != next) {
+            if (GuidanceLogic.announce(speechMode, untilTurn, 1)) say(nextInstruction);
+        } else if (untilTurn > 250 && untilTurn <= 1000 && spokenDistanceIndex != next) {
             spokenDistanceIndex = next;
-            say("In " + NavigationUnits.spokenDistance(untilTurn, metricUnits) + ", " + step.message);
+            if (GuidanceLogic.announce(speechMode, untilTurn, 0)) say(nextInstruction);
         }
     }
 
