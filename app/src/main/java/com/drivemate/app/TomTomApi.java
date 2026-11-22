@@ -41,9 +41,23 @@ public final class TomTomApi {
     public static final class Instruction {
         public final double routeOffsetMetres;
         public final String message;
-        public Instruction(double routeOffsetMetres, String message) {
+        public final String maneuver;
+        public final String junctionType;
+        public final int exitNumber;
+        public final double turnAngleDegrees;
+        public final String street;
+        public final String signpost;
+        public Instruction(double routeOffsetMetres, String message, String maneuver,
+                           String junctionType, int exitNumber, double turnAngleDegrees,
+                           String street, String signpost) {
             this.routeOffsetMetres = routeOffsetMetres;
             this.message = message;
+            this.maneuver = maneuver;
+            this.junctionType = junctionType;
+            this.exitNumber = exitNumber;
+            this.turnAngleDegrees = turnAngleDegrees;
+            this.street = street;
+            this.signpost = signpost;
         }
     }
 
@@ -129,7 +143,13 @@ public final class TomTomApi {
                 String text = instruction.optString("message", "").trim();
                 if (!text.isEmpty()) {
                     steps.add(new Instruction(
-                            instruction.optDouble("routeOffsetInMeters", 0), text));
+                            instruction.optDouble("routeOffsetInMeters", 0), text,
+                            instruction.optString("maneuver", ""),
+                            instruction.optString("junctionType", ""),
+                            instruction.optInt("roundaboutExitNumber", 0),
+                            instruction.optDouble("turnAngleInDecimalDegrees", 0),
+                            instruction.optString("street", ""),
+                            instruction.optString("signpostText", "")));
                 }
             }
         }
