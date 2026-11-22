@@ -678,6 +678,11 @@ public final class MainActivity extends Activity implements LocationListener {
             setStatus("GPS disabled. Enable location services for accurate guidance.");
     }
 
+    @Override public void onProviderEnabled(String provider) { /* GPS fixes follow. */ }
+
+    @Override @SuppressWarnings("deprecation")
+    public void onStatusChanged(String provider, int status, Bundle extras) { }
+
     @Override public void onResume() {
         super.onResume();
         if (map != null) map.onResume();
