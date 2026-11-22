@@ -3,6 +3,7 @@ package com.drivemate.app;
 import android.Manifest;
 import android.media.AudioAttributes;
 import android.net.ConnectivityManager;
+import android.net.Network;
 import android.net.NetworkCapabilities;
 import android.text.TextWatcher;
 import android.text.Editable;
@@ -34,6 +35,7 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -988,7 +990,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
-        GeoPoint point = new GeoPoint(fix.getLatitude(), fix.getLongitude());
+        GeoMath.Point smoothed = vehicleFilter.apply(gpsPoint(fix), fix.getTime(),
+                fix.hasAccuracy() ? fix.getAccuracy() : 99f,
+                fix.hasSpeed() ? fix.getSpeed() : 0f);
+        GeoPoint point = new GeoPoint(smoothed.lat, smoothed.lon);
         if (userPin == null) {
             userPin = new Marker(map);
             userPin.setTitle("Your live GPS position");
@@ -997,7 +1002,8 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         userPin.setPosition(point);
-        if (fix.hasBearing()) userPin.setRotation(fix.getBearing());
+        if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
+            userPin.setRotation(fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
@@ -1007,6 +1013,11 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active && followLocation && SystemClock.elapsedRealtime() - lastCameraUpdate > 1400) {
             centreOnLocation(false);
             lastCameraUpdate = SystemClock.elapsedRealtime();
+        }
+        if (gpsAccuracyText != null && active) {
+            gpsAccuracyText.setText("GPS accuracy "
+                    + (fix.hasAccuracy() ? "±" + Math.round(fix.getAccuracy()) + " m" : "unknown")
+                    + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
         map.invalidate();
@@ -1085,11 +1096,12 @@ public final class MainActivity extends Activity implements LocationListener {
             showKeyDialog();
             return;
         }
-        String query = destinationInput.getText().toString().trim();
+        String query = UkSearch.normalize(destinationInput.getText().toString());
         if (query.length() < 2) {
             destinationInput.setError("Enter an address or postcode");
             return;
         }
+        destinationInput.dismissDropDown();
         destinationInput.clearFocus();
         InputMethodManager keyboard = (InputMethodManager)
                 getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -1208,9 +1220,14 @@ public final class MainActivity extends Activity implements LocationListener {
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
         instructionText.setText("Review your route before driving.");
+        maneuverIcon.setVisibility(View.GONE);
+        nextTurnText.setVisibility(View.GONE);
         distanceText.setText("Distance: " + NavigationUnits.displayDistance(
                 calculated.lengthMetres, metricUnits));
-        etaText.setText("Drive: " + NavigationUnits.duration(calculated.timeSeconds));
+        journeyTimeText.setText("Drive: " + NavigationUnits.duration(calculated.timeSeconds));
+        etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
+                .format(new Date(System.currentTimeMillis()
+                        + calculated.timeSeconds * 1000L)));
         startButton.setVisibility(View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
         saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save place");
@@ -1232,6 +1249,8 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         followLocation = true;
         followButton.setText("◎");
+        maneuverIcon.setVisibility(View.VISIBLE);
+        nextTurnText.setVisibility(View.VISIBLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         routeSummary.setVisibility(View.GONE);
         startButton.setVisibility(View.GONE);
@@ -1242,6 +1261,9 @@ public final class MainActivity extends Activity implements LocationListener {
         setStatus("Navigating to " + destination.title);
         say("Navigation started. Follow the directions.");
         lastCameraUpdate = 0;
+        previousInstructionIndex = 0;
+        stabilizedAlong = -1;
+        observedSpeed = 0;
         updateGuidance(currentLocation);
     }
 
@@ -1257,7 +1279,8 @@ public final class MainActivity extends Activity implements LocationListener {
         places.addRecent(selected);
         followLocation = false;
         followButton.setText("◎");
-        destinationInput.setText(selected.title);
+        destinationInput.setText(selected.title, false);
+        destinationInput.dismissDropDown();
         if (destinationPin == null) {
             destinationPin = new Marker(map);
             destinationPin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
@@ -1430,6 +1453,14 @@ public final class MainActivity extends Activity implements LocationListener {
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
         routeSummary.setVisibility(View.GONE);
+        maneuverIcon.setVisibility(View.GONE);
+        nextTurnText.setVisibility(View.GONE);
+        journeyTimeText.setText("Time: —");
+        gpsAccuracyText.setText("");
+        vehicleFilter.reset();
+        previousInstructionIndex = 0;
+        stabilizedAlong = -1;
+        observedSpeed = 0;
         followLocation = true;
         followButton.setText("◎");
         distanceText.setText("Distance: —");
@@ -1458,8 +1489,11 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void say(String message) {
-        if (voiceEnabled && speechReady && speech != null) {
-            speech.speak(message, TextToSpeech.QUEUE_FLUSH, null, "drivemate-guidance");
+        if (voiceEnabled && speechReady && speech != null && message != null
+                && !message.trim().isEmpty()) {
+            Bundle params = new Bundle();
+            params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, guidanceVolume);
+            speech.speak(message, TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
         }
     }
 
