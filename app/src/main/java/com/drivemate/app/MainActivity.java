@@ -613,8 +613,12 @@ public final class MainActivity extends Activity implements LocationListener {
         String[] options = {
                 "TomTom API key",
                 voiceEnabled ? "Mute voice guidance" : "Enable voice guidance",
-                trafficEnabled ? "Hide traffic overlay" : "Show traffic overlay",
-                metricUnits ? "Use miles, yards and mph" : "Use kilometres, metres and km/h",
+                "Voice instructions · " + speechModeName(),
+                "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
+                trafficEnabled ? "Hide live traffic overlay" : "Show live traffic overlay",
+                metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
+                northUp ? "Map orientation · north up" : "Map orientation · direction up",
+                closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
                 "Set or change Home",
                 "Set or change Work",
                 "Clear recent destinations",
@@ -623,27 +627,23 @@ public final class MainActivity extends Activity implements LocationListener {
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
                     switch (which) {
-                        case 0:
-                            showKeyDialog();
-                            break;
+                        case 0: showKeyDialog(); break;
                         case 1:
                             voiceEnabled = !voiceEnabled;
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("voice", voiceEnabled).apply();
                             if (!voiceEnabled && speech != null) speech.stop();
                             else say("Voice guidance enabled.");
-                            Toast.makeText(this, voiceEnabled ? "Voice enabled" : "Voice muted",
-                                    Toast.LENGTH_SHORT).show();
                             break;
-                        case 2:
+                        case 2: selectSpeechMode(); break;
+                        case 3: selectSpeechVolume(); break;
+                        case 4:
                             trafficEnabled = !trafficEnabled;
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("traffic", trafficEnabled).apply();
                             configureTrafficTiles();
-                            Toast.makeText(this, trafficEnabled ? "Traffic overlay on" :
-                                    "Traffic overlay off", Toast.LENGTH_SHORT).show();
                             break;
-                        case 3:
+                        case 5:
                             metricUnits = !metricUnits;
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("metric_units", metricUnits).apply();
@@ -653,33 +653,113 @@ public final class MainActivity extends Activity implements LocationListener {
                                 if (active) updateGuidance(currentLocation);
                             }
                             if (route != null && !active) showPreview(route);
-                            Toast.makeText(this, metricUnits ? "Metric units" :
-                                    "UK miles and yards", Toast.LENGTH_SHORT).show();
-                            break;
-                        case 4:
-                            configureQuickDestination(true);
-                            break;
-                        case 5:
-                            configureQuickDestination(false);
                             break;
                         case 6:
+                            northUp = !northUp;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("north_up", northUp).apply();
+                            lastCameraUpdate = 0;
+                            if (northUp) map.setMapOrientation(0);
+                            if (active && currentLocation != null) updateGuidance(currentLocation);
+                            break;
+                        case 7:
+                            closeZoom = !closeZoom;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("close_zoom", closeZoom).apply();
+                            lastCameraUpdate = 0;
+                            if (active && currentLocation != null) updateGuidance(currentLocation);
+                            break;
+                        case 8: configureQuickDestination(true); break;
+                        case 9: configureQuickDestination(false); break;
+                        case 10:
                             new AlertDialog.Builder(this).setTitle("Clear recent destinations?")
                                     .setMessage("Favourites, Home and Work will be kept.")
                                     .setPositiveButton("Clear", (d, w) -> {
                                         places.clearRecent();
                                         refreshHomePanel();
+                                        refreshSearchSuggestions();
                                     }).setNegativeButton("Cancel", null).show();
                             break;
-                        case 7:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.2")
-                                    .setMessage("UK navigation using TomTom routing and traffic. " +
-                                            "Keep the app in the foreground while driving. " +
-                                            "Never rely on an untested navigation app as your only guidance.")
+                        case 11:
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.3.0")
+                                    .setMessage("Online TomTom routing, traffic and spoken directions. " +
+                                            "Road-matching and route camera are experimental. " +
+                                            "Keep DriveMate open; never use it as your sole navigator " +
+                                            "before testing directions on a real device.")
                                     .setPositiveButton("OK", null).show();
                             break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
+    }
+
+    private String speechModeName() {
+        return new String[]{"Detailed", "Normal", "Minimal"}[speechMode];
+    }
+
+    private void selectSpeechMode() {
+        new AlertDialog.Builder(this).setTitle("Voice instruction frequency")
+                .setSingleChoiceItems(new String[]{"Detailed · early and close prompts",
+                        "Normal · approach and turn", "Minimal · turn only"}, speechMode,
+                        (dialog, which) -> {
+                            speechMode = which;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putInt("speech_mode", which).apply();
+                            dialog.dismiss();
+                        }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void selectSpeechVolume() {
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(100);
+        slider.setProgress(Math.round(guidanceVolume * 100));
+        slider.setPadding(dp(22), dp(12), dp(22), dp(12));
+        new AlertDialog.Builder(this).setTitle("Spoken guidance volume")
+                .setMessage("Uses Android text-to-speech navigation audio. Media volume also matters.")
+                .setView(slider)
+                .setPositiveButton("Save and test", (dialog, which) -> {
+                    guidanceVolume = Math.max(0.1f, slider.getProgress() / 100f);
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putFloat("speech_volume", guidanceVolume).apply();
+                    say("DriveMate guidance volume");
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void refreshSearchSuggestions() {
+        if (destinationInput == null || places == null) return;
+        String text = destinationInput.getText().toString().trim().toLowerCase(Locale.UK);
+        suggestionMatches.clear();
+        List<String> labels = new ArrayList<>();
+        List<TomTomApi.Destination> candidates = new ArrayList<>(places.favorites());
+        candidates.addAll(places.recent());
+        for (TomTomApi.Destination candidate : candidates) {
+            if (!text.isEmpty()
+                    && !candidate.toString().toLowerCase(Locale.UK).contains(text)) continue;
+            boolean duplicate = false;
+            for (TomTomApi.Destination prior : suggestionMatches) {
+                if (GeoMath.distance(prior.point, candidate.point) < 3) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            suggestionMatches.add(candidate);
+            labels.add(candidate.toString());
+            if (labels.size() >= 8) break;
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_dropdown_item_1line, labels);
+        destinationInput.setAdapter(adapter);
+        destinationInput.setOnItemClickListener((parent, view, position, id) -> {
+            Object selected = parent.getItemAtPosition(position);
+            for (TomTomApi.Destination place : new ArrayList<>(suggestionMatches)) {
+                if (place.toString().equals(selected)) {
+                    destinationInput.dismissDropDown();
+                    selectDestination(place);
+                    return;
+                }
+            }
+        });
     }
 
     private void openQuickDestination(boolean home) {
