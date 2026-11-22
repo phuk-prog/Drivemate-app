@@ -534,6 +534,123 @@ public final class MainActivity extends Activity implements LocationListener {
         });
     }
 
+
+    /** Select saved/recent destinations without making another search API call. */
+    private void showSavedDestinations() {
+        List<TomTomApi.Destination> favorites = places.favorites();
+        List<TomTomApi.Destination> recents = places.recent();
+        if (favorites.isEmpty() && recents.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("Places")
+                    .setMessage("No places saved yet. Search for a destination to build your list.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        List<TomTomApi.Destination> results = new ArrayList<>();
+        List<String> descriptions = new ArrayList<>();
+        for (TomTomApi.Destination item : favorites) {
+            results.add(item);
+            descriptions.add("★ " + item.toString());
+        }
+        for (TomTomApi.Destination item : recents) {
+            boolean alreadyShown = false;
+            for (TomTomApi.Destination saved : favorites) {
+                if (GeoMath.distance(item.point, saved.point) < 2) {
+                    alreadyShown = true;
+                    break;
+                }
+            }
+            if (!alreadyShown) {
+                results.add(item);
+                descriptions.add("Recent · " + item.toString());
+            }
+        }
+        new AlertDialog.Builder(this).setTitle("Saved & recent places")
+                .setItems(descriptions.toArray(new String[0]), (dialog, which) ->
+                        selectDestination(results.get(which)))
+                .setNeutralButton("Remove favourite", (dialog, which) -> showRemoveFavorite())
+                .setNegativeButton("Close", null).show();
+    }
+
+    private void showRemoveFavorite() {
+        List<TomTomApi.Destination> favorites = places.favorites();
+        if (favorites.isEmpty()) {
+            Toast.makeText(this, "No saved favourites to remove.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[favorites.size()];
+        for (int i = 0; i < favorites.size(); i++) names[i] = favorites.get(i).toString();
+        new AlertDialog.Builder(this).setTitle("Remove a favourite")
+                .setItems(names, (dialog, which) -> {
+                    places.removeFavorite(favorites.get(which));
+                    if (destination != null && !active && route != null) showPreview(route);
+                    Toast.makeText(this, "Favourite removed", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
+
+    private void saveCurrentDestination() {
+        if (destination == null) return;
+        if (places.isFavorite(destination)) {
+            Toast.makeText(this, "Already saved in favourites", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        places.addFavorite(destination);
+        saveButton.setText("★ Saved");
+        Toast.makeText(this, "Saved to favourites", Toast.LENGTH_SHORT).show();
+    }
+
+    private String previewDetails(TomTomApi.Route calculated) {
+        String detail = NavigationUnits.displayDistance(calculated.lengthMetres, metricUnits)
+                + " · " + NavigationUnits.duration(calculated.timeSeconds);
+        if (calculated.trafficDelaySeconds > 0) {
+            detail += " · traffic +" + NavigationUnits.duration(calculated.trafficDelaySeconds);
+        } else {
+            detail += " · traffic checked";
+        }
+        return detail;
+    }
+
+    private void showPreview(TomTomApi.Route calculated) {
+        active = false;
+        routeSummary.setText(previewDetails(calculated));
+        routeSummary.setVisibility(View.VISIBLE);
+        instructionText.setText("Review your route before driving.");
+        distanceText.setText("Distance: " + NavigationUnits.displayDistance(
+                calculated.lengthMetres, metricUnits));
+        etaText.setText("Drive: " + NavigationUnits.duration(calculated.timeSeconds));
+        startButton.setVisibility(View.VISIBLE);
+        saveButton.setVisibility(View.VISIBLE);
+        saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save place");
+        repeatButton.setVisibility(View.GONE);
+        refreshButton.setVisibility(View.GONE);
+        stopButton.setText("Cancel route");
+        stopButton.setVisibility(View.VISIBLE);
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setStatus("Route ready · tap Start when parked and ready");
+    }
+
+    private void startNavigation() {
+        if (route == null || destination == null) return;
+        if (currentLocation == null || System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+            showError("Waiting for a fresh GPS position before starting.");
+            return;
+        }
+        active = true;
+        followLocation = true;
+        followButton.setText("GPS ✓");
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        routeSummary.setVisibility(View.GONE);
+        startButton.setVisibility(View.GONE);
+        saveButton.setVisibility(View.GONE);
+        repeatButton.setVisibility(View.VISIBLE);
+        refreshButton.setVisibility(View.VISIBLE);
+        stopButton.setText("End navigation");
+        setStatus("Navigating to " + destination.title);
+        say("Navigation started. Follow the directions.");
+        centreOnLocation(true);
+        updateGuidance(currentLocation);
+    }
+
     private void selectDestination(TomTomApi.Destination selected) {
         if (currentLocation == null
                 || System.currentTimeMillis() - currentLocation.getTime() > 60000) {
