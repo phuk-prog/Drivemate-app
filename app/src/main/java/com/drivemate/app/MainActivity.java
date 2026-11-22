@@ -247,7 +247,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.2.2", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.3.0", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -287,6 +287,22 @@ public final class MainActivity extends Activity implements LocationListener {
             return false;
         });
         search.addView(destinationInput, new LinearLayout.LayoutParams(0, dp(48), 1));
+        TextView clearSearch = text("×", 26, Color.rgb(74, 101, 114), false);
+        clearSearch.setGravity(Gravity.CENTER);
+        clearSearch.setVisibility(View.GONE);
+        clearSearch.setContentDescription("Clear destination search");
+        clearSearch.setOnClickListener(v -> destinationInput.setText(""));
+        searchClearView = clearSearch;
+        search.addView(clearSearch, new LinearLayout.LayoutParams(dp(29), dp(42)));
+        destinationInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                clearSearch.setVisibility(text.length() == 0 ? View.GONE : View.VISIBLE);
+            }
+            @Override public void afterTextChanged(Editable text) { }
+        });
+        searchGlyph.setContentDescription("Tap for saved or recent destinations");
+        searchGlyph.setOnClickListener(v -> showSavedDestinations());
         Button mic = chip("🎙");
         mic.setContentDescription("Search by voice");
         mic.setTextSize(19);
@@ -303,6 +319,7 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams searchPos = new LinearLayout.LayoutParams(-1, dp(60));
         searchPos.setMargins(dp(10), dp(11), dp(10), dp(7));
         top.addView(search, searchPos);
+        searchBarView = search;
 
         FrameLayout.LayoutParams topPos = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
         frame.addView(top, topPos);
@@ -310,16 +327,36 @@ public final class MainActivity extends Activity implements LocationListener {
         // Driving controls become visible on the navigation panel, not on home.
         navigationPanel = new LinearLayout(this);
         navigationPanel.setOrientation(LinearLayout.VERTICAL);
-        navigationPanel.setPadding(dp(15), dp(12), dp(15), dp(12));
+        navigationPanel.setPadding(dp(12), dp(9), dp(12), dp(9));
         navigationPanel.setBackground(rounded(DARK, 22));
         navigationPanel.setElevation(dp(10));
         banner = text("Ready to navigate", 12, CYAN, true);
         navigationPanel.addView(banner);
-        instructionText = text("Search for a destination, then preview the route.", 19,
+        LinearLayout turnRow = new LinearLayout(this);
+        turnRow.setGravity(Gravity.CENTER_VERTICAL);
+        turnRow.setOrientation(LinearLayout.HORIZONTAL);
+        arrowView = new TurnArrowView(this);
+        arrowView.setVisibility(View.GONE);
+        LinearLayout.LayoutParams arrowPos = new LinearLayout.LayoutParams(dp(52), dp(52));
+        arrowPos.rightMargin = dp(10);
+        turnRow.addView(arrowView, arrowPos);
+        LinearLayout turnLabels = new LinearLayout(this);
+        turnLabels.setOrientation(LinearLayout.VERTICAL);
+        instructionText = text("Search for a destination, then preview the route.", 17,
                 Color.WHITE, true);
+        turnLabels.addView(instructionText);
+        roadText = text("", 12, Color.rgb(190, 225, 237), false);
+        roadText.setVisibility(View.GONE);
+        turnLabels.addView(roadText);
+        turnRow.addView(turnLabels, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams instructionPos = new LinearLayout.LayoutParams(-1, -2);
-        instructionPos.topMargin = dp(7);
-        navigationPanel.addView(instructionText, instructionPos);
+        instructionPos.topMargin = dp(5);
+        navigationPanel.addView(turnRow, instructionPos);
+        followingText = text("", 12, Color.rgb(188, 223, 235), false);
+        followingText.setVisibility(View.GONE);
+        LinearLayout.LayoutParams followingPos = new LinearLayout.LayoutParams(-1, -2);
+        followingPos.topMargin = dp(3);
+        navigationPanel.addView(followingText, followingPos);
         routeSummary = text("", 13, Color.rgb(194, 226, 238), false);
         routeSummary.setVisibility(View.GONE);
         navigationPanel.addView(routeSummary);
@@ -329,6 +366,8 @@ public final class MainActivity extends Activity implements LocationListener {
         details.addView(distanceText, new LinearLayout.LayoutParams(0, -2, 1));
         etaText = text("ETA: —", 13, Color.WHITE, false);
         details.addView(etaText, new LinearLayout.LayoutParams(0, -2, 1));
+        timeLeftText = text("Time: —", 13, Color.WHITE, false);
+        details.addView(timeLeftText, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams detailsPos = new LinearLayout.LayoutParams(-1, -2);
         detailsPos.topMargin = dp(10);
         navigationPanel.addView(details, detailsPos);
@@ -431,9 +470,12 @@ public final class MainActivity extends Activity implements LocationListener {
         speedBadge.setElevation(dp(6));
         TextView gpsLabel = text("GPS", 10, Color.WHITE, true);
         speedBadge.addView(gpsLabel);
+        gpsAccuracyText = text("", 9, Color.rgb(187, 218, 228), false);
+        gpsAccuracyText.setGravity(Gravity.CENTER);
         speedText = text(metricUnits ? "0 km/h" : "0 mph", 16, Color.WHITE, true);
         speedText.setGravity(Gravity.CENTER);
         speedBadge.addView(speedText);
+        speedBadge.addView(gpsAccuracyText);
         speedBadgePos = new FrameLayout.LayoutParams(dp(86), dp(86), Gravity.BOTTOM | Gravity.LEFT);
         speedBadgePos.leftMargin = dp(12);
         frame.addView(speedBadge, speedBadgePos);
@@ -493,6 +535,9 @@ public final class MainActivity extends Activity implements LocationListener {
         if (homePanel == null || navigationPanel == null) return;
         homePanel.setVisibility(show && !keyboardOpen ? View.VISIBLE : View.GONE);
         navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
+        if (searchBarView != null) {
+            searchBarView.setVisibility(active && !show ? View.GONE : View.VISIBLE);
+        }
         if (speedBadgeView != null) {
             speedBadgeView.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
         }
