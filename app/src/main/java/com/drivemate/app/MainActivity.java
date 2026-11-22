@@ -1085,6 +1085,10 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         userPin.setPosition(point);
+        if (vectorMap != null) {
+            vectorMap.setVehicle(smoothed);
+            vectorMap.prefetch(gpsPoint(fix));
+        }
         if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
@@ -1142,6 +1146,8 @@ public final class MainActivity extends Activity implements LocationListener {
         // A direct centre update follows the current location immediately.
         map.getController().setCenter(
                 new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
+        if (vectorMap != null)
+            vectorMap.setCamera(gpsPoint(currentLocation), map.getZoomLevelDouble(), 0);
         lastCameraCenter = gpsPoint(currentLocation);
     }
 
@@ -1201,6 +1207,9 @@ public final class MainActivity extends Activity implements LocationListener {
         // Immediate centre adjustment; no animations running behind live GPS.
         map.getController().setCenter(
                 new GeoPoint(camera.center.lat, camera.center.lon));
+        if (vectorMap != null)
+            vectorMap.setCamera(camera.center, boundedZoom,
+                    northUp ? 0 : camera.roadBearingDegrees);
         lastCameraCenter = camera.center;
         lastCameraUpdate = now;
     }
@@ -1401,6 +1410,7 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(destinationPin);
         }
         destinationPin.setPosition(new GeoPoint(selected.point.lat, selected.point.lon));
+        if (vectorMap != null) vectorMap.setDestination(selected.point);
         destinationPin.setTitle(selected.toString());
         planRoute(true);
     }
@@ -1508,6 +1518,10 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         map.invalidate();
+        if (vectorMap != null) {
+            if (preview) vectorMap.previewRoute(calculated.points);
+            else vectorMap.setRoute(calculated.points);
+        }
         if (preview) {
             map.setMapOrientation(0);
             double north = -90, south = 90, east = -180, west = 180;
@@ -1645,6 +1659,10 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         map.setMapOrientation(0);
+        if (vectorMap != null) {
+            vectorMap.setRoute(null);
+            vectorMap.setDestination(null);
+        }
         lastCameraUpdate = 0;
         stopButton.setVisibility(View.GONE);
         setHomeVisible(true);
