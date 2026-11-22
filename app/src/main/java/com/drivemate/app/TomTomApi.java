@@ -41,9 +41,33 @@ public final class TomTomApi {
     public static final class Instruction {
         public final double routeOffsetMetres;
         public final String message;
+        public final String maneuver;
+        public final String instructionType;
+        public final String junctionType;
+        public final String street;
+        public final String signpostText;
+        public final int roundaboutExitNumber;
+        public final double turnAngleDegrees;
+        public final int travelTimeSeconds;
+
         public Instruction(double routeOffsetMetres, String message) {
+            this(routeOffsetMetres, message, "", "", "", "", "", 0, 0, -1);
+        }
+
+        public Instruction(double routeOffsetMetres, String message, String maneuver,
+                           String instructionType, String junctionType, String street,
+                           String signpostText, int roundaboutExitNumber,
+                           double turnAngleDegrees, int travelTimeSeconds) {
             this.routeOffsetMetres = routeOffsetMetres;
-            this.message = message;
+            this.message = message == null ? "" : message;
+            this.maneuver = maneuver == null ? "" : maneuver;
+            this.instructionType = instructionType == null ? "" : instructionType;
+            this.junctionType = junctionType == null ? "" : junctionType;
+            this.street = street == null ? "" : street;
+            this.signpostText = signpostText == null ? "" : signpostText;
+            this.roundaboutExitNumber = Math.max(0, roundaboutExitNumber);
+            this.turnAngleDegrees = turnAngleDegrees;
+            this.travelTimeSeconds = travelTimeSeconds;
         }
     }
 
@@ -129,7 +153,16 @@ public final class TomTomApi {
                 String text = instruction.optString("message", "").trim();
                 if (!text.isEmpty()) {
                     steps.add(new Instruction(
-                            instruction.optDouble("routeOffsetInMeters", 0), text));
+                            instruction.optDouble("routeOffsetInMeters", 0),
+                            text,
+                            instruction.optString("maneuver", ""),
+                            instruction.optString("instructionType", ""),
+                            instruction.optString("junctionType", ""),
+                            instruction.optString("street", ""),
+                            instruction.optString("signpostText", ""),
+                            instruction.optInt("roundaboutExitNumber", 0),
+                            instruction.optDouble("turnAngleInDecimalDegrees", 0),
+                            instruction.optInt("travelTimeInSeconds", -1)));
                 }
             }
         }
