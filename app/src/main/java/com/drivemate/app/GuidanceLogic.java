@@ -76,8 +76,10 @@ public final class GuidanceLogic {
     /** Progress smoothing is only for display and manoeuvre advancement. */
     public static double monotonicProgress(double lastMetres, double measuredMetres,
                                            double offRouteMetres, double accuracyMetres) {
-        if (lastMetres < 0 || offRouteMetres > 80 || accuracyMetres > 55)
-            return Math.max(0, measuredMetres);
+        if (lastMetres < 0) return Math.max(0, measuredMetres);
+        // Do not advance on a position outside the drivable route or a
+        // poor-quality fix. Wait for accurate GPS or a new route.
+        if (offRouteMetres > 80 || accuracyMetres > 55) return lastMetres;
         return Math.max(lastMetres - 8, measuredMetres);
     }
 
