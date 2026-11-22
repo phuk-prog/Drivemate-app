@@ -18,6 +18,8 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 import android.text.InputType;
@@ -65,6 +67,21 @@ public final class MainActivity extends Activity implements LocationListener {
     private static final long ROUTE_REFRESH_MS = 300_000L;
 
     private final ExecutorService network = Executors.newSingleThreadExecutor();
+    private final Handler gpsHandler = new Handler(Looper.getMainLooper());
+    private boolean gpsLost;
+    private final Runnable gpsWatchdog = new Runnable() {
+        @Override public void run() {
+            if (active && currentLocation != null
+                    && System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+                if (!gpsLost) {
+                    gpsLost = true;
+                    setStatus("GPS signal lost · waiting for a fresh fix");
+                    say("GPS signal lost. Waiting for location.");
+                }
+            }
+            gpsHandler.postDelayed(this, 5000);
+        }
+    };
     private MapView map;
     private EditText destinationInput;
     private Button trafficButton;
@@ -441,7 +458,15 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     @Override public void onLocationChanged(Location fix) {
-        if (fix == null || (fix.hasAccuracy() && fix.getAccuracy() > 100)) return;
+        if (fix == null || (fix.hasAccuracy() && fix.getAccuracy() > 100)
+                || System.currentTimeMillis() - fix.getTime() > 15000) return;
+        if (gpsLost) {
+            gpsLost = false;
+            if (active) {
+                setStatus("GPS signal restored · guidance resumed");
+                say("GPS signal restored.");
+            }
+        }
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
@@ -811,6 +836,7 @@ public final class MainActivity extends Activity implements LocationListener {
         route = null;
         destination = null;
         offRouteSince = 0;
+        gpsLost = false;
         nextInstruction = "";
         if (routeLine != null) {
             map.getOverlays().remove(routeLine);
@@ -874,9 +900,12 @@ public final class MainActivity extends Activity implements LocationListener {
         super.onResume();
         if (map != null) map.onResume();
         startLocation();
+        gpsHandler.removeCallbacks(gpsWatchdog);
+        gpsHandler.postDelayed(gpsWatchdog, 5000);
     }
 
     @Override public void onPause() {
+        gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
         if (map != null) map.onPause();
         super.onPause();
