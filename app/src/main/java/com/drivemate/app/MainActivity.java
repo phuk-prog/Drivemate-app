@@ -1103,7 +1103,9 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        if (now - lastCameraUpdate < 2400) return;
+        // GPS arrives about once a second. Do not queue another animated pan:
+        // by the time osmdroid finishes it, the vehicle has already moved.
+        if (lastCameraUpdate > 0 && now - lastCameraUpdate < 600) return;
         if (map.getHeight() < dp(350)) return;
 
         int headerHeight = dp(145);
@@ -1114,27 +1116,37 @@ public final class MainActivity extends Activity implements LocationListener {
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
                 map.getHeight(), headerHeight, bottomPanelHeight);
 
-        // Speed-adaptive zoom is the default; optional close-junction mode keeps
-        // local streets legible without a jump to maximum magnification.
-        double targetZoom = Math.min(19.2, camera.zoom + (closeZoom ? 0.55 : 0));
+        double targetZoom = Math.min(19.0, camera.zoom + (closeZoom ? 0.45 : 0));
         double currentZoom = map.getZoomLevelDouble();
-        double boundedZoom = currentZoom + Math.max(-0.65,
-                Math.min(0.65, targetZoom - currentZoom));
-        if (Math.abs(boundedZoom - currentZoom) >= 0.10)
+        double wantedOrientation = northUp ? 0 : -camera.roadBearingDegrees;
+        double headingChange = MapFollowPolicy.shortestHeadingDifference(
+                wantedOrientation, map.getMapOrientation());
+        double centerMovement = lastCameraCenter == null ? Double.POSITIVE_INFINITY
+                : GeoMath.distance(lastCameraCenter, camera.center);
+        float speed = fix.hasSpeed() ? fix.getSpeed() : 0f;
+        if (!MapFollowPolicy.shouldMove(lastCameraUpdate, now, centerMovement,
+                speed, targetZoom - currentZoom, headingChange)) return;
+
+        // Keep zoom stable to avoid expensive high-resolution tile reloads
+        // for tiny GPS fluctuations. Move at most one half zoom level/update.
+        double boundedZoom = currentZoom + Math.max(-0.5,
+                Math.min(0.5, targetZoom - currentZoom));
+        if (Math.abs(targetZoom - currentZoom) > 0.30)
             map.getController().setZoom(boundedZoom);
 
         if (northUp) {
-            if (Math.abs(map.getMapOrientation()) > 0.1f) map.setMapOrientation(0);
-        } else {
-            float wantedOrientation = (float) -camera.roadBearingDegrees;
-            float currentOrientation = map.getMapOrientation();
-            float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
-            float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
-            if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+            if (Math.abs(headingChange) >= 1) map.setMapOrientation(0);
+        } else if (speed >= 1.8f && Math.abs(headingChange) >= 8) {
+            // Rotate only during actual movement, not on stopped GPS jitter.
+            float adjusted = (float) (map.getMapOrientation()
+                    + Math.max(-20, Math.min(20, headingChange)));
+            map.setMapOrientation(adjusted);
         }
 
-        map.getController().animateTo(
+        // Immediate centre adjustment; no animations running behind live GPS.
+        map.getController().setCenter(
                 new GeoPoint(camera.center.lat, camera.center.lon));
+        lastCameraCenter = camera.center;
         lastCameraUpdate = now;
     }
 
