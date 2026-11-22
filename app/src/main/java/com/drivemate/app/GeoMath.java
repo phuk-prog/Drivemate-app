@@ -1,0 +1,73 @@
+package com.drivemate.app;
+
+import java.util.List;
+
+/** GPS geometry in metres. No Android dependency, so it can be unit tested. */
+public final class GeoMath {
+    private static final double EARTH_METRES = 6371000.0;
+    private GeoMath() {}
+
+    public static final class Point {
+        public final double lat;
+        public final double lon;
+        public Point(double lat, double lon) {
+            this.lat = lat;
+            this.lon = lon;
+        }
+    }
+
+    public static final class Progress {
+        public final double alongMetres;
+        public final double offRouteMetres;
+        public final double totalMetres;
+        Progress(double alongMetres, double offRouteMetres, double totalMetres) {
+            this.alongMetres = alongMetres;
+            this.offRouteMetres = offRouteMetres;
+            this.totalMetres = totalMetres;
+        }
+    }
+
+    public static double distance(Point a, Point b) {
+        double lat1 = Math.toRadians(a.lat);
+        double lat2 = Math.toRadians(b.lat);
+        double dLat = lat2 - lat1;
+        double dLon = Math.toRadians(b.lon - a.lon);
+        double v = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(lat1) * Math.cos(lat2)
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return 2 * EARTH_METRES * Math.atan2(Math.sqrt(v), Math.sqrt(Math.max(0, 1 - v)));
+    }
+
+    /** Finds the nearest point on the route, not just the nearest vertex. */
+    public static Progress project(List<Point> path, Point gps) {
+        if (path == null || path.isEmpty()) {
+            return new Progress(0, Double.POSITIVE_INFINITY, 0);
+        }
+        if (path.size() == 1) {
+            return new Progress(0, distance(path.get(0), gps), 0);
+        }
+        double walked = 0;
+        double bestOff = Double.POSITIVE_INFINITY;
+        double bestAlong = 0;
+        for (int i = 1; i < path.size(); i++) {
+            Point a = path.get(i - 1);
+            Point b = path.get(i);
+            double latitudeRadians = Math.toRadians((a.lat + b.lat) * 0.5);
+            double mPerDegree = Math.PI * EARTH_METRES / 180;
+            double ax = (b.lon - a.lon) * Math.cos(latitudeRadians) * mPerDegree;
+            double ay = (b.lat - a.lat) * mPerDegree;
+            double gx = (gps.lon - a.lon) * Math.cos(latitudeRadians) * mPerDegree;
+            double gy = (gps.lat - a.lat) * mPerDegree;
+            double square = ax * ax + ay * ay;
+            double t = square < 0.001 ? 0 : Math.max(0, Math.min(1, (gx * ax + gy * ay) / square));
+            double off = Math.hypot(gx - t * ax, gy - t * ay);
+            double segment = distance(a, b);
+            if (off < bestOff) {
+                bestOff = off;
+                bestAlong = walked + t * segment;
+            }
+            walked += segment;
+        }
+        return new Progress(bestAlong, bestOff, walked);
+    }
+}
