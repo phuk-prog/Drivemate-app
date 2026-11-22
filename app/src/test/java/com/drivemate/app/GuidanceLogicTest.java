@@ -34,6 +34,8 @@ public class GuidanceLogicTest {
     }
     @Test public void progressResistsSmallGpsBacktracking() {
         assertEquals(192, GuidanceLogic.monotonicProgress(200, 170, 10, 5), 0.01);
+        assertEquals(200, GuidanceLogic.monotonicProgress(200, 600, 120, 5), 0.01);
+        assertEquals(200, GuidanceLogic.monotonicProgress(200, 600, 15, 95), 0.01);
     }
     @Test public void normalizesOnlyFullPostcodes() {
         assertEquals("SK3 0UX", UkSearch.normalize("sk30ux"));
