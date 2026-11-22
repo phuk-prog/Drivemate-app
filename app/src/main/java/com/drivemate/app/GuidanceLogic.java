@@ -24,7 +24,7 @@ public final class GuidanceLogic {
         String clean = message == null ? "" : message.trim();
         if (exit > 0 && "ROUNDABOUT".equalsIgnoreCase(junction)) {
             String label = ordinal(exit) + " exit";
-            if (!clean.toLowerCase(Locale.UK).contains(label.toLowerCase(Locale.UK))) {
+            if (!clean.toLowerCase(Locale.UK).contains("exit")) {
                 return "Roundabout: " + label + " · " + clean;
             }
         }
