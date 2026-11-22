@@ -1430,8 +1430,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private void showRoute(TomTomApi.Route calculated, boolean preview) {
         if (routeLine != null) map.getOverlays().remove(routeLine);
         routeLine = new Polyline();
-        List<GeoPoint> geometry = new ArrayList<>(calculated.points.size());
-        for (GeoMath.Point point : calculated.points)
+        // Draw fewer vertices without changing the full route used by GPS,
+        // distances, roundabouts, and manoeuvre selection.
+        List<GeoMath.Point> displayPoints = DisplayPolyline.simplify(
+                calculated.points, 1.5);
+        List<GeoPoint> geometry = new ArrayList<>(displayPoints.size());
+        for (GeoMath.Point point : displayPoints)
             geometry.add(new GeoPoint(point.lat, point.lon));
         routeLine.setPoints(geometry);
         routeLine.getOutlinePaint().setColor(BLUE);
