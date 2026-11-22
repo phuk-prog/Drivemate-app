@@ -316,7 +316,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.3.2", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.4.0", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -702,6 +702,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 northUp ? "Map orientation · north up" : "Map orientation · direction up",
                 closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
+                useLocalMap ? "Map · DriveMate local vector" : "Map · TomTom online raster",
+                "Nearby map cache & Wi-Fi prefetch",
                 "Set or change Home",
                 "Set or change Work",
                 "Clear recent destinations",
@@ -752,9 +754,42 @@ public final class MainActivity extends Activity implements LocationListener {
                             lastCameraUpdate = 0;
                             if (active && currentLocation != null) updateGuidance(currentLocation);
                             break;
-                        case 8: configureQuickDestination(true); break;
-                        case 9: configureQuickDestination(false); break;
-                        case 10:
+                        case 8:
+                            if (vectorMap == null) {
+                                Toast.makeText(this,
+                                        "DriveMate local map is unavailable on this device",
+                                        Toast.LENGTH_LONG).show();
+                                break;
+                            }
+                            useLocalMap = !useLocalMap;
+                            autoFallback = false;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("drivemate_vector_map", useLocalMap).apply();
+                            updateMapVisibility();
+                            if (useLocalMap && currentLocation != null) {
+                                vectorMap.setCamera(gpsPoint(currentLocation),
+                                        map.getZoomLevelDouble(), 0);
+                                vectorMap.prefetch(gpsPoint(currentLocation));
+                            }
+                            break;
+                        case 9:
+                            String stats = vectorMap == null ? "Local vector map unavailable"
+                                    : vectorMap.cacheStats();
+                            new AlertDialog.Builder(this).setTitle("DriveMate nearby map cache")
+                                    .setMessage(stats + "\n\nMaps are cached privately on your phone (up to 180 MB of street tiles). "
+                                            + "An approximately 20–30 km area is prefetched on unmetered Wi-Fi "
+                                            + "around a GPS fix. Online use fetches missing tiles individually. "
+                                            + "TomTom routing still needs internet. "
+                                            + "Map data © OpenStreetMap contributors, ODbL 1.0.")
+                                    .setPositiveButton("Prefetch nearby", (dialog, button) -> {
+                                        if (vectorMap != null && currentLocation != null)
+                                            vectorMap.prefetch(gpsPoint(currentLocation));
+                                    })
+                                    .setNegativeButton("Close", null).show();
+                            break;
+                        case 10: configureQuickDestination(true); break;
+                        case 11: configureQuickDestination(false); break;
+                        case 12:
                             new AlertDialog.Builder(this).setTitle("Clear recent destinations?")
                                     .setMessage("Favourites, Home and Work will be kept.")
                                     .setPositiveButton("Clear", (d, w) -> {
@@ -763,9 +798,11 @@ public final class MainActivity extends Activity implements LocationListener {
                                         refreshSearchSuggestions();
                                     }).setNegativeButton("Cancel", null).show();
                             break;
-                        case 11:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.3.2")
-                                    .setMessage("Online TomTom routing, traffic and spoken directions. " +
+                        case 13:
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.0")
+                                    .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
+                                            + "Cached vector tiles are map display only. "
+                                            + "Online TomTom routing, traffic and spoken directions. " +
                                             "Road-matching and route camera are experimental. " +
                                             "Keep DriveMate open; never use it as your sole navigator " +
                                             "before testing directions on a real device.")
