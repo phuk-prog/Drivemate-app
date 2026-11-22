@@ -122,6 +122,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private MapView map;
     private View speedBadgeView;
     private View searchBarView;
+    private LinearLayout searchSuggestions;
     private TurnArrowView arrowView;
     private TextView followingText;
     private TextView roadText;
@@ -317,6 +318,7 @@ public final class MainActivity extends Activity implements LocationListener {
             @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
                 clearSearch.setVisibility(text.length() == 0 ? View.GONE : View.VISIBLE);
+                updateSearchSuggestions();
             }
             @Override public void afterTextChanged(Editable text) { }
         });
@@ -339,6 +341,15 @@ public final class MainActivity extends Activity implements LocationListener {
         searchPos.setMargins(dp(10), dp(11), dp(10), dp(7));
         top.addView(search, searchPos);
         searchBarView = search;
+        searchSuggestions = new LinearLayout(this);
+        searchSuggestions.setOrientation(LinearLayout.VERTICAL);
+        searchSuggestions.setPadding(dp(7), dp(4), dp(7), dp(4));
+        searchSuggestions.setBackground(rounded(Color.WHITE, 12));
+        searchSuggestions.setVisibility(View.GONE);
+        searchSuggestions.setElevation(dp(6));
+        LinearLayout.LayoutParams suggestionParams = new LinearLayout.LayoutParams(-1, -2);
+        suggestionParams.setMargins(dp(12), 0, dp(12), dp(6));
+        top.addView(searchSuggestions, suggestionParams);
 
         FrameLayout.LayoutParams topPos = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
         frame.addView(top, topPos);
@@ -527,10 +538,59 @@ public final class MainActivity extends Activity implements LocationListener {
             if (imeNow != keyboardOpen) {
                 keyboardOpen = imeNow;
                 setHomeVisible(homeMode);
+                updateSearchSuggestions();
             }
         });
         setHomeVisible(true);
         refreshHomePanel();
+    }
+
+    private void updateSearchSuggestions() {
+        if (searchSuggestions == null || destinationInput == null || places == null) return;
+        searchSuggestions.removeAllViews();
+        if (!keyboardOpen || active || !homeMode) {
+            searchSuggestions.setVisibility(View.GONE);
+            return;
+        }
+        String typed = destinationInput.getText().toString().trim().toLowerCase(Locale.UK);
+        List<TomTomApi.Destination> matches = new ArrayList<>();
+        List<TomTomApi.Destination> pool = new ArrayList<>(places.favorites());
+        pool.addAll(places.recent());
+        for (TomTomApi.Destination place : pool) {
+            if (!typed.isEmpty() && !place.toString().toLowerCase(Locale.UK).contains(typed))
+                continue;
+            boolean duplicate = false;
+            for (TomTomApi.Destination seen : matches) {
+                if (GeoMath.distance(seen.point, place.point) < 2) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate) matches.add(place);
+            if (matches.size() >= 3) break;
+        }
+        if (matches.isEmpty()) {
+            searchSuggestions.setVisibility(View.GONE);
+            return;
+        }
+        for (TomTomApi.Destination item : matches) {
+            TextView suggestion = text("↺  " + item.toString(), 14, DARK, false);
+            suggestion.setSingleLine(true);
+            suggestion.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            suggestion.setGravity(Gravity.CENTER_VERTICAL);
+            suggestion.setPadding(dp(8), 0, dp(8), 0);
+            suggestion.setOnClickListener(v -> {
+                destinationInput.clearFocus();
+                InputMethodManager keyboard = (InputMethodManager)
+                        getSystemService(Context.INPUT_METHOD_SERVICE);
+                if (keyboard != null)
+                    keyboard.hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
+                searchSuggestions.setVisibility(View.GONE);
+                selectDestination(item);
+            });
+            searchSuggestions.addView(suggestion, new LinearLayout.LayoutParams(-1, dp(42)));
+        }
+        searchSuggestions.setVisibility(View.VISIBLE);
     }
 
     private Button quickTile(String symbol, String label) {
