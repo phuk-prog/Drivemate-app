@@ -8,6 +8,10 @@ DriveMate v1.2 sets `applicationId 'com.drivemate.android'`, matching the earlie
 
 Android requires **both the same package ID and the same signing certificate** before replacing an installed APK. The former `com.drivemate.android` Drivemate app and v1.2 share the ID, but their signing key has not been verified to match. **Uninstall the previous Drivemate app if Android reports a signing conflict** and then install the new signed APK. Likewise, manually uninstall the separate `com.drivemate.app` DriveMate GPS app if present. Uninstalling deletes local app preferences and saved destinations: copy any needed settings first. Do not promise seamless replacement of unrelated package IDs or unknown signatures.
 
+## v1.2 owner signing certificate (public fingerprint only)
+
+The signed v1.2 APK is issued under this **SHA-256 certificate fingerprint** (safe to share): `9F:11:80:4F:0C:28:F6:1B:E2:58:8F:C6:E1:66:35:14:CF:CC:A6:AD:4D:A4:E3:1E:19:E4:18:6C:02:9B:1A:38`. Later signed release APKs must show the **same** fingerprint and a higher version code. Keep the private `DriveMate-Signing-Key.p12` and its password outside GitHub and back them up securely. Losing the signing key prevents normal in-place updates. A private key is never a GitHub file or Action artifact.
+
 ## Stable updates from v1.2 onward
 
 The reproducible **source** and **applicationId** are public; the private signing key must never be committed, logged or published as a GitHub Actions artifact.
