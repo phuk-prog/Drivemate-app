@@ -26,6 +26,7 @@ import java.text.SimpleDateFormat;
 import android.graphics.Path;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
+import java.io.File;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 import android.widget.ImageView;
@@ -180,6 +181,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private long lastRouteRequest;
     private long offRouteSince;
     private long lastCameraUpdate;
+    private GeoMath.Point lastCameraCenter;
     private int requestGeneration;
     private int spokenDistanceIndex = -1;
     private int spokenCloseIndex = -1;
@@ -187,7 +189,19 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Configure osmdroid before constructing MapView. Cache tiles in the
+        // app-private cache, and allow additional parallel tile downloads.
+        // TomTom traffic remains a separate, optional overlay.
         Configuration.getInstance().setUserAgentValue(getPackageName());
+        File mapCache = new File(getCacheDir(), "drivemate-map-tiles");
+        if (!mapCache.exists()) mapCache.mkdirs();
+        Configuration.getInstance().setOsmdroidBasePath(mapCache);
+        Configuration.getInstance().setOsmdroidTileCache(new File(mapCache, "tiles"));
+        Configuration.getInstance().setCacheMapTileCount((short) 36);
+        Configuration.getInstance().setTileDownloadThreads((short) 4);
+        Configuration.getInstance().setTileDownloadMaxQueueSize((short) 60);
+        Configuration.getInstance().setTileFileSystemCacheMaxBytes(180L * 1024L * 1024L);
+        Configuration.getInstance().setTileFileSystemCacheTrimBytes(140L * 1024L * 1024L);
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         apiKey = settings.getString("tomtom_key", "");
         voiceEnabled = settings.getBoolean("voice", true);
@@ -258,7 +272,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.3.1", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.3.2", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -697,7 +711,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 11:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.3.1")
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.3.2")
                                     .setMessage("Online TomTom routing, traffic and spoken directions. " +
                                             "Road-matching and route camera are experimental. " +
                                             "Keep DriveMate open; never use it as your sole navigator " +
@@ -1024,9 +1038,18 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
             setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
         }
-        if (!active && followLocation && SystemClock.elapsedRealtime() - lastCameraUpdate > 1400) {
-            centreOnLocation(false);
-            lastCameraUpdate = SystemClock.elapsedRealtime();
+        if (!active && followLocation) {
+            // Fast idle GPS recenter, but ignore small stationary jitter.
+            long now = SystemClock.elapsedRealtime();
+            GeoMath.Point gps = gpsPoint(fix);
+            double moved = lastCameraCenter == null ? Double.POSITIVE_INFINITY
+                    : GeoMath.distance(lastCameraCenter, gps);
+            if (MapFollowPolicy.shouldMove(lastCameraUpdate, now, moved,
+                    fix.hasSpeed() ? fix.getSpeed() : 0f, 0, 0)) {
+                centreOnLocation(false);
+                lastCameraUpdate = now;
+                lastCameraCenter = gps;
+            }
         }
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
@@ -1034,7 +1057,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
-        map.invalidate();
+        map.postInvalidateOnAnimation();
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -1060,8 +1083,11 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation == null) return;
         if (forceZoom || map.getZoomLevelDouble() < 14.0)
             map.getController().setZoom(16.5);
-        map.getController().animateTo(
+        // One-second animated moves were repeatedly restarting on GPS fixes.
+        // A direct centre update follows the current location immediately.
+        map.getController().setCenter(
                 new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
+        lastCameraCenter = gpsPoint(currentLocation);
     }
 
     /**
@@ -1077,7 +1103,9 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        if (now - lastCameraUpdate < 2400) return;
+        // GPS arrives about once a second. Do not queue another animated pan:
+        // by the time osmdroid finishes it, the vehicle has already moved.
+        if (lastCameraUpdate > 0 && now - lastCameraUpdate < 600) return;
         if (map.getHeight() < dp(350)) return;
 
         int headerHeight = dp(145);
@@ -1088,27 +1116,37 @@ public final class MainActivity extends Activity implements LocationListener {
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
                 map.getHeight(), headerHeight, bottomPanelHeight);
 
-        // Speed-adaptive zoom is the default; optional close-junction mode keeps
-        // local streets legible without a jump to maximum magnification.
-        double targetZoom = Math.min(19.2, camera.zoom + (closeZoom ? 0.55 : 0));
+        double targetZoom = Math.min(19.0, camera.zoom + (closeZoom ? 0.45 : 0));
         double currentZoom = map.getZoomLevelDouble();
-        double boundedZoom = currentZoom + Math.max(-0.65,
-                Math.min(0.65, targetZoom - currentZoom));
-        if (Math.abs(boundedZoom - currentZoom) >= 0.10)
+        double wantedOrientation = northUp ? 0 : -camera.roadBearingDegrees;
+        double headingChange = MapFollowPolicy.shortestHeadingDifference(
+                wantedOrientation, map.getMapOrientation());
+        double centerMovement = lastCameraCenter == null ? Double.POSITIVE_INFINITY
+                : GeoMath.distance(lastCameraCenter, camera.center);
+        float speed = fix.hasSpeed() ? fix.getSpeed() : 0f;
+        if (!MapFollowPolicy.shouldMove(lastCameraUpdate, now, centerMovement,
+                speed, targetZoom - currentZoom, headingChange)) return;
+
+        // Keep zoom stable to avoid expensive high-resolution tile reloads
+        // for tiny GPS fluctuations. Move at most one half zoom level/update.
+        double boundedZoom = currentZoom + Math.max(-0.5,
+                Math.min(0.5, targetZoom - currentZoom));
+        if (Math.abs(targetZoom - currentZoom) > 0.30)
             map.getController().setZoom(boundedZoom);
 
         if (northUp) {
-            if (Math.abs(map.getMapOrientation()) > 0.1f) map.setMapOrientation(0);
-        } else {
-            float wantedOrientation = (float) -camera.roadBearingDegrees;
-            float currentOrientation = map.getMapOrientation();
-            float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
-            float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
-            if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+            if (Math.abs(headingChange) >= 1) map.setMapOrientation(0);
+        } else if (speed >= 1.8f && Math.abs(headingChange) >= 8) {
+            // Rotate only during actual movement, not on stopped GPS jitter.
+            float adjusted = (float) (map.getMapOrientation()
+                    + Math.max(-20, Math.min(20, headingChange)));
+            map.setMapOrientation(adjusted);
         }
 
-        map.getController().animateTo(
+        // Immediate centre adjustment; no animations running behind live GPS.
+        map.getController().setCenter(
                 new GeoPoint(camera.center.lat, camera.center.lon));
+        lastCameraCenter = camera.center;
         lastCameraUpdate = now;
     }
 
@@ -1392,8 +1430,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private void showRoute(TomTomApi.Route calculated, boolean preview) {
         if (routeLine != null) map.getOverlays().remove(routeLine);
         routeLine = new Polyline();
-        List<GeoPoint> geometry = new ArrayList<>(calculated.points.size());
-        for (GeoMath.Point point : calculated.points)
+        // Draw fewer vertices without changing the full route used by GPS,
+        // distances, roundabouts, and manoeuvre selection.
+        List<GeoMath.Point> displayPoints = DisplayPolyline.simplify(
+                calculated.points, 1.5);
+        List<GeoPoint> geometry = new ArrayList<>(displayPoints.size());
+        for (GeoMath.Point point : displayPoints)
             geometry.add(new GeoPoint(point.lat, point.lon));
         routeLine.setPoints(geometry);
         routeLine.getOutlinePaint().setColor(BLUE);

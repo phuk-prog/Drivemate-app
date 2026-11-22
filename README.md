@@ -13,6 +13,33 @@ The 22 November 2026 reference screenshots informed the navy/cyan design: a larg
 
 **Important:** The package identity now matches original Drivemate (`com.drivemate.android`), but its former signing certificate is unknown. You may need to uninstall the older Drivemate install **once**, and also remove the separately installed `com.drivemate.app` DriveMate GPS package. From this release onward, only APKs signed with the owner's **same private signing key** can update in place; see [Updating and signing](docs/UPDATING-AND-SIGNING.md). Never put the keystore in this public repo.
 
+## DriveMate v1.3.2 — map responsiveness fix
+
+Fixes the reported **slow GPS map response** without changing TomTom routing or the
+permanent application ID `com.drivemate.android`:
+
+- Replaces repeated osmdroid `animateTo(...)` panning with direct
+  `setCenter(...)` updates while following a live GPS fix; animations previously
+  took about a second and were restarted when the camera moved.
+- Updates the moving driving camera at normal GPS cadence (typically about one
+  second), rather than waiting at least 2.4 seconds.
+- Ignores very small stationary GPS movements; limits map rotation and zoom
+  changes that would reload raster tiles unnecessarily.
+- Uses a bounded app-private tile cache with four parallel tile downloader
+  threads, so previously visited map areas can render faster without unbounded
+  storage. TomTom's traffic layer is still optional from Settings.
+- Uses a reduced set of vertices **for displaying the blue route only**. The
+  full original TomTom route remains used for manoeuvres, progress, distance
+  calculations and rerouting.
+- Adds `MapFollowPolicyTest` and `DisplayPolylineTest`.
+
+The fast camera reduces avoidable *application-level* delay. Map tiles may
+still load slowly on poor internet connections or if TomTom tiles are slow.
+This app is not certified for real-road navigation, and a successful build
+does not replace testing on the intended phone. The APK must be signed using
+the same private DriveMate v1.2 certificate as previous installable releases.
+Version: `1.3.2`; version code: `100302`.
+
 ## v1.2.2 — Junction-focused driving view
 
 Changes based on actual DriveMate screenshots from an Android phone:
