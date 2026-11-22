@@ -1,1 +1,57 @@
-# Drivemate-app
+# DriveMate GPS — Android
+
+An independently owned, native Android driving-navigation app.
+
+## What the first Android build implements
+
+- A TomTom raster road map with an optional live traffic-flow layer.
+- Search for real places, postcodes and addresses; choose from matching results.
+- Traffic-aware **car** routing from the phone's live GPS position.
+- On-screen route line, position and heading marker, next road instruction, distance remaining, estimated arrival time and current GPS speed in mph.
+- Spoken turn-by-turn instructions using Android's **on-device TextToSpeech** service, with speech at up to approximately 1 km, 250 m and 65 m before a manoeuvre.
+- Rerouting if a sufficiently accurate GPS fix stays more than 70 metres away from the current route for over 9 seconds; optional route refresh every 5 minutes while driving.
+- Toggle live traffic, speech and map follow. End navigation at any time.
+- API key entered on the device (stored in app-private preferences, not in source control).
+- GitHub Actions build of an installable, Android-debug-signed APK.
+
+## Install the first APK
+
+1. Open **Actions → Build installable Android APK** in this GitHub repository.
+2. Open the latest **successful** run from this branch (or its pull request).
+3. Download **DriveMate-Android-debug-APK** from *Artifacts* and unzip the file.
+4. Install `app-debug.apk` on an Android 8.0+ phone. Android may ask you to allow installation from that source.
+5. Open **DriveMate GPS** and grant **Precise location** permission.
+6. Paste your TomTom Maps API key when prompted. Confirm it allows **Map Display**, **Search**, **Routing** and **Traffic** requests. The app does not include a key.
+7. Wait for GPS, search for an address/postcode, choose the correct result and follow the route with audio enabled. The phone needs a data connection.
+
+For development: use Android Studio with JDK 17, Android SDK platform 35 and Gradle 8.9, or run `gradle :app:assembleDebug`. The Gradle build uses Android Gradle Plugin 8.7.3.
+
+## API endpoints
+
+The app uses TomTom REST APIs, not the separate licensed Android Navigation SDK:
+- `GET /map/1/tile/basic/main/{z}/{x}/{y}.png`
+- `GET /traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png`
+- `GET /search/2/search/{query}.json`
+- `GET /routing/1/calculateRoute/{start}:{end}/json` with `traffic=true` and `instructionsType=text`.
+
+Every call is over HTTPS and requires a valid TomTom key with the relevant API permissions. If map tiles do not show or search fails with HTTP 401/403, check TomTom API product entitlements, key validity, quota and billing. Traffic availability is subject to TomTom coverage.
+
+## Important current limitations
+
+This is a **first-build candidate**, not a tested or certified navigation device. It must undergo real Android phone, GPS and actual-road validation before being relied upon for driving. Always obey actual road signs, restrictions, closures and conditions. Never interact with the screen while driving. Use a safe mount and pull over to enter destinations.
+
+- **Foreground only**: GPS updates stop while the activity is backgrounded, and the app keeps the screen awake while navigating. Background navigation, lock-screen guidance, Android Auto and offline maps are **not included**.
+- Spoken cues are based on TomTom REST guidance and GPS geometry, without the full map-matched positioning, lane guidance or dead reckoning of TomTom Navigation SDK.
+- Route ETA is estimated from route duration and remaining distance, then updated during rerouting. It is not a continuously predictive traffic ETA between refreshes.
+- This build handles one destination at a time; no waypoint trips, alternate-route picker, destination history, automatic speed-limit display, cameras, vehicle dimensions or motorway lane assist.
+- No guarantees of continuous service if the TomTom key's permissions/quotas/terms are insufficient.
+- A debug APK is suitable for personal installation/testing, not for Play Store distribution. Production release signing, accessibility review, key-management hardening, telemetry/privacy review, and compliance with TomTom licensing still need work.
+- API keys entered into a mobile client are extractable by someone with sufficient device access; scope and rate-limit keys accordingly. Keys are not uploaded to GitHub.
+
+## Ownership and license
+
+This repository is the DriveMate Android app code. TomTom data and APIs remain subject to TomTom's terms; osmdroid is an open-source Android map renderer subject to its own license. This repo is independent of the archived offline-routing research in `phuk-prog/Drivemate--app` and data in `phuk-prog/Drivemate-map`.
+
+## Verification
+
+`GeoMathTest` covers route geometry calculations. GitHub Actions runs the unit tests and builds the APK. Successful compilation and tests **do not** prove physical-road safety or successful API calls with a particular key.
