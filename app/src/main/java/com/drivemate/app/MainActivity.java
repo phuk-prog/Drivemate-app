@@ -116,6 +116,12 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     };
     private MapView map;
+    private DriveTileServer driveTiles;
+    private VectorDriveMap vectorMap;
+    private Bundle vectorSavedState;
+    private boolean useLocalMap = true;
+    private boolean vectorTileReady;
+    private boolean autoFallback;
     private View speedBadgeView;
     private boolean keyboardOpen;
     private boolean homeMode = true;
@@ -211,7 +217,15 @@ public final class MainActivity extends Activity implements LocationListener {
         northUp = settings.getBoolean("north_up", false);
         closeZoom = settings.getBoolean("close_zoom", false);
         places = new DestinationStore(this);
-        trafficEnabled = settings.getBoolean("traffic", true);
+        trafficEnabled = settings.getBoolean("traffic", false);
+        useLocalMap = settings.getBoolean("drivemate_vector_map", true);
+        vectorSavedState = savedInstanceState;
+        try {
+            driveTiles = new DriveTileServer(this);
+        } catch (java.io.IOException e) {
+            driveTiles = null;
+            useLocalMap = false;
+        }
         buildScreen();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         speech = new TextToSpeech(this, status -> {
@@ -248,6 +262,36 @@ public final class MainActivity extends Activity implements LocationListener {
         map.getController().setZoom(15.5);
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         frame.addView(map, new FrameLayout.LayoutParams(-1, -1));
+        if (driveTiles != null) {
+            try {
+                vectorMap = new VectorDriveMap(this, vectorSavedState, driveTiles,
+                        apiKey, trafficEnabled, () -> {
+                            vectorTileReady = true;
+                            // If the user picked local mode, bring the vector map forward
+                            // once a real UK map tile has been successfully loaded.
+                            if (useLocalMap) updateMapVisibility();
+                        });
+                frame.addView(vectorMap.view(), new FrameLayout.LayoutParams(-1, -1));
+                updateMapVisibility();
+                // If the PMTiles host cannot supply map details, automatically
+                // fall back to the existing TomTom raster view after 15 seconds.
+                frame.postDelayed(() -> {
+                    if (useLocalMap && !vectorTileReady && !apiKey.isEmpty()
+                            && !isFinishing()) {
+                        autoFallback = true;
+                        updateMapVisibility();
+                        setStatus("DriveMate map unavailable · showing TomTom map instead");
+                    }
+                }, 15000);
+            } catch (Throwable error) {
+                vectorMap = null;
+                useLocalMap = false;
+                if (driveTiles != null) {
+                    driveTiles.close();
+                    driveTiles = null;
+                }
+            }
+        }
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
@@ -538,6 +582,15 @@ public final class MainActivity extends Activity implements LocationListener {
         });
         setHomeVisible(true);
         refreshHomePanel();
+    }
+
+    private void updateMapVisibility() {
+        boolean vector = useLocalMap && !autoFallback && vectorMap != null;
+        if (vectorMap != null) vectorMap.setVisible(vector);
+        if (map != null) {
+            map.setVisibility(!vector && !apiKey.isEmpty()
+                    ? View.VISIBLE : View.INVISIBLE);
+        }
     }
 
     private Button quickTile(String symbol, String label) {
@@ -941,7 +994,8 @@ public final class MainActivity extends Activity implements LocationListener {
         if (apiKey.isEmpty()) return;
         map.setTileSource(tileSource("DriveMate-TomTom-Map",
                 "map/1/tile/basic/main/"));
-        map.setVisibility(View.VISIBLE);
+        if (vectorMap != null) vectorMap.setTomTomKey(apiKey);
+        updateMapVisibility();
         configureTrafficTiles();
         map.invalidate();
     }
@@ -959,6 +1013,7 @@ public final class MainActivity extends Activity implements LocationListener {
             trafficTiles.setLoadingLineColor(Color.TRANSPARENT);
             map.getOverlays().add(0, trafficTiles);
         }
+        if (vectorMap != null) vectorMap.setTraffic(trafficEnabled);
         map.invalidate();
     }
 
