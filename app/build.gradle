@@ -8,8 +8,8 @@ android {
         applicationId 'com.drivemate.android'
         minSdk 26
         targetSdk 34
-        versionCode 100201
-        versionName '1.2.1'
+        versionCode 100202
+        versionName '1.2.2'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
