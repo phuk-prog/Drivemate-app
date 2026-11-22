@@ -1,6 +1,14 @@
 package com.drivemate.app;
 
 import android.Manifest;
+import android.media.AudioAttributes;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import android.text.TextWatcher;
+import android.text.Editable;
+import android.widget.AutoCompleteTextView;
+import android.widget.ArrayAdapter;
+import android.widget.SeekBar;
 import android.app.Activity;
 import android.content.Intent;
 import android.speech.RecognizerIntent;
@@ -104,12 +112,17 @@ public final class MainActivity extends Activity implements LocationListener {
     private Button workTile;
     private FrameLayout.LayoutParams speedBadgePos;
     private FrameLayout.LayoutParams gpsButtonPos;
-    private EditText destinationInput;
+    private AutoCompleteTextView destinationInput;
+    private final List<TomTomApi.Destination> suggestionMatches = new ArrayList<>();
     private Button trafficButton;
     private Button voiceButton;
     private Button followButton;
     private TextView banner;
     private TextView instructionText;
+    private TextView maneuverIcon;
+    private TextView nextTurnText;
+    private TextView journeyTimeText;
+    private TextView gpsAccuracyText;
     private TextView distanceText;
     private TextView etaText;
     private TextView speedText;
@@ -123,6 +136,16 @@ public final class MainActivity extends Activity implements LocationListener {
     private DestinationStore places;
     private boolean metricUnits;
     private String nextInstruction = "";
+    private final VehicleFilter vehicleFilter = new VehicleFilter();
+    private int speechMode = 1; // 0 detailed, 1 normal, 2 minimal
+    private float guidanceVolume = 0.85f;
+    private boolean northUp;
+    private boolean closeZoom;
+    private int previousInstructionIndex;
+    private double stabilizedAlong = -1;
+    private double observedSpeed;
+    private long lastNetworkWarning;
+    private long lastRerouteAttempt;
 
     private LocationManager locationManager;
     private Location currentLocation;
@@ -155,12 +178,19 @@ public final class MainActivity extends Activity implements LocationListener {
         apiKey = settings.getString("tomtom_key", "");
         voiceEnabled = settings.getBoolean("voice", true);
         metricUnits = settings.getBoolean("metric_units", false);
+        speechMode = Math.max(0, Math.min(2, settings.getInt("speech_mode", 1)));
+        guidanceVolume = Math.max(0.1f, Math.min(1f, settings.getFloat("speech_volume", 0.85f)));
+        northUp = settings.getBoolean("north_up", false);
+        closeZoom = settings.getBoolean("close_zoom", false);
         places = new DestinationStore(this);
         trafficEnabled = settings.getBoolean("traffic", true);
         buildScreen();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         speech = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && speech != null) {
+                speech.setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
                 int language = speech.setLanguage(Locale.UK);
                 speechReady = language != TextToSpeech.LANG_MISSING_DATA
                         && language != TextToSpeech.LANG_NOT_SUPPORTED;
@@ -214,7 +244,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.2.2", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.3.0", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -236,7 +266,9 @@ public final class MainActivity extends Activity implements LocationListener {
         TextView searchGlyph = text("⌕", 29, Color.rgb(95, 128, 142), false);
         searchGlyph.setGravity(Gravity.CENTER);
         search.addView(searchGlyph, new LinearLayout.LayoutParams(dp(36), -1));
-        destinationInput = new EditText(this);
+        destinationInput = new AutoCompleteTextView(this);
+        destinationInput.setThreshold(1);
+        destinationInput.setDropDownBackgroundDrawable(rounded(Color.WHITE, 12));
         destinationInput.setSingleLine(true);
         destinationInput.setTextSize(17);
         destinationInput.setPadding(dp(4), 0, 0, 0);
@@ -254,6 +286,28 @@ public final class MainActivity extends Activity implements LocationListener {
             return false;
         });
         search.addView(destinationInput, new LinearLayout.LayoutParams(0, dp(48), 1));
+        destinationInput.setOnFocusChangeListener((v, focused) -> {
+            if (focused) refreshSearchSuggestions();
+        });
+        destinationInput.setOnClickListener(v -> {
+            refreshSearchSuggestions();
+            if (destinationInput.length() > 0) destinationInput.showDropDown();
+        });
+        destinationInput.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
+                refreshSearchSuggestions();
+            }
+            @Override public void afterTextChanged(Editable value) { }
+        });
+        Button clearSearch = chip("×");
+        clearSearch.setContentDescription("Clear destination search");
+        clearSearch.setTextSize(22);
+        clearSearch.setOnClickListener(v -> {
+            destinationInput.setText("");
+            destinationInput.requestFocus();
+        });
+        search.addView(clearSearch, new LinearLayout.LayoutParams(dp(34), dp(42)));
         Button mic = chip("🎙");
         mic.setContentDescription("Search by voice");
         mic.setTextSize(19);
@@ -282,11 +336,24 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.setElevation(dp(10));
         banner = text("Ready to navigate", 12, CYAN, true);
         navigationPanel.addView(banner);
+        LinearLayout turnRow = new LinearLayout(this);
+        turnRow.setOrientation(LinearLayout.HORIZONTAL);
+        turnRow.setGravity(Gravity.CENTER_VERTICAL);
+        maneuverIcon = text("↑", 45, CYAN, true);
+        maneuverIcon.setGravity(Gravity.CENTER);
+        maneuverIcon.setVisibility(View.GONE);
+        turnRow.addView(maneuverIcon, new LinearLayout.LayoutParams(dp(68), dp(75)));
         instructionText = text("Search for a destination, then preview the route.", 19,
                 Color.WHITE, true);
-        LinearLayout.LayoutParams instructionPos = new LinearLayout.LayoutParams(-1, -2);
-        instructionPos.topMargin = dp(7);
-        navigationPanel.addView(instructionText, instructionPos);
+        LinearLayout.LayoutParams instructionPos = new LinearLayout.LayoutParams(0, -2, 1);
+        instructionPos.leftMargin = dp(2);
+        turnRow.addView(instructionText, instructionPos);
+        LinearLayout.LayoutParams turnRowPos = new LinearLayout.LayoutParams(-1, -2);
+        turnRowPos.topMargin = dp(7);
+        navigationPanel.addView(turnRow, turnRowPos);
+        nextTurnText = text("", 13, Color.rgb(191, 225, 236), false);
+        nextTurnText.setVisibility(View.GONE);
+        navigationPanel.addView(nextTurnText);
         routeSummary = text("", 13, Color.rgb(194, 226, 238), false);
         routeSummary.setVisibility(View.GONE);
         navigationPanel.addView(routeSummary);
@@ -294,11 +361,15 @@ public final class MainActivity extends Activity implements LocationListener {
         details.setGravity(Gravity.CENTER_VERTICAL);
         distanceText = text("Distance: —", 13, Color.WHITE, false);
         details.addView(distanceText, new LinearLayout.LayoutParams(0, -2, 1));
+        journeyTimeText = text("Time: —", 13, Color.WHITE, false);
+        details.addView(journeyTimeText, new LinearLayout.LayoutParams(0, -2, 1));
         etaText = text("ETA: —", 13, Color.WHITE, false);
         details.addView(etaText, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams detailsPos = new LinearLayout.LayoutParams(-1, -2);
         detailsPos.topMargin = dp(10);
         navigationPanel.addView(details, detailsPos);
+        gpsAccuracyText = text("", 11, Color.rgb(190, 219, 230), false);
+        navigationPanel.addView(gpsAccuracyText);
         LinearLayout navActions = new LinearLayout(this);
         navActions.setGravity(Gravity.CENTER);
         startButton = chip("▶ Start");
