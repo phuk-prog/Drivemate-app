@@ -958,6 +958,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         places.addFavorite(destination);
         saveButton.setText("★ Saved");
+        refreshHomePanel();
         Toast.makeText(this, "Saved to favourites", Toast.LENGTH_SHORT).show();
     }
 
@@ -974,6 +975,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void showPreview(TomTomApi.Route calculated) {
         active = false;
+        setHomeVisible(false);
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
         instructionText.setText("Review your route before driving.");
@@ -998,8 +1000,9 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        setHomeVisible(false);
         followLocation = true;
-        followButton.setText("GPS ✓");
+        followButton.setText("◎");
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         routeSummary.setVisibility(View.GONE);
         startButton.setVisibility(View.GONE);
@@ -1020,10 +1023,11 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         if (route != null || active) stopNavigation(false);
+        setHomeVisible(false);
         destination = selected;
         places.addRecent(selected);
         followLocation = false;
-        followButton.setText("GPS ○");
+        followButton.setText("◎");
         destinationInput.setText(selected.title);
         if (destinationPin == null) {
             destinationPin = new Marker(map);
@@ -1185,13 +1189,14 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         stopButton.setVisibility(View.GONE);
+        setHomeVisible(true);
         startButton.setVisibility(View.GONE);
         saveButton.setVisibility(View.GONE);
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
         routeSummary.setVisibility(View.GONE);
         followLocation = true;
-        followButton.setText("GPS ✓");
+        followButton.setText("◎");
         distanceText.setText("Distance: —");
         etaText.setText("ETA: —");
         if (arrived) {
