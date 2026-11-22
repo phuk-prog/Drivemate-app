@@ -1762,9 +1762,30 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override @SuppressWarnings("deprecation")
     public void onStatusChanged(String provider, int status, Bundle extras) { }
 
+    @Override public void onStart() {
+        super.onStart();
+        if (vectorMap != null) vectorMap.onStart();
+    }
+
+    @Override public void onStop() {
+        if (vectorMap != null) vectorMap.onStop();
+        super.onStop();
+    }
+
+    @Override public void onLowMemory() {
+        super.onLowMemory();
+        if (vectorMap != null) vectorMap.onLowMemory();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        if (vectorMap != null) vectorMap.onSaveInstanceState(state);
+        super.onSaveInstanceState(state);
+    }
+
     @Override public void onResume() {
         super.onResume();
         if (map != null) map.onResume();
+        if (vectorMap != null) vectorMap.onResume();
         startLocation();
         gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.postDelayed(gpsWatchdog, 5000);
@@ -1774,6 +1795,7 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
         if (map != null) map.onPause();
+        if (vectorMap != null) vectorMap.onPause();
         super.onPause();
     }
 
@@ -1784,6 +1806,8 @@ public final class MainActivity extends Activity implements LocationListener {
             speech.stop();
             speech.shutdown();
         }
+        if (vectorMap != null) vectorMap.onDestroy();
+        if (driveTiles != null) driveTiles.close();
         if (map != null) map.onDetach();
         super.onDestroy();
     }
