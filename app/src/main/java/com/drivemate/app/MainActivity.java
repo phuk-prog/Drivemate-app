@@ -132,7 +132,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private Button followButton;
     private TextView banner;
     private TextView instructionText;
-    private TextView maneuverIcon;
+    private TurnArrowView maneuverIcon;
     private TextView nextTurnText;
     private TextView journeyTimeText;
     private TextView gpsAccuracyText;
@@ -353,10 +353,12 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout turnRow = new LinearLayout(this);
         turnRow.setOrientation(LinearLayout.HORIZONTAL);
         turnRow.setGravity(Gravity.CENTER_VERTICAL);
-        maneuverIcon = text("↑", 45, CYAN, true);
-        maneuverIcon.setGravity(Gravity.CENTER);
+        maneuverIcon = new TurnArrowView(this);
         maneuverIcon.setVisibility(View.GONE);
-        turnRow.addView(maneuverIcon, new LinearLayout.LayoutParams(dp(68), dp(75)));
+        LinearLayout.LayoutParams arrowSize =
+                new LinearLayout.LayoutParams(dp(52), dp(52));
+        arrowSize.rightMargin = dp(9);
+        turnRow.addView(maneuverIcon, arrowSize);
         instructionText = text("Search for a destination, then preview the route.", 19,
                 Color.WHITE, true);
         LinearLayout.LayoutParams instructionPos = new LinearLayout.LayoutParams(0, -2, 1);
@@ -1488,13 +1490,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 step.exitNumber);
         String glyph = GuidanceLogic.symbol(step.maneuver, step.junctionType,
                 step.turnAngleDegrees);
-        if ("↻".equals(glyph) && step.exitNumber > 0) {
-            maneuverIcon.setText("↻ " + step.exitNumber);
-            maneuverIcon.setTextSize(26);
-        } else {
-            maneuverIcon.setText(glyph);
-            maneuverIcon.setTextSize(45);
-        }
+        maneuverIcon.update(glyph, step.exitNumber);
         maneuverIcon.setVisibility(View.VISIBLE);
         instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)
                 + " · " + direction);
