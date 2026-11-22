@@ -265,8 +265,10 @@ public final class DriveTileServer implements AutoCloseable {
         lastPrefetchX = x;
         lastPrefetchY = y;
         prefetcher.execute(() -> {
-            // Prioritise z14 streets immediately near the phone, then fan out
-            // to approximately 20–30 km across depending on latitude.
+            // Prioritise z14 streets immediately near the phone, then fan out.
+            // Stop after repeated network errors rather than hammering a
+            // disconnected phone or rate-limited public release host.
+            int consecutiveFailures = 0;
             for (int z = 14; z >= 11 && !closed; z--) {
                 int radius = z == 14 ? 7 : z == 13 ? 4 : z == 12 ? 2 : 1;
                 int cx = tileX(lon, z), cy = tileY(lat, z);
@@ -277,10 +279,12 @@ public final class DriveTileServer implements AutoCloseable {
                             int xx = cx + dx, yy = cy + dy;
                             if (xx < 0 || yy < 0 || xx >= (1 << z) || yy >= (1 << z))
                                 continue;
-                            try { fetchTile(z, xx, yy); }
-                            catch (IOException ignored) {
-                                // Retain previous tiles; stop when network disappears.
-                                if (!unmetered()) return;
+                            try {
+                                fetchTile(z, xx, yy);
+                                consecutiveFailures = 0;
+                            } catch (IOException ignored) {
+                                consecutiveFailures++;
+                                if (consecutiveFailures >= 4 || !unmetered()) return;
                             }
                         }
                     }
