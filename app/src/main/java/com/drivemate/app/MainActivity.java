@@ -1074,31 +1074,40 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         long now = SystemClock.elapsedRealtime();
-        if (now - lastCameraUpdate < 2400) return;
-        if (map.getHeight() < dp(350)) return;
+        if (now - lastCameraUpdate < 2200 || map.getHeight() < dp(350)) return;
 
-        int headerHeight = dp(145);
-        int bottomPanelHeight = navigationPanel.getHeight() > 0
+        int headerHeight = dp(80);
+        int panelHeight = navigationPanel.getHeight() > 0
                 ? navigationPanel.getHeight() + dp(18) : dp(245);
-        NavigationCamera.Frame camera = NavigationCamera.calculate(
+        NavigationCamera.Frame frame = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), progress.alongMetres,
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
-                map.getHeight(), headerHeight, bottomPanelHeight);
+                map.getHeight(), headerHeight, panelHeight);
 
-        // Avoid rapid zoom flicker when fixes vary slightly in position.
-        if (Math.abs(map.getZoomLevelDouble() - camera.zoom) >= 0.12) {
-            map.getController().setZoom(camera.zoom);
+        double zoomAdjustment = "close".equals(cameraMode) ? 0.6
+                : "wide".equals(cameraMode) ? -0.65 : 0;
+        // Briefly hold a close view after each manoeuvre, while GPS catches up.
+        if (now < junctionHoldUntil) zoomAdjustment += 0.35;
+        double targetZoom = Math.max(14.1, Math.min(19.1,
+                frame.zoom + zoomAdjustment));
+        if (!Double.isFinite(smoothedCameraZoom)) {
+            smoothedCameraZoom = targetZoom;
+        } else {
+            double delta = targetZoom - smoothedCameraZoom;
+            smoothedCameraZoom += Math.max(-0.35, Math.min(0.35, delta));
+        }
+        if (Math.abs(map.getZoomLevelDouble() - smoothedCameraZoom) > 0.08) {
+            map.getController().setZoom(smoothedCameraZoom);
         }
 
-        float wantedOrientation = (float) -camera.roadBearingDegrees;
-        float currentOrientation = map.getMapOrientation();
-        float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
-        // Turns/roundabouts rotate smoothly, never a sudden full spin.
-        float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
-        if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+        float targetOrientation = northUp ? 0 : (float) -frame.roadBearingDegrees;
+        float orientation = map.getMapOrientation();
+        float delta = (targetOrientation - orientation + 540f) % 360f - 180f;
+        float rotated = orientation + Math.max(-19f, Math.min(19f, delta));
+        if (Math.abs(delta) > 2) map.setMapOrientation(rotated);
 
         map.getController().animateTo(
-                new GeoPoint(camera.center.lat, camera.center.lon));
+                new GeoPoint(frame.center.lat, frame.center.lon));
         lastCameraUpdate = now;
     }
 
