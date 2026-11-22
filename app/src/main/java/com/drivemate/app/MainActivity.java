@@ -26,6 +26,7 @@ import java.text.SimpleDateFormat;
 import android.graphics.Path;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
+import java.io.File;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 import android.widget.ImageView;
@@ -180,6 +181,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private long lastRouteRequest;
     private long offRouteSince;
     private long lastCameraUpdate;
+    private GeoMath.Point lastCameraCenter;
     private int requestGeneration;
     private int spokenDistanceIndex = -1;
     private int spokenCloseIndex = -1;
@@ -187,7 +189,19 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Configure osmdroid before constructing MapView. Cache tiles in the
+        // app-private cache, and allow additional parallel tile downloads.
+        // TomTom traffic remains a separate, optional overlay.
         Configuration.getInstance().setUserAgentValue(getPackageName());
+        File mapCache = new File(getCacheDir(), "drivemate-map-tiles");
+        if (!mapCache.exists()) mapCache.mkdirs();
+        Configuration.getInstance().setOsmdroidBasePath(mapCache);
+        Configuration.getInstance().setOsmdroidTileCache(new File(mapCache, "tiles"));
+        Configuration.getInstance().setCacheMapTileCount((short) 36);
+        Configuration.getInstance().setTileDownloadThreads((short) 4);
+        Configuration.getInstance().setTileDownloadMaxQueueSize((short) 60);
+        Configuration.getInstance().setTileFileSystemCacheMaxBytes(180L * 1024L * 1024L);
+        Configuration.getInstance().setTileFileSystemCacheTrimBytes(140L * 1024L * 1024L);
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         apiKey = settings.getString("tomtom_key", "");
         voiceEnabled = settings.getBoolean("voice", true);
@@ -1024,9 +1038,18 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
             setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
         }
-        if (!active && followLocation && SystemClock.elapsedRealtime() - lastCameraUpdate > 1400) {
-            centreOnLocation(false);
-            lastCameraUpdate = SystemClock.elapsedRealtime();
+        if (!active && followLocation) {
+            // Fast idle GPS recenter, but ignore small stationary jitter.
+            long now = SystemClock.elapsedRealtime();
+            GeoMath.Point gps = gpsPoint(fix);
+            double moved = lastCameraCenter == null ? Double.POSITIVE_INFINITY
+                    : GeoMath.distance(lastCameraCenter, gps);
+            if (MapFollowPolicy.shouldMove(lastCameraUpdate, now, moved,
+                    fix.hasSpeed() ? fix.getSpeed() : 0f, 0, 0)) {
+                centreOnLocation(false);
+                lastCameraUpdate = now;
+                lastCameraCenter = gps;
+            }
         }
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
@@ -1034,7 +1057,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
-        map.invalidate();
+        map.postInvalidateOnAnimation();
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -1060,8 +1083,11 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation == null) return;
         if (forceZoom || map.getZoomLevelDouble() < 14.0)
             map.getController().setZoom(16.5);
-        map.getController().animateTo(
+        // One-second animated moves were repeatedly restarting on GPS fixes.
+        // A direct centre update follows the current location immediately.
+        map.getController().setCenter(
                 new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
+        lastCameraCenter = gpsPoint(currentLocation);
     }
 
     /**
