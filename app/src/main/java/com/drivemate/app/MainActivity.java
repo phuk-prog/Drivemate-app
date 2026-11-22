@@ -100,6 +100,17 @@ public final class MainActivity extends Activity implements LocationListener {
                     say("GPS signal lost. Waiting for location.");
                 }
             }
+            if (active && !hasNetwork()) {
+                if (!networkLost) {
+                    networkLost = true;
+                    lastNetworkWarning = SystemClock.elapsedRealtime();
+                    setStatus("Internet unavailable · following cached on-screen route");
+                    say("Internet connection lost. Continue carefully.");
+                }
+            } else if (active && networkLost) {
+                networkLost = false;
+                setStatus("Internet restored · route updates available");
+            }
             gpsHandler.postDelayed(this, 5000);
         }
     };
@@ -147,6 +158,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private double stabilizedAlong = -1;
     private double observedSpeed;
     private long lastNetworkWarning;
+    private boolean networkLost;
     private long lastRerouteAttempt;
 
     private LocationManager locationManager;
@@ -1074,17 +1086,24 @@ public final class MainActivity extends Activity implements LocationListener {
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
                 map.getHeight(), headerHeight, bottomPanelHeight);
 
-        // Avoid rapid zoom flicker when fixes vary slightly in position.
-        if (Math.abs(map.getZoomLevelDouble() - camera.zoom) >= 0.12) {
-            map.getController().setZoom(camera.zoom);
-        }
+        // Speed-adaptive zoom is the default; optional close-junction mode keeps
+        // local streets legible without a jump to maximum magnification.
+        double targetZoom = Math.min(19.2, camera.zoom + (closeZoom ? 0.55 : 0));
+        double currentZoom = map.getZoomLevelDouble();
+        double boundedZoom = currentZoom + Math.max(-0.65,
+                Math.min(0.65, targetZoom - currentZoom));
+        if (Math.abs(boundedZoom - currentZoom) >= 0.10)
+            map.getController().setZoom(boundedZoom);
 
-        float wantedOrientation = (float) -camera.roadBearingDegrees;
-        float currentOrientation = map.getMapOrientation();
-        float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
-        // Turns/roundabouts rotate smoothly, never a sudden full spin.
-        float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
-        if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+        if (northUp) {
+            if (Math.abs(map.getMapOrientation()) > 0.1f) map.setMapOrientation(0);
+        } else {
+            float wantedOrientation = (float) -camera.roadBearingDegrees;
+            float currentOrientation = map.getMapOrientation();
+            float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
+            float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
+            if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+        }
 
         map.getController().animateTo(
                 new GeoPoint(camera.center.lat, camera.center.lon));
@@ -1293,6 +1312,21 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private GeoMath.Point gpsPoint(Location location) {
         return new GeoMath.Point(location.getLatitude(), location.getLongitude());
+    }
+
+    /** Connectivity is only advisory; an existing map/route is preserved. */
+    private boolean hasNetwork() {
+        ConnectivityManager cm = (ConnectivityManager)
+                getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return true;
+        try {
+            Network network = cm.getActiveNetwork();
+            if (network == null) return false;
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (SecurityException ignored) {
+            return true;
+        }
     }
 
     private void planRoute(boolean firstRoute) {
@@ -1505,6 +1539,8 @@ public final class MainActivity extends Activity implements LocationListener {
         destination = null;
         offRouteSince = 0;
         gpsLost = false;
+        networkLost = false;
+        lastRerouteAttempt = 0;
         nextInstruction = "";
         if (routeLine != null) {
             map.getOverlays().remove(routeLine);
