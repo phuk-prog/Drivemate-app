@@ -507,6 +507,175 @@ public final class MainActivity extends Activity implements LocationListener {
         return button;
     }
 
+
+    private void showSettings() {
+        String[] options = {
+                "TomTom API key",
+                voiceEnabled ? "Mute voice guidance" : "Enable voice guidance",
+                trafficEnabled ? "Hide traffic overlay" : "Show traffic overlay",
+                metricUnits ? "Use miles, yards and mph" : "Use kilometres, metres and km/h",
+                "Set or change Home",
+                "Set or change Work",
+                "Clear recent destinations",
+                "About DriveMate"
+        };
+        new AlertDialog.Builder(this).setTitle("DriveMate settings")
+                .setItems(options, (dialog, which) -> {
+                    switch (which) {
+                        case 0:
+                            showKeyDialog();
+                            break;
+                        case 1:
+                            voiceEnabled = !voiceEnabled;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("voice", voiceEnabled).apply();
+                            if (!voiceEnabled && speech != null) speech.stop();
+                            else say("Voice guidance enabled.");
+                            Toast.makeText(this, voiceEnabled ? "Voice enabled" : "Voice muted",
+                                    Toast.LENGTH_SHORT).show();
+                            break;
+                        case 2:
+                            trafficEnabled = !trafficEnabled;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("traffic", trafficEnabled).apply();
+                            configureTrafficTiles();
+                            Toast.makeText(this, trafficEnabled ? "Traffic overlay on" :
+                                    "Traffic overlay off", Toast.LENGTH_SHORT).show();
+                            break;
+                        case 3:
+                            metricUnits = !metricUnits;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("metric_units", metricUnits).apply();
+                            if (currentLocation != null) {
+                                speedText.setText(NavigationUnits.displaySpeed(
+                                        currentLocation.getSpeed(), metricUnits));
+                                if (active) updateGuidance(currentLocation);
+                            }
+                            if (route != null && !active) showPreview(route);
+                            Toast.makeText(this, metricUnits ? "Metric units" :
+                                    "UK miles and yards", Toast.LENGTH_SHORT).show();
+                            break;
+                        case 4:
+                            configureQuickDestination(true);
+                            break;
+                        case 5:
+                            configureQuickDestination(false);
+                            break;
+                        case 6:
+                            new AlertDialog.Builder(this).setTitle("Clear recent destinations?")
+                                    .setMessage("Favourites, Home and Work will be kept.")
+                                    .setPositiveButton("Clear", (d, w) -> {
+                                        places.clearRecent();
+                                        refreshHomePanel();
+                                    }).setNegativeButton("Cancel", null).show();
+                            break;
+                        case 7:
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.2")
+                                    .setMessage("UK navigation using TomTom routing and traffic. " +
+                                            "Keep the app in the foreground while driving. " +
+                                            "Never rely on an untested navigation app as your only guidance.")
+                                    .setPositiveButton("OK", null).show();
+                            break;
+                        default: break;
+                    }
+                }).setNegativeButton("Close", null).show();
+    }
+
+    private void openQuickDestination(boolean home) {
+        TomTomApi.Destination place = home ? places.home() : places.work();
+        if (place == null) {
+            configureQuickDestination(home);
+        } else {
+            selectDestination(place);
+        }
+    }
+
+    private void configureQuickDestination(boolean home) {
+        String label = home ? "Home" : "Work";
+        EditText entry = new EditText(this);
+        entry.setSingleLine(true);
+        entry.setHint("Enter " + label + " address or postcode");
+        entry.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        FrameLayout container = new FrameLayout(this);
+        container.setPadding(dp(18), dp(6), dp(18), dp(4));
+        container.addView(entry, new FrameLayout.LayoutParams(-1, dp(55)));
+        new AlertDialog.Builder(this).setTitle("Set " + label)
+                .setMessage("Choose a destination to save as " + label + ".")
+                .setView(container)
+                .setPositiveButton("Search", (dialog, which) -> {
+                    String query = entry.getText().toString().trim();
+                    if (query.length() < 2) {
+                        showError("Enter a complete address or postcode.");
+                        return;
+                    }
+                    if (apiKey.isEmpty()) {
+                        showKeyDialog();
+                        return;
+                    }
+                    GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
+                    setStatus("Finding " + label + "…");
+                    network.execute(() -> {
+                        try {
+                            List<TomTomApi.Destination> options =
+                                    TomTomApi.search(apiKey, query, near);
+                            runOnUiThread(() -> {
+                                if (isFinishing()) return;
+                                if (options.isEmpty()) {
+                                    showError("No matching addresses. Try a fuller address.");
+                                    return;
+                                }
+                                String[] labels = new String[options.size()];
+                                for (int i = 0; i < options.size(); i++) {
+                                    labels[i] = options.get(i).toString();
+                                }
+                                new AlertDialog.Builder(this)
+                                        .setTitle("Save " + label + " location")
+                                        .setItems(labels, (d, index) -> {
+                                            TomTomApi.Destination chosen = options.get(index);
+                                            if (home) places.setHome(chosen);
+                                            else places.setWork(chosen);
+                                            refreshHomePanel();
+                                            Toast.makeText(this, label + " saved",
+                                                    Toast.LENGTH_SHORT).show();
+                                            selectDestination(chosen);
+                                        })
+                                        .setNegativeButton("Cancel", null).show();
+                            });
+                        } catch (Exception error) {
+                            runOnUiThread(() -> {
+                                if (!isFinishing()) showError(error.getMessage());
+                            });
+                        }
+                    });
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void voiceSearch() {
+        try {
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB");
+            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Say an address or postcode");
+            startActivityForResult(intent, VOICE_SEARCH_REQUEST);
+        } catch (Exception e) {
+            showError("Speech search is not available on this phone.");
+        }
+    }
+
+    @Override @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != VOICE_SEARCH_REQUEST || resultCode != RESULT_OK || data == null)
+            return;
+        ArrayList<String> results = data.getStringArrayListExtra(
+                RecognizerIntent.EXTRA_RESULTS);
+        if (results != null && !results.isEmpty()) {
+            destinationInput.setText(results.get(0));
+            searchDestination();
+        }
+    }
+
     private void showKeyDialog() {
         EditText keyInput = new EditText(this);
         keyInput.setSingleLine(true);
