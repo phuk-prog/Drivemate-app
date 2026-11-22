@@ -52,6 +52,7 @@ public final class VectorDriveMap {
     private GeoMath.Point pendingDest;
     private List<GeoMath.Point> pendingRoute;
     private GeoMath.Point pendingCamera;
+    private GeoMath.Point lastRenderedCamera;
     private double pendingZoom = 14.5, pendingBearing;
     private Runnable firstTileCallback;
 
@@ -201,12 +202,22 @@ public final class VectorDriveMap {
         if (!ready() || center == null) return;
         // The GPU map follows directly; GPS camera updates do not restart
         // a long animation on every position fix.
-        map.moveCamera(CameraUpdateFactory.newCameraPosition(
-                new CameraPosition.Builder()
-                        .target(new LatLng(center.lat, center.lon))
-                        .zoom(zoom)
-                        .bearing((bearing % 360 + 360) % 360)
-                        .build()));
+        org.maplibre.android.camera.CameraUpdate update =
+                CameraUpdateFactory.newCameraPosition(
+                        new CameraPosition.Builder()
+                                .target(new LatLng(center.lat, center.lon))
+                                .zoom(zoom)
+                                .bearing((bearing % 360 + 360) % 360)
+                                .build());
+        // Native GPU linear interpolation is short enough to finish before
+        // the next typical one-second GPS fix. Sudden position jumps, startup
+        // and manual route preview are handled immediately.
+        boolean follow = lastRenderedCamera != null
+                && GeoMath.distance(lastRenderedCamera, center) < 130
+                && Math.abs(map.getCameraPosition().zoom - zoom) < 0.8;
+        if (follow) map.easeCamera(update, 650, false);
+        else map.moveCamera(update);
+        lastRenderedCamera = center;
     }
 
     public void previewRoute(List<GeoMath.Point> path) {
