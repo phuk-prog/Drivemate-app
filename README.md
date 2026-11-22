@@ -1,4 +1,24 @@
-# DriveMate GPS — Android
+# DriveMate — UK Navigation (Android)
+
+**v1.2: one DriveMate app ID and a map-first redesigned home screen.**
+
+The 22 November 2026 reference screenshots informed the navy/cyan design: a large on-map DriveMate header with a turquoise road mark, a prominent destination search bar with an Android speech-search button, map/GPS/speed controls, and Home/Work/Saved Places/Recent Destinations cards. Navigating switches to the existing route-preview and spoken-guidance panel.
+
+**Important:** The package identity now matches original Drivemate (`com.drivemate.android`), but its former signing certificate is unknown. You may need to uninstall the older Drivemate install **once**, and also remove the separately installed `com.drivemate.app` DriveMate GPS package. From this release onward, only APKs signed with the owner's **same private signing key** can update in place; see [Updating and signing](docs/UPDATING-AND-SIGNING.md). Never put the keystore in this public repo.
+
+## v1.2 additions
+
+- Install display name **DriveMate** and branded adaptive launcher icon.
+- Navy map-first interface with a home destination panel modelled on the screenshot.
+- Working Home/Work shortcuts (tap to route, hold or choose Settings to change).
+- Saved places and recent trips in the home panel, with private on-device persistence.
+- Voice destination search where Android provides a recognizer.
+- Settings for TomTom key, traffic overlay, voice, distance units and Home/Work.
+- Route preview, traffic-aware directions and on-screen voice/refresh controls retained.
+- Higher versionCode `100200` and a deliberately **unsigned release** build for securely owner-controlled signing.
+- Updated tests, Android CI and stable signing instructions.
+
+**The debug APK artifact is not a stable update signer.** Use the signed release APK for updates. No real-world device or road validation has been completed.
 
 An independently owned, native Android driving-navigation app.
 
