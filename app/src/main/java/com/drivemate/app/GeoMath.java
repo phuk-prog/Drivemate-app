@@ -38,6 +38,46 @@ public final class GeoMath {
         return 2 * EARTH_METRES * Math.atan2(Math.sqrt(v), Math.sqrt(Math.max(0, 1 - v)));
     }
 
+    /** Total road-polyline distance, in metres. */
+    public static double length(List<Point> path) {
+        if (path == null || path.size() < 2) return 0;
+        double total = 0;
+        for (int i = 1; i < path.size(); i++) {
+            total += distance(path.get(i - 1), path.get(i));
+        }
+        return total;
+    }
+
+    /** Interpolate a point along the road, clamped to its endpoints. */
+    public static Point pointAtDistance(List<Point> path, double targetMetres) {
+        if (path == null || path.isEmpty()) return new Point(0, 0);
+        if (path.size() == 1 || targetMetres <= 0) return path.get(0);
+        double walked = 0;
+        for (int i = 1; i < path.size(); i++) {
+            Point a = path.get(i - 1);
+            Point b = path.get(i);
+            double length = distance(a, b);
+            if (targetMetres <= walked + length && length > 0) {
+                double t = (targetMetres - walked) / length;
+                return new Point(a.lat + t * (b.lat - a.lat),
+                        a.lon + t * (b.lon - a.lon));
+            }
+            walked += length;
+        }
+        return path.get(path.size() - 1);
+    }
+
+    /** Bearing of the road ahead, clockwise from north (degrees). */
+    public static double bearingDegrees(Point a, Point b) {
+        double lat1 = Math.toRadians(a.lat);
+        double lat2 = Math.toRadians(b.lat);
+        double lon = Math.toRadians(b.lon - a.lon);
+        double y = Math.sin(lon) * Math.cos(lat2);
+        double x = Math.cos(lat1) * Math.sin(lat2)
+                - Math.sin(lat1) * Math.cos(lat2) * Math.cos(lon);
+        return (Math.toDegrees(Math.atan2(y, x)) + 360) % 360;
+    }
+
     /** Finds the nearest point on the route, not just the nearest vertex. */
     public static Progress project(List<Point> path, Point gps) {
         if (path == null || path.isEmpty()) {
