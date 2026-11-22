@@ -325,11 +325,11 @@ public final class DriveTileServer implements AutoCloseable {
      */
     private static final class RangeSource implements PmTilesReader.Source {
         final File directory;
-        private long dataStarts;
+        private volatile long dataStarts;
         RangeSource(File directory) { this.directory = directory; }
         @Override public long size() { return SOURCE_SIZE; }
 
-        @Override public synchronized byte[] read(long offset, int length) throws IOException {
+        @Override public byte[] read(long offset, int length) throws IOException {
             if (offset < 0 || length <= 0 || length > 4 * 1024 * 1024
                     || offset > SOURCE_SIZE - length)
                 throw new IOException("PMTiles range outside verified release bounds");
@@ -342,47 +342,61 @@ public final class DriveTileServer implements AutoCloseable {
                 }
                 return cached;
             }
-            HttpURLConnection connection = (HttpURLConnection) new URL(SOURCE).openConnection();
-            connection.setInstanceFollowRedirects(true);
-            connection.setConnectTimeout(10000);
-            connection.setReadTimeout(18000);
-            connection.setRequestMethod("GET");
-            connection.setRequestProperty("Range",
-                    "bytes=" + offset + "-" + (offset + length - 1));
-            connection.setRequestProperty("Accept-Encoding", "identity");
-            connection.setRequestProperty("User-Agent", "DriveMateMap/1.4");
-            try {
-                int response = connection.getResponseCode();
-                if (response != 206)
-                    throw new IOException("DriveMate Map host did not honor byte ranges: HTTP "
-                            + response);
-                String contentRange = connection.getHeaderField("Content-Range");
-                if (contentRange == null || !contentRange.startsWith("bytes "
-                        + offset + "-" + (offset + length - 1) + "/"))
-                    throw new IOException("DriveMate Map range response did not match request");
-                ByteArrayOutputStream buffer = new ByteArrayOutputStream(length);
-                try (InputStream in = connection.getInputStream()) {
-                    byte[] bytes = new byte[8192];
-                    int count;
-                    while ((count = in.read(bytes)) != -1) {
-                        if (buffer.size() + count > length)
-                            throw new IOException("Server returned too much map data");
-                        buffer.write(bytes, 0, count);
+            URL current = new URL(SOURCE);
+            for (int redirects = 0; redirects < 6; redirects++) {
+                HttpURLConnection connection = (HttpURLConnection) current.openConnection();
+                connection.setInstanceFollowRedirects(false);
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(18000);
+                connection.setRequestMethod("GET");
+                // GitHub Release redirects can lose Range headers when Java
+                // follows them automatically. Reapply Range on every hop.
+                connection.setRequestProperty("Range",
+                        "bytes=" + offset + "-" + (offset + length - 1));
+                connection.setRequestProperty("Accept-Encoding", "identity");
+                connection.setRequestProperty("User-Agent", "DriveMateMap/1.4");
+                try {
+                    int response = connection.getResponseCode();
+                    if (response == 301 || response == 302 || response == 303
+                            || response == 307 || response == 308) {
+                        String location = connection.getHeaderField("Location");
+                        if (location == null) throw new IOException("Map release redirect missing Location");
+                        URL next = new URL(current, location);
+                        if (!"https".equalsIgnoreCase(next.getProtocol()))
+                            throw new IOException("Map release redirect is not HTTPS");
+                        current = next;
+                        continue;
                     }
-                }
-                if (buffer.size() != length)
-                    throw new IOException("Server returned an incomplete map range");
-                byte[] bytes = buffer.toByteArray();
-                if (offset == 0 && bytes.length >= 127) {
-                    dataStarts = java.nio.ByteBuffer.wrap(bytes)
-                            .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(56);
-                }
-                // Do not double-cache every road tile's compressed bytes:
-                // the decompressed tile cache already has an LRU size cap.
-                if (offset == 0 || (dataStarts > 0 && offset < dataStarts))
-                    storeAtomically(local, bytes);
-                return bytes;
-            } finally { connection.disconnect(); }
+                    if (response != 206)
+                        throw new IOException("DriveMate Map host did not honor byte ranges: HTTP "
+                                + response);
+                    String contentRange = connection.getHeaderField("Content-Range");
+                    if (contentRange == null || !contentRange.startsWith("bytes "
+                            + offset + "-" + (offset + length - 1) + "/"))
+                        throw new IOException("DriveMate Map range response did not match request");
+                    ByteArrayOutputStream buffer = new ByteArrayOutputStream(length);
+                    try (InputStream in = connection.getInputStream()) {
+                        byte[] bytes = new byte[8192];
+                        int count;
+                        while ((count = in.read(bytes)) != -1) {
+                            if (buffer.size() + count > length)
+                                throw new IOException("Server returned too much map data");
+                            buffer.write(bytes, 0, count);
+                        }
+                    }
+                    if (buffer.size() != length)
+                        throw new IOException("Server returned an incomplete map range");
+                    byte[] bytes = buffer.toByteArray();
+                    if (offset == 0 && bytes.length >= 127) {
+                        dataStarts = java.nio.ByteBuffer.wrap(bytes)
+                                .order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong(56);
+                    }
+                    if (offset == 0 || (dataStarts > 0 && offset < dataStarts))
+                        storeAtomically(local, bytes);
+                    return bytes;
+                } finally { connection.disconnect(); }
+            }
+            throw new IOException("Map release redirected too many times");
         }
     }
 }
