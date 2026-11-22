@@ -887,6 +887,47 @@ public final class MainActivity extends Activity implements LocationListener {
                 new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
     }
 
+    /**
+     * During active guidance keep the vehicle in the lower part of the visible
+     * map, with the next manoeuvre and exit road above it. The camera uses
+     * road geometry rather than a noisy stopped-vehicle compass bearing.
+     */
+    private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
+                                     double nextJunctionOffsetMetres) {
+        if (!active || !followLocation || route == null || gpsLost
+                || (fix.hasAccuracy() && fix.getAccuracy() > 55)
+                || progress.offRouteMetres > 110) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastCameraUpdate < 2400) return;
+        if (map.getHeight() < dp(350)) return;
+
+        int headerHeight = dp(145);
+        int bottomPanelHeight = navigationPanel.getHeight() > 0
+                ? navigationPanel.getHeight() + dp(18) : dp(245);
+        NavigationCamera.Frame camera = NavigationCamera.calculate(
+                route.points, gpsPoint(fix), progress.alongMetres,
+                nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
+                map.getHeight(), headerHeight, bottomPanelHeight);
+
+        // Avoid rapid zoom flicker when fixes vary slightly in position.
+        if (Math.abs(map.getZoomLevelDouble() - camera.zoom) >= 0.12) {
+            map.getController().setZoom(camera.zoom);
+        }
+
+        float wantedOrientation = (float) -camera.roadBearingDegrees;
+        float currentOrientation = map.getMapOrientation();
+        float delta = (wantedOrientation - currentOrientation + 540f) % 360f - 180f;
+        // Turns/roundabouts rotate smoothly, never a sudden full spin.
+        float adjusted = currentOrientation + Math.max(-24f, Math.min(24f, delta));
+        if (Math.abs(delta) >= 3f) map.setMapOrientation(adjusted);
+
+        map.getController().animateTo(
+                new GeoPoint(camera.center.lat, camera.center.lon));
+        lastCameraUpdate = now;
+    }
+
     private void searchDestination() {
         if (apiKey.isEmpty()) {
             showKeyDialog();
