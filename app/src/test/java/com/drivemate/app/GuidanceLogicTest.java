@@ -9,7 +9,7 @@ public class GuidanceLogicTest {
         assertEquals("↰", GuidanceLogic.symbol("TURN_LEFT", "REGULAR", -70));
         assertEquals("↱", GuidanceLogic.symbol("TURN_RIGHT", "REGULAR", 70));
         assertEquals("↑", GuidanceLogic.symbol("STRAIGHT", "REGULAR", 0));
-        assertTrue(GuidanceLogic.actionLine("Take the exit", "ROUNDABOUT", 2)
+        assertTrue(GuidanceLogic.actionLine("At roundabout", "ROUNDABOUT", 2)
                 .contains("2nd exit"));
     }
     @Test public void avoidsBacktrackingThroughRoundabout() {
