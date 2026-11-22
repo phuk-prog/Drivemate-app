@@ -1,12 +1,12 @@
-# DriveMate 1.3.0 — Navigation polish batch
+# DriveMate 1.3.1 — Navigation polish batch
 
 This is the requested 12-item upgrade applied as one Android release to the existing
 `com.drivemate.android` application. Existing private release-signing certificate
-must be reused for in-place updates. Version code: **100300**.
+must be reused for in-place updates. Version code: **100301**.
 
 ## Implemented changes
 
-1. **Large manoeuvre symbols.** The guidance panel displays a prominent
+1. **Moderately sized manoeuvre arrows.** The guidance panel displays a compact 52dp
    roundabout/turn/straight/arrival icon using TomTom's structured `maneuver`,
    `junctionType` and turn-angle fields, with roundabout exit number where provided.
 2. **Improved junction camera.** Junction zoom is speed-adaptive with bounded

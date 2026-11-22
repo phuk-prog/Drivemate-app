@@ -1,11 +1,11 @@
 # DriveMate — UK Navigation (Android)
 
-**v1.3: updated turn-by-turn guidance and junction driving view.**
+**v1.3.1: all twelve navigation improvements, with a compact 52dp turn pictogram.**
 [Full v1.3 release notes](docs/DRIVEMATE-1.3-RELEASE-NOTES.md)
 cover the 12 approved improvements: turn symbols, next junction, smoother
 GPS vehicle marker, closer camera, roundabout exits, improved ETA and
 rerouting, configurable voice, UK search, connectivity warnings, dashboard
-and saved preferences. Version code: `100300`.
+and saved preferences. Version code: `100301`.
 
 **v1.2: one DriveMate app ID and a map-first redesigned home screen.**
 
