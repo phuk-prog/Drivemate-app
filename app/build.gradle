@@ -8,8 +8,8 @@ android {
         applicationId 'com.drivemate.android'
         minSdk 26
         targetSdk 34
-        versionCode 100500
-        versionName '1.5.0'
+        versionCode 100501
+        versionName '1.5.1'
     }
     // PMTiles archives already compress their own tile/index data. Keep the
     // bundled overview uncompressed in APK so MapLibre can seek by byte range.
