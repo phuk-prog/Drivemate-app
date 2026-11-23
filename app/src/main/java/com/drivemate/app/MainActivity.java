@@ -2200,6 +2200,172 @@ public final class MainActivity extends Activity implements LocationListener {
         planRoute(true);
     }
 
+    /** Only a provider-listed POI main entry point is marked as an entrance. */
+    private void displayEntranceMarker(TomTomApi.Destination selected) {
+        if (entrancePin != null) {
+            map.getOverlays().remove(entrancePin);
+            entrancePin = null;
+        }
+        GeoMath.Point entry = selected == null ? null : selected.mainEntrance;
+        if (vectorMap != null) vectorMap.setEntrance(entry);
+        if (entry != null) {
+            entrancePin = new Marker(map);
+            entrancePin.setPosition(new GeoPoint(entry.lat, entry.lon));
+            entrancePin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
+            entrancePin.setTitle("Map-listed main entrance · verify road access");
+            map.getOverlays().add(entrancePin);
+        }
+        map.invalidate();
+    }
+
+    private void showArrivalApproach(ArrivalPolicy.State state) {
+        if (arrivalHintText == null || !(arrivalHintText.getTag() instanceof View))
+            return;
+        View panel = (View) arrivalHintText.getTag();
+        if (state == ArrivalPolicy.State.EN_ROUTE || destination == null) {
+            panel.setVisibility(View.GONE);
+            return;
+        }
+        String label = state == ArrivalPolicy.State.NEARBY
+                ? "Destination nearby · slow down and check access"
+                : "Destination ahead · follow final road";
+        if (destination.mainEntrance != null)
+            label += "\nMap-listed entrance marked · verify access";
+        else
+            label += "\nEntrance and correct road side not verified";
+        arrivalHintText.setText(label);
+        panel.setVisibility(View.VISIBLE);
+        // The parking lookup is offered only when the driver is stationary.
+        boolean parked = currentLocation != null && currentLocation.hasSpeed()
+                && currentLocation.getSpeed() <= 1.2f
+                && System.currentTimeMillis() - currentLocation.getTime() <= 7000;
+        findParkingButton.setEnabled(parked);
+        findParkingButton.setAlpha(parked ? 1f : 0.45f);
+    }
+
+    /** Parking information is requested only on demand and never guessed. */
+    private void findNearbyParking() {
+        if (destination == null || apiKey.isEmpty()) {
+            showError("Choose a destination and configure TomTom before finding parking.");
+            return;
+        }
+        if (currentLocation == null || !currentLocation.hasSpeed()
+                || currentLocation.getSpeed() > 1.2f
+                || System.currentTimeMillis() - currentLocation.getTime() > 7000) {
+            showError("Stop safely before finding or selecting parking.");
+            return;
+        }
+        final TomTomApi.Destination searchedFor = destination;
+        final String key = apiKey;
+        setStatus("Looking for map-listed parking near destination…");
+        network.execute(() -> {
+            try {
+                List<TomTomApi.Destination> results =
+                        TomTomApi.parkingNearby(key, searchedFor.point);
+                results.removeIf(item -> GeoMath.distance(
+                        item.point, searchedFor.point) > 1400);
+                results.sort((a, b) -> Double.compare(
+                        GeoMath.distance(a.point, searchedFor.point),
+                        GeoMath.distance(b.point, searchedFor.point)));
+                runOnUiThread(() -> {
+                    if (isFinishing() || destination == null
+                            || GeoMath.distance(destination.point, searchedFor.point) > 2)
+                        return;
+                    if (results.isEmpty()) {
+                        new AlertDialog.Builder(this).setTitle("Nearby parking")
+                                .setMessage("TomTom returned no verified nearby parking POIs. "
+                                        + "Parking availability and access are not guaranteed.")
+                                .setPositiveButton("OK", null).show();
+                        return;
+                    }
+                    String[] names = new String[results.size()];
+                    for (int i = 0; i < results.size(); i++) {
+                        TomTomApi.Destination item = results.get(i);
+                        names[i] = item.title + " · " + NavigationUnits.displayDistance(
+                                GeoMath.distance(item.point, searchedFor.point), metricUnits);
+                    }
+                    new AlertDialog.Builder(this)
+                            .setTitle("Map-listed parking · availability unknown")
+                            .setItems(names, (dialog, which) -> {
+                                TomTomApi.Destination chosen = results.get(which);
+                                new AlertDialog.Builder(this)
+                                        .setTitle("Preview route to " + chosen.title + "?")
+                                        .setMessage("This will replace your current destination. "
+                                                + "Parking capacity, pricing and vehicle access "
+                                                + "have not been verified. Follow signs.")
+                                        .setPositiveButton("Preview route", (d, w) ->
+                                                selectDestination(chosen))
+                                        .setNegativeButton("Keep destination", null).show();
+                            })
+                            .setNegativeButton("Cancel", null).show();
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (!isFinishing() && destination != null
+                            && GeoMath.distance(destination.point, searchedFor.point) <= 2)
+                        showError("Nearby parking unavailable: " + error.getMessage());
+                });
+            }
+        });
+    }
+
+    private void offerSaveParkedCar() {
+        new AlertDialog.Builder(this).setTitle("Save where you parked?")
+                .setMessage("Store this GPS position on this phone only. "
+                        + "You can view or clear it from the DriveMate home screen.")
+                .setPositiveButton("Save location", (dialog, which) -> saveParkedCarNow())
+                .setNegativeButton("Not now", null).show();
+    }
+
+    private void saveParkedCarNow() {
+        if (currentLocation == null || !ArrivalPolicy.canSaveParking(
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
+                currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
+                currentLocation.getTime(), System.currentTimeMillis())) {
+            showError("Parking location not saved · wait for fresh precise stationary GPS.");
+            return;
+        }
+        places.saveParkedCar(gpsPoint(currentLocation), System.currentTimeMillis());
+        refreshHomePanel();
+        Toast.makeText(this, "Parked car saved locally", Toast.LENGTH_LONG).show();
+    }
+
+    private void showParkedCar() {
+        GeoMath.Point saved = places.parkedCar();
+        if (saved == null) {
+            Toast.makeText(this, "No saved parking position", Toast.LENGTH_SHORT).show();
+            refreshHomePanel();
+            return;
+        }
+        if (parkedCarPin != null) map.getOverlays().remove(parkedCarPin);
+        parkedCarPin = new Marker(map);
+        parkedCarPin.setPosition(new GeoPoint(saved.lat, saved.lon));
+        parkedCarPin.setTitle("Saved parked-car position · GPS estimate");
+        map.getOverlays().add(parkedCarPin);
+        if (vectorMap != null) {
+            vectorMap.setParkedCar(saved);
+            vectorMap.setCamera(saved, 17.0, 0);
+        }
+        map.getController().setZoom(17.0);
+        map.getController().setCenter(new GeoPoint(saved.lat, saved.lon));
+        map.invalidate();
+        new AlertDialog.Builder(this).setTitle("Parked car · saved on this phone")
+                .setMessage("Showing the GPS position you explicitly saved. "
+                        + "It may not be an exact parking bay. "
+                        + "DriveMate does not provide a walking route to your car.")
+                .setPositiveButton("Done", null)
+                .setNeutralButton("Clear saved position", (dialog, which) -> {
+                    places.clearParkedCar();
+                    if (parkedCarPin != null) {
+                        map.getOverlays().remove(parkedCarPin);
+                        parkedCarPin = null;
+                    }
+                    if (vectorMap != null) vectorMap.setParkedCar(null);
+                    refreshHomePanel();
+                    map.invalidate();
+                }).show();
+    }
+
     private GeoMath.Point gpsPoint(Location location) {
         return new GeoMath.Point(location.getLatitude(), location.getLongitude());
     }
