@@ -90,4 +90,13 @@ public final class NavigationCameraTest {
         assertTrue(frame.roadBearingDegrees < 8 ||
                 frame.roadBearingDegrees > 352);
     }
+
+    @Test public void urbanSpeedZoomStillChangesBetween300And100Yards() {
+        GeoMath.Point driver = north.get(0);
+        NavigationCamera.Frame threeHundred = NavigationCamera.calculate(
+                north, driver, 0, 275, 13, 1400, 350, 120);
+        NavigationCamera.Frame oneHundred = NavigationCamera.calculate(
+                north, driver, 175, 275, 13, 1400, 350, 120);
+        assertTrue(oneHundred.zoom > threeHundred.zoom + 0.1);
+    }
 }
