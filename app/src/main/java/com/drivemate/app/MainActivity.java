@@ -475,7 +475,8 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v" + installedVersionName(), 10, Color.rgb(180, 222, 235), true);
+        // Version lives in Settings → About; the home header stays clean.
+        TextView subtitle = text("UK NAV", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -545,14 +546,7 @@ public final class MainActivity extends Activity implements LocationListener {
         mic.setTextSize(19);
         mic.setOnClickListener(v -> voiceSearch());
         search.addView(mic, new LinearLayout.LayoutParams(dp(44), dp(43)));
-        Button find = chip("Find");
-        find.setTextColor(DARK);
-        find.setTextSize(14);
-        find.setBackgroundTintList(android.content.res.ColorStateList.valueOf(CYAN));
-        find.setOnClickListener(v -> searchDestination());
-        LinearLayout.LayoutParams findParams = new LinearLayout.LayoutParams(dp(62), dp(44));
-        findParams.leftMargin = dp(5);
-        search.addView(find, findParams);
+        // No separate Find button: the keyboard's search key runs the same search.
         LinearLayout.LayoutParams searchPos = new LinearLayout.LayoutParams(-1, dp(60));
         searchPos.setMargins(dp(10), dp(11), dp(10), dp(7));
         top.addView(search, searchPos);
@@ -657,40 +651,35 @@ public final class MainActivity extends Activity implements LocationListener {
 
         homePanel = new LinearLayout(this);
         homePanel.setOrientation(LinearLayout.VERTICAL);
-        homePanel.setPadding(dp(13), dp(15), dp(13), dp(10));
+        homePanel.setPadding(dp(13), dp(12), dp(13), dp(10));
         homePanel.setBackground(rounded(DARK, 23));
         homePanel.setElevation(dp(9));
-        LinearLayout homeHeading = new LinearLayout(this);
         TextView heading = text("YOUR DESTINATIONS", 12, Color.rgb(189, 227, 239), true);
         heading.setLetterSpacing(.08f);
-        homeHeading.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView ready = text("READY FOR THE ROAD", 10, CYAN, true);
-        homeHeading.addView(ready);
-        homePanel.addView(homeHeading);
+        homePanel.addView(heading);
 
         LinearLayout tiles = new LinearLayout(this);
-        homeTile = quickTile("⌂", "Home");
-        workTile = quickTile("▣", "Work");
-        Button savedPlaces = quickTile("★", "Saved Places");
+        homeTile = quickTile(R.drawable.ic_quick_home, "Home", "Not set");
+        workTile = quickTile(R.drawable.ic_quick_work, "Work", "Not set");
+        Button savedPlaces = quickTile(R.drawable.ic_quick_star, "Saved", "Places");
         homeTile.setOnClickListener(v -> openQuickDestination(true));
         homeTile.setOnLongClickListener(v -> { configureQuickDestination(true); return true; });
         workTile.setOnClickListener(v -> openQuickDestination(false));
         workTile.setOnLongClickListener(v -> { configureQuickDestination(false); return true; });
         savedPlaces.setOnClickListener(v -> showSavedDestinations());
-        tiles.addView(homeTile, new LinearLayout.LayoutParams(0, dp(74), 1));
-        LinearLayout.LayoutParams workPos = new LinearLayout.LayoutParams(0, dp(74), 1);
+        tiles.addView(homeTile, new LinearLayout.LayoutParams(0, dp(72), 1));
+        LinearLayout.LayoutParams workPos = new LinearLayout.LayoutParams(0, dp(72), 1);
         workPos.setMargins(dp(6), 0, dp(6), 0);
         tiles.addView(workTile, workPos);
-        tiles.addView(savedPlaces, new LinearLayout.LayoutParams(0, dp(74), 1));
+        tiles.addView(savedPlaces, new LinearLayout.LayoutParams(0, dp(72), 1));
         LinearLayout.LayoutParams tilesPos = new LinearLayout.LayoutParams(-1, -2);
-        tilesPos.topMargin = dp(10);
+        tilesPos.topMargin = dp(8);
         homePanel.addView(tiles, tilesPos);
 
-        TextView recentTitle = text("RECENT DESTINATIONS", 12,
-                Color.rgb(189, 227, 239), true);
+        TextView recentTitle = text("RECENT", 12, Color.rgb(189, 227, 239), true);
         recentTitle.setLetterSpacing(.07f);
         LinearLayout.LayoutParams recentHeaderPos = new LinearLayout.LayoutParams(-1, -2);
-        recentHeaderPos.topMargin = dp(12);
+        recentHeaderPos.topMargin = dp(10);
         homePanel.addView(recentTitle, recentHeaderPos);
 
         ScrollView recentScroll = new ScrollView(this);
@@ -699,12 +688,22 @@ public final class MainActivity extends Activity implements LocationListener {
         recentList = new LinearLayout(this);
         recentList.setOrientation(LinearLayout.VERTICAL);
         recentScroll.addView(recentList);
-        LinearLayout.LayoutParams recentPos = new LinearLayout.LayoutParams(-1, dp(147));
-        recentPos.topMargin = dp(3);
+        // Three visible recents; the list scrolls for the rest (up to 8 stored).
+        LinearLayout.LayoutParams recentPos = new LinearLayout.LayoutParams(-1, dp(138));
+        recentPos.topMargin = dp(2);
         homePanel.addView(recentScroll, recentPos);
         FrameLayout.LayoutParams homePos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         homePos.setMargins(dp(4), 0, dp(4), 0);
         frame.addView(homePanel, homePos);
+        // Keep the recentre button just above the sheet, whatever its height.
+        homePanel.addOnLayoutChangeListener((view, l2, t2, r2, b2, ol2, ot2, or2, ob2) -> {
+            if (!homeMode || gpsButtonPos == null || followButton == null) return;
+            int wanted = (b2 - t2) + dp(12);
+            if (gpsButtonPos.bottomMargin != wanted) {
+                gpsButtonPos.bottomMargin = wanted;
+                followButton.requestLayout();
+            }
+        });
 
         LinearLayout speedBadge = new LinearLayout(this);
         speedBadge.setOrientation(LinearLayout.VERTICAL);
@@ -880,20 +879,32 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    private Button quickTile(String symbol, String label) {
+    private Button quickTile(int iconRes, String label, String detail) {
         Button button = new Button(this);
         button.setAllCaps(false);
-        button.setText(symbol + "\n" + label);
         button.setTextSize(14);
         button.setTextColor(Color.WHITE);
-        button.setPadding(0, 0, 0, 0);
+        button.setPadding(dp(4), dp(6), dp(4), dp(6));
         button.setMinWidth(0);
         button.setMinimumWidth(0);
         button.setMinHeight(0);
+        button.setCompoundDrawablePadding(dp(3));
+        button.setCompoundDrawablesWithIntrinsicBounds(null, getDrawable(iconRes), null, null);
+        button.setMaxLines(2);
+        button.setEllipsize(android.text.TextUtils.TruncateAt.END);
         GradientDrawable background = rounded(Color.rgb(25, 69, 85), 12);
         background.setStroke(dp(1), CYAN);
         button.setBackground(background);
+        setTileText(button, label, detail);
         return button;
+    }
+
+    /** Bold label on the first line, smaller destination name (or hint) below. */
+    private void setTileText(Button tile, String label, String detail) {
+        SpannableString content = new SpannableString(label + "\n" + detail);
+        content.setSpan(new android.text.style.RelativeSizeSpan(0.8f),
+                label.length() + 1, content.length(), 0);
+        tile.setText(content);
     }
 
     private void setHomeVisible(boolean show) {
@@ -902,7 +913,8 @@ public final class MainActivity extends Activity implements LocationListener {
         homePanel.setVisibility(show && !keyboardOpen ? View.VISIBLE : View.GONE);
         navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
         if (speedBadgeView != null) {
-            speedBadgeView.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
+            // Home shows no speed readout; it returns when navigating.
+            speedBadgeView.setVisibility(keyboardOpen || show ? View.GONE : View.VISIBLE);
         }
         if (followButton != null) {
             followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
@@ -923,6 +935,8 @@ public final class MainActivity extends Activity implements LocationListener {
         TomTomApi.Destination work = places.work();
         homeTile.setContentDescription(home == null ? "Set Home" : "Navigate Home to " + home);
         workTile.setContentDescription(work == null ? "Set Work" : "Navigate Work to " + work);
+        setTileText(homeTile, "Home", home == null ? "Not set" : home.title);
+        setTileText(workTile, "Work", work == null ? "Not set" : work.title);
         recentList.removeAllViews();
         List<TomTomApi.Destination> recents = places.recent();
         if (recents.isEmpty()) {
@@ -932,13 +946,24 @@ public final class MainActivity extends Activity implements LocationListener {
             recentList.addView(empty);
         } else {
             for (TomTomApi.Destination item : recents) {
-                TextView row = text("↺    " + item.title, 14, Color.WHITE, false);
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
                 row.setGravity(Gravity.CENTER_VERTICAL);
-                row.setSingleLine(true);
-                row.setEllipsize(android.text.TextUtils.TruncateAt.END);
-                row.setPadding(dp(7), dp(8), dp(6), dp(8));
+                row.setPadding(dp(7), 0, dp(6), 0);
+                TextView name = text(item.title, 15, Color.WHITE, false);
+                name.setSingleLine(true);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+                if (currentLocation != null && item.point != null) {
+                    // Straight-line distance from the live GPS fix, shown on the right.
+                    TextView distance = text(NavigationUnits.displayDistance(
+                            GeoMath.distance(gpsPoint(currentLocation), item.point),
+                            metricUnits), 13, Color.rgb(143, 176, 192), false);
+                    distance.setPadding(dp(8), 0, 0, 0);
+                    row.addView(distance);
+                }
                 row.setOnClickListener(v -> selectDestination(item));
-                recentList.addView(row, new LinearLayout.LayoutParams(-1, dp(44)));
+                recentList.addView(row, new LinearLayout.LayoutParams(-1, dp(46)));
                 View line = new View(this);
                 line.setBackgroundColor(Color.rgb(40, 86, 104));
                 recentList.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
