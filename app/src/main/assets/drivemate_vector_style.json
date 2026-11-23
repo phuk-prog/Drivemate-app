@@ -11,34 +11,322 @@
     },
     "uk": {
       "type": "vector",
-      "tiles": ["__TILE_URL__"],
+      "tiles": [
+        "__TILE_URL__"
+      ],
       "minzoom": 0,
       "maxzoom": 14,
-      "bounds": [-14.858498,49.4191999,2.641786,61.13564],
+      "bounds": [
+        -14.858498,
+        49.4191999,
+        2.641786,
+        61.13564
+      ],
       "attribution": "© OpenStreetMap contributors (ODbL 1.0)"
     },
     "tomtom-traffic": {
       "type": "raster",
-      "tiles": ["https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"],
+      "tiles": [
+        "https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"
+      ],
       "tileSize": 256,
       "maxzoom": 19
     }
   },
   "layers": [
-    {"id":"background","type":"background","paint":{"background-color":"#F3F6F3"}},
-    {"id":"world-earth","type":"fill","source":"world","source-layer":"earth","maxzoom":7,"paint":{"fill-color":"#E7EFDE"}},
-    {"id":"world-water","type":"fill","source":"world","source-layer":"water","maxzoom":7,"paint":{"fill-color":"#B5DCE9"}},
-    {"id":"world-roads","type":"line","source":"world","source-layer":"roads","minzoom":3,"maxzoom":7,"paint":{"line-color":"#FFFFFF","line-width":1.1}},
-    {"id":"uk-land","type":"fill","source":"uk","source-layer":"land","paint":{"fill-color":"#E8EFE2"}},
-    {"id":"uk-ocean","type":"fill","source":"uk","source-layer":"ocean","paint":{"fill-color":"#B9DCEB"}},
-    {"id":"uk-water","type":"fill","source":"uk","source-layer":"water_polygons","paint":{"fill-color":"#A8D5E7"}},
-    {"id":"uk-park","type":"fill","source":"uk","source-layer":"sites","paint":{"fill-color":"#E1ECD6","fill-opacity":0.40}},
-    {"id":"uk-buildings","type":"fill","source":"uk","source-layer":"buildings","minzoom":13,"paint":{"fill-color":"#D7DED6","fill-outline-color":"#C6D0C8"}},
-    {"id":"uk-road-casing","type":"line","source":"uk","source-layer":"streets","minzoom":7,"layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#CCD4D2","line-width":["interpolate",["linear"],["zoom"],7,1.2,12,3.1,14,6.5,18,17]}},
-    {"id":"uk-roads","type":"line","source":"uk","source-layer":"streets","minzoom":7,"layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#FFFFFF","line-width":["interpolate",["linear"],["zoom"],7,0.9,12,2.2,14,5.1,18,14]}},
-    {"id":"uk-trunk","type":"line","source":"uk","source-layer":"streets","minzoom":6,"filter":["any",["==",["get","kind"],"motorway"],["==",["get","kind"],"trunk"],["==",["get","kind"],"primary"]],"layout":{"line-cap":"round","line-join":"round"},"paint":{"line-color":"#F4C98B","line-width":["interpolate",["linear"],["zoom"],7,1.5,12,3.2,14,6,18,16]}},
-    {"id":"uk-street-labels","type":"symbol","source":"uk","source-layer":"street_labels","minzoom":12,"layout":{"text-field":["coalesce",["get","name"],""],"text-font":["Noto Sans Regular"],"text-size":["interpolate",["linear"],["zoom"],12,10,16,14],"symbol-placement":"line","text-rotation-alignment":"map"},"paint":{"text-color":"#536372","text-halo-color":"#FFFFFF","text-halo-width":1.5}},
-    {"id":"uk-place-labels","type":"symbol","source":"uk","source-layer":"place_labels","minzoom":6,"layout":{"text-field":["coalesce",["get","name"],""],"text-font":["Noto Sans Regular"],"text-size":["interpolate",["linear"],["zoom"],6,11,14,14]},"paint":{"text-color":"#394E60","text-halo-color":"#FFFFFF","text-halo-width":1.7}},
-    {"id":"tomtom-traffic-flow","type":"raster","source":"tomtom-traffic","layout":{"visibility":"none"},"paint":{"raster-opacity":0.74}}
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#F3F6F3"
+      }
+    },
+    {
+      "id": "world-earth",
+      "type": "fill",
+      "source": "world",
+      "source-layer": "earth",
+      "paint": {
+        "fill-color": "#E7EFDE"
+      }
+    },
+    {
+      "id": "world-water",
+      "type": "fill",
+      "source": "world",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#B5DCE9"
+      }
+    },
+    {
+      "id": "world-roads",
+      "type": "line",
+      "source": "world",
+      "source-layer": "roads",
+      "minzoom": 3,
+      "maxzoom": 7,
+      "paint": {
+        "line-color": "#FFFFFF",
+        "line-width": 1.1
+      }
+    },
+    {
+      "id": "uk-land",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "land",
+      "paint": {
+        "fill-color": "#E8EFE2"
+      }
+    },
+    {
+      "id": "uk-ocean",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "ocean",
+      "paint": {
+        "fill-color": "#B9DCEB"
+      }
+    },
+    {
+      "id": "uk-water",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "water_polygons",
+      "paint": {
+        "fill-color": "#A8D5E7"
+      }
+    },
+    {
+      "id": "uk-park",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "sites",
+      "paint": {
+        "fill-color": "#E1ECD6",
+        "fill-opacity": 0.4
+      }
+    },
+    {
+      "id": "uk-buildings",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "buildings",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#D7DED6",
+        "fill-outline-color": "#C6D0C8"
+      }
+    },
+    {
+      "id": "uk-road-casing",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 7,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#CCD4D2",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          1.2,
+          12,
+          3.1,
+          14,
+          6.5,
+          18,
+          17
+        ]
+      }
+    },
+    {
+      "id": "uk-roads",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 7,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#FFFFFF",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          0.9,
+          12,
+          2.2,
+          14,
+          5.1,
+          18,
+          14
+        ]
+      }
+    },
+    {
+      "id": "uk-trunk",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 6,
+      "filter": [
+        "any",
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "trunk"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "primary"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#F4C98B",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          1.5,
+          12,
+          3.2,
+          14,
+          6,
+          18,
+          16
+        ]
+      }
+    },
+    {
+      "id": "uk-street-labels",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 12,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          10,
+          16,
+          14
+        ],
+        "symbol-placement": "line",
+        "text-rotation-alignment": "map"
+      },
+      "paint": {
+        "text-color": "#536372",
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "uk-place-labels",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "place_labels",
+      "minzoom": 6,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          6,
+          11,
+          14,
+          14
+        ]
+      },
+      "paint": {
+        "text-color": "#394E60",
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.7
+      }
+    },
+    {
+      "id": "tomtom-traffic-flow",
+      "type": "raster",
+      "source": "tomtom-traffic",
+      "layout": {
+        "visibility": "none"
+      },
+      "paint": {
+        "raster-opacity": 0.74
+      }
+    }
   ]
 }
