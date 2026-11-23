@@ -335,6 +335,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean themeApplied;
     private boolean hazardWarningEnabled = true;
     private boolean speedWarningEnabled = true;
+    /** Extruded building blocks on the map (Settings). */
+    private boolean buildings3d = true;
     private final List<TextView> tripMetricCaptions = new ArrayList<>();
     private float guidanceVolume = 0.85f;
     private boolean closeZoom;
@@ -458,6 +460,7 @@ public final class MainActivity extends Activity implements LocationListener {
         themePreference = Math.max(0, Math.min(2, settings.getInt("map_theme", 0)));
         hazardWarningEnabled = settings.getBoolean("hazard_voice_alerts", true);
         speedWarningEnabled = settings.getBoolean("speed_voice_alerts", true);
+        buildings3d = settings.getBoolean("buildings_3d", true);
         closeZoom = settings.getBoolean("close_zoom", true);
         highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
@@ -1390,7 +1393,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Save where I parked",
                 places != null && places.parkedCar() != null
                         ? "Find my parked car" : "Find my parked car · none saved",
-                "Share diagnostics (no location included)"
+                "Share diagnostics (no location included)",
+                "3D buildings · " + (buildings3d ? "On" : "Off")
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1517,6 +1521,15 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 20: promptSaveParking(); break;
                         case 21: showParkedCar(); break;
                         case 22: shareDiagnostics(); break;
+                        case 23:
+                            buildings3d = !buildings3d;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("buildings_3d", buildings3d).apply();
+                            if (vectorMap != null) vectorMap.setBuildings3D(buildings3d);
+                            Toast.makeText(this, buildings3d
+                                    ? "3D buildings on (estimated height; map data has no real heights)"
+                                    : "Flat building outlines", Toast.LENGTH_SHORT).show();
+                            break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -2537,6 +2550,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (vectorMap == null) return;
         boolean rotating = active && cameraMode != DrivingDisplayPolicy.CAMERA_NORTH_2D;
         vectorMap.setHighDetailEnabled(highDetailOnline && !rotating);
+        // Same moments decide map clutter: shops, cafés and bus stops hide
+        // while navigating; fuel, EV charging, parking and stations stay.
+        vectorMap.setBuildings3D(buildings3d);
+        vectorMap.setNavigationDetail(active);
     }
 
     private void selectDestination(TomTomApi.Destination selected) {
