@@ -13,6 +13,15 @@ public final class TurnArrowView extends View {
     private enum Arrow { STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, UTURN, ROUNDABOUT, ARRIVE }
     private Arrow arrow = Arrow.STRAIGHT;
     private int roundaboutExit;
+    private int accentColor = Color.rgb(7, 214, 235);
+    private int exitTextColor = Color.WHITE;
+
+    /** Keep turn arrows and exit numbers legible in either road-map theme. */
+    public void setNightMode(boolean night) {
+        accentColor = night ? Color.rgb(7, 214, 235) : Color.rgb(0, 96, 130);
+        exitTextColor = night ? Color.WHITE : Color.rgb(22, 48, 62);
+        invalidate();
+    }
 
     public TurnArrowView(Context context) {
         super(context);
@@ -42,7 +51,7 @@ public final class TurnArrowView extends View {
         float size = Math.min(getWidth(), getHeight());
         canvas.translate((getWidth() - size) * 0.5f, (getHeight() - size) * 0.5f);
         canvas.scale(size / 64f, size / 64f);
-        paint.setColor(Color.rgb(7, 214, 235));
+        paint.setColor(accentColor);
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(5.8f);
         paint.setStrokeCap(Paint.Cap.ROUND);
@@ -98,7 +107,7 @@ public final class TurnArrowView extends View {
         if (arrow == Arrow.ROUNDABOUT && roundaboutExit > 0) {
             paint.setStyle(Paint.Style.FILL);
             paint.setStrokeWidth(1);
-            paint.setColor(Color.WHITE);
+            paint.setColor(exitTextColor);
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setTextSize(roundaboutExit > 9 ? 13f : 18f);
             paint.setFakeBoldText(true);
