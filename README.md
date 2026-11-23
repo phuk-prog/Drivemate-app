@@ -1,3 +1,16 @@
+## DriveMate v1.5.0 — smoother follow-route camera
+
+DriveMate now samples an indexed TomTom route on Android's display clock for
+continuous camera/vehicle motion between GPS updates (GPU up to 30fps, raster
+fallback about 9fps). Zoom has a gradual rate limit, hysteresis, and a brief
+post-junction hold; road bearing rotates through the shortest angle. Visual-only
+prediction is bounded by GPS quality, a short timeout and the next unconfirmed
+turn. Manual map gestures pause follow until the user taps recenter.
+
+[Implementation notes and validation limitations](docs/DRIVEMATE-1.5-SMOOTH-CAMERA.md).
+The UK vector tile source still supplies native geometry only through z14;
+building a higher-detail regional dataset is a separate data-source task.
+
 # DriveMate — UK Navigation (Android)
 
 ## DriveMate 1.4 — DriveMate Map + local street cache
