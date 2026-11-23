@@ -1,0 +1,62 @@
+name: UI smoke test on Android emulator
+
+# Installs the debug build on an emulator, launches it, checks it is still
+# running (no crash on start) and saves a screenshot of the first screen.
+# Catches launch crashes and badly broken layouts before an APK reaches a
+# phone. It does not drive a route: that needs a TomTom key and real GPS.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Fetch checksum-verified DriveMate world map (45 MB)
+        run: python3 tools/fetch_pinned_map.py
+
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Launch DriveMate and capture the first screen
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash tools/ui_smoke.sh
+
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: DriveMate-ui-smoke
+          path: ui-smoke/
+          if-no-files-found: warn
+          retention-days: 14
