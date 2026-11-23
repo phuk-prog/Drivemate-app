@@ -299,6 +299,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private long lastCameraUpdate;
     private GeoMath.Point lastCameraCenter;
     private GeoMath.Point displayGps;
+    private MapStartupPolicy.Viewport startupMapView;
+    private boolean locationSubscribed;
+    private long lastMapAreaSavedAt;
     private SmoothFollowCamera smoothFollow;
     private boolean smoothLoopRunning;
     private boolean foreground;
@@ -336,6 +339,11 @@ public final class MainActivity extends Activity implements LocationListener {
         trafficEnabled = settings.getBoolean("traffic", false);
         useLocalMap = settings.getBoolean("drivemate_vector_map", true);
         vectorSavedState = savedInstanceState;
+        startupMapView = MapStartupPolicy.initial(
+                settings.getFloat("last_map_lat", Float.NaN),
+                settings.getFloat("last_map_lon", Float.NaN),
+                settings.getLong("last_map_at", 0L),
+                System.currentTimeMillis());
         try {
             driveTiles = new DriveTileServer(this);
         } catch (java.io.IOException e) {
@@ -387,7 +395,11 @@ public final class MainActivity extends Activity implements LocationListener {
             return false;
         });
         map.setMinZoomLevel(2.0);
-        map.getController().setZoom(15.5);
+        // Never initialise a UK navigation app at MapLibre's world-default
+        // camera. An approximate saved map area is DISPLAY ONLY, never GPS.
+        map.getController().setZoom(startupMapView.zoom);
+        map.getController().setCenter(new GeoPoint(
+                startupMapView.center.lat, startupMapView.center.lon));
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         // Keep both map engines inside the SAME background-only host:
         // the visible TomTom raster map covers MapLibre until actual UK roads
@@ -420,6 +432,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             }
                         });
                 vectorMap.setOnUserGesture(this::disengageFollowForGesture);
+                vectorMap.setCamera(startupMapView.center, startupMapView.zoom, 0);
                 // Place MapLibre below the existing TomTom map while waiting
                 // for first verifiably painted UK street features.
                 mapHost.addView(vectorMap.view(), 0,
@@ -459,7 +472,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.5.0", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.5.1", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -721,8 +734,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 lastCameraUpdate = 0;
                 updateGuidance(currentLocation);
                 startSmoothLoop();
-            } else if (currentLocation != null) {
+            } else if (currentLocation != null
+                    && MapStartupPolicy.freshForRouting(
+                            currentLocation.getLatitude(), currentLocation.getLongitude(),
+                            currentLocation.getTime(), System.currentTimeMillis(),
+                            currentLocation.hasAccuracy()
+                                    ? currentLocation.getAccuracy() : 101f)) {
                 centreOnLocation(true);
+            } else {
+                ensureLocationPermission();
+                Toast.makeText(this, gpsUnavailableMessage(), Toast.LENGTH_LONG).show();
             }
         });
         gpsButtonPos = new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.BOTTOM | Gravity.RIGHT);
@@ -1076,7 +1097,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 13:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.5.0")
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.5.1")
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
                                             + "Online TomTom routing, traffic and spoken directions. " +
@@ -1348,35 +1369,118 @@ public final class MainActivity extends Activity implements LocationListener {
         if (requestCode != LOCATION_PERMISSION) return;
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) startLocation();
-        else setStatus("Precise location permission is required for driving GPS guidance.");
+        else {
+            setStatus("Allow Precise Location to show your position and navigate.");
+            Toast.makeText(this, "DriveMate needs Precise Location permission for driving.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean hasPreciseLocationPermission() {
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasEnabledLocationProvider() {
+        if (locationManager == null) return false;
+        try {
+            return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (Exception error) { return false; }
+    }
+
+    /** Human-readable reason, without falsely claiming mobile data is GPS. */
+    private String gpsUnavailableMessage() {
+        if (!hasPreciseLocationPermission())
+            return "Allow Precise Location for DriveMate in Android app permissions.";
+        if (!hasEnabledLocationProvider())
+            return "Turn on your phone's Location service, then tap the GPS button.";
+        if (currentLocation != null
+                && System.currentTimeMillis() - currentLocation.getTime() > 20000)
+            return "GPS position is out of date. Keep Location on and try again.";
+        return "Waiting for a fresh GPS position. Move near a window or outdoors and retry.";
+    }
+
+    /**
+     * Restore the map camera from the phone's last GPS OR network provider
+     * result without advertising an old fix as current navigation position.
+     */
+    private void restoreLastKnownMapArea() {
+        if (locationManager == null || !hasPreciseLocationPermission()
+                || currentLocation != null || !followLocation) return;
+        Location chosen = null;
+        long now = System.currentTimeMillis();
+        for (String provider : new String[]{
+                LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+            try {
+                Location candidate = locationManager.getLastKnownLocation(provider);
+                if (candidate != null && MapStartupPolicy.usableCachedMapArea(
+                        candidate.getLatitude(), candidate.getLongitude(),
+                        candidate.getTime(), now,
+                        candidate.hasAccuracy() ? candidate.getAccuracy() : 2501f)
+                        && (chosen == null || candidate.getTime() > chosen.getTime()))
+                    chosen = candidate;
+            } catch (SecurityException | IllegalArgumentException ignored) {
+                // The remembered app-private overview remains available.
+            }
+        }
+        if (chosen == null) return;
+        // A genuinely fresh, accurate fix can enter the normal GPS path.
+        if (MapStartupPolicy.freshForRouting(chosen.getLatitude(), chosen.getLongitude(),
+                chosen.getTime(), now, chosen.getAccuracy())) {
+            onLocationChanged(chosen);
+            return;
+        }
+        if (chosen.getTime() <= getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getLong("last_map_at", 0L)) return;
+        GeoMath.Point preview = new GeoMath.Point(
+                chosen.getLatitude(), chosen.getLongitude());
+        double zoom = chosen.hasAccuracy() && chosen.getAccuracy() > 1000
+                ? 11.0 : 13.5;
+        map.getController().setZoom(zoom);
+        map.getController().setCenter(new GeoPoint(preview.lat, preview.lon));
+        if (vectorMap != null) vectorMap.setCamera(preview, zoom, 0);
+        // No blue GPS marker is created: this is historical positioning only.
+        setStatus("Showing last known area · waiting for live GPS");
     }
 
     private void startLocation() {
-        if (locationManager == null
-                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                    != PackageManager.PERMISSION_GRANTED) return;
-        locationManager.removeUpdates(this);
+        if (locationManager == null || !hasPreciseLocationPermission()) {
+            setStatus("Precise Location permission is required for navigation.");
+            return;
+        }
+        // onCreate and onResume both ask to start. Do not repeatedly tear down
+        // GPS registration before the phone has obtained its first fix.
+        if (locationSubscribed) return;
         try {
+            if (!hasEnabledLocationProvider()) {
+                setStatus("Phone Location is off · enable it to navigate");
+                return;
+            }
+            boolean requested = false;
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
                         1000L, 1f, this);
+                requested = true;
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                        2500L, 5f, this);
+                        2000L, 3f, this);
+                requested = true;
             }
-            Location last = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-            if (last != null && System.currentTimeMillis() - last.getTime() < 60000) {
-                onLocationChanged(last);
-            }
-        } catch (SecurityException ignored) {
-            setStatus("Location permission denied.");
+            locationSubscribed = requested;
+            if (requested) restoreLastKnownMapArea();
+        } catch (SecurityException error) {
+            locationSubscribed = false;
+            setStatus("Location permission denied. Enable Precise Location.");
         }
     }
 
     @Override public void onLocationChanged(Location fix) {
-        if (fix == null || (fix.hasAccuracy() && fix.getAccuracy() > 100)
-                || System.currentTimeMillis() - fix.getTime() > 15000) return;
+        if (fix == null || !MapStartupPolicy.freshForRouting(
+                fix.getLatitude(), fix.getLongitude(), fix.getTime(),
+                System.currentTimeMillis(),
+                fix.hasAccuracy() ? fix.getAccuracy() : 101f)) return;
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -1387,6 +1491,18 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
+        if (SystemClock.elapsedRealtime() - lastMapAreaSavedAt > 60000) {
+            // Save only a coarse ~1 km area in app-private storage. Never use
+            // this historical map centre as the origin of a TomTom route.
+            lastMapAreaSavedAt = SystemClock.elapsedRealtime();
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putFloat("last_map_lat",
+                            (float) (Math.round(fix.getLatitude() * 100.0) / 100.0))
+                    .putFloat("last_map_lon",
+                            (float) (Math.round(fix.getLongitude() * 100.0) / 100.0))
+                    .putLong("last_map_at", System.currentTimeMillis())
+                    .apply();
+        }
         GeoMath.Point smoothed = vehicleFilter.apply(gpsPoint(fix), fix.getTime(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fix.hasSpeed() ? fix.getSpeed() : 0f);
@@ -1702,9 +1818,14 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void selectDestination(TomTomApi.Destination selected) {
-        if (currentLocation == null
-                || System.currentTimeMillis() - currentLocation.getTime() > 60000) {
-            showError("Waiting for a fresh GPS fix. Enable device location, then try again.");
+        if (currentLocation == null || !MapStartupPolicy.freshForRouting(
+                currentLocation.getLatitude(), currentLocation.getLongitude(),
+                currentLocation.getTime(), System.currentTimeMillis(),
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : 101f)) {
+            // Selecting a destination must never silently use the remembered
+            // startup map centre or an old system cached GPS measurement.
+            ensureLocationPermission();
+            showError(gpsUnavailableMessage());
             return;
         }
         if (route != null || active) stopNavigation(false);
@@ -2105,6 +2226,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
+        locationSubscribed = false;
         if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
         super.onPause();
