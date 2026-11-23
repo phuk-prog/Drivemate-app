@@ -181,7 +181,8 @@ public final class MainActivity extends Activity implements LocationListener {
     };
 
     private void startSmoothLoop() {
-        if (smoothLoopRunning || !active || !followLocation || smoothFollow == null) return;
+        if (smoothLoopRunning || !foreground || !active
+                || !followLocation || smoothFollow == null) return;
         smoothLoopRunning = true;
         smoothTick = 0;
         lastVisualTickMs = 0;
@@ -300,6 +301,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private GeoMath.Point displayGps;
     private SmoothFollowCamera smoothFollow;
     private boolean smoothLoopRunning;
+    private boolean foreground;
     private int smoothTick;
     private boolean mapGestureWasNotified;
     private int requestGeneration;
@@ -2089,6 +2091,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override public void onResume() {
         super.onResume();
+        foreground = true;
         if (map != null) map.onResume();
         if (vectorMap != null) vectorMap.onResume();
         startLocation();
@@ -2098,6 +2101,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     @Override public void onPause() {
+        foreground = false;
         stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
