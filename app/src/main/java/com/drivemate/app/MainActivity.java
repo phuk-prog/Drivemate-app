@@ -1672,7 +1672,7 @@ public final class MainActivity extends Activity implements LocationListener {
             gpsLost = false;
             if (active) {
                 setStatus("GPS signal restored · guidance resumed");
-                say("GPS signal restored.");
+                saySystemWarning("GPS signal restored.");
             }
         }
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
