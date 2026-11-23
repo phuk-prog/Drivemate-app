@@ -319,7 +319,6 @@ public final class MainActivity extends Activity implements LocationListener {
     private MapStartupPolicy.Viewport startupMapView;
     private boolean locationSubscribed;
     private long lastMapAreaSavedAt;
-    private long lastPrefetchAt;
     private SmoothFollowCamera smoothFollow;
     private boolean smoothLoopRunning;
     private boolean foreground;
@@ -1524,8 +1523,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 requested = true;
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                // Maximum rate here too; the fix gate decides which fixes are used.
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                        2000L, 3f, this);
+                        0L, 0f, this);
                 requested = true;
             }
             locationSubscribed = requested;
@@ -1589,13 +1589,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active || smoothFollow == null) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
             if (!active || smoothFollow == null) vectorMap.setVehicle(smoothed);
-            // Prefetch at most every 3 s: at a high GPS rate, per-fix tile work would
-            // compete with rendering.
-            long nowPrefetch = SystemClock.elapsedRealtime();
-            if (!autoFallback && nowPrefetch - lastPrefetchAt >= 3000) {
-                lastPrefetchAt = nowPrefetch;
-                vectorMap.prefetch(gpsPoint(fix));
-            }
+            if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
         }
         if ((!active || smoothFollow == null) && fix.hasBearing()
                 && fix.hasSpeed() && fix.getSpeed() > 1.5f)
