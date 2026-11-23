@@ -58,4 +58,14 @@ public class TomTomRouteIntelligenceTest {
         assertTrue(invalid.laneSections.isEmpty());
         assertTrue(invalid.trafficSections.isEmpty());
     }
+
+    @Test public void rejectsContradictoryLaneFollowRecommendation() throws Exception {
+        String incorrect = "[{\"sectionType\":\"LANES\","
+                + "\"startPointIndex\":2,\"endPointIndex\":3,"
+                + "\"lanes\":[{\"directions\":[\"LEFT\"],\"follow\":\"RIGHT\"}]}]";
+        TomTomApi.Route route = TomTomApi.parseRoute(fixture(incorrect));
+        assertTrue("Contradictory lane arrows must not be displayed",
+                route.laneSections.isEmpty());
+    }
+
 }
