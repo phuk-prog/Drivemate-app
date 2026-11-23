@@ -54,6 +54,8 @@ public final class VectorDriveMap {
     private GeoJsonSource junctionSource;
     private GeoJsonSource vehicleSource;
     private GeoJsonSource destinationSource;
+    private GeoJsonSource entranceSource;
+    private GeoJsonSource parkedSource;
     private boolean styleReady;
     private boolean trafficEnabled;
     private boolean nightMode;
@@ -61,6 +63,8 @@ public final class VectorDriveMap {
     private boolean disposed;
     private GeoMath.Point pendingGps;
     private GeoMath.Point pendingDest;
+    private GeoMath.Point pendingEntrance;
+    private GeoMath.Point pendingParked;
     private List<GeoMath.Point> pendingRoute;
     private List<GeoMath.Point> pendingJunctionRoute;
     private GeoMath.Point pendingCamera;
@@ -229,6 +233,8 @@ public final class VectorDriveMap {
                 setTraffic(trafficEnabled);
                 if (pendingGps != null) setVehicle(pendingGps);
                 if (pendingDest != null) setDestination(pendingDest);
+                setEntrance(pendingEntrance);
+                setParkedCar(pendingParked);
                 if (pendingRoute != null) setRoute(pendingRoute);
                 if (pendingJunctionRoute != null) setJunctionPreview(pendingJunctionRoute);
                 if (pendingCamera != null) setCamera(pendingCamera,
@@ -248,11 +254,17 @@ public final class VectorDriveMap {
                 FeatureCollection.fromFeatures(new Feature[0]));
         destinationSource = new GeoJsonSource("dm-destination",
                 FeatureCollection.fromFeatures(new Feature[0]));
+        entranceSource = new GeoJsonSource("dm-entrance",
+                FeatureCollection.fromFeatures(new Feature[0]));
+        parkedSource = new GeoJsonSource("dm-parked",
+                FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(routeSource);
         junctionSource = new GeoJsonSource("dm-junction",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(junctionSource);
         style.addSource(destinationSource);
+        style.addSource(entranceSource);
+        style.addSource(parkedSource);
         style.addSource(vehicleSource);
         LineLayer routeHalo = new LineLayer("dm-route-halo", "dm-route");
         routeHalo.setProperties(PropertyFactory.lineColor(
@@ -277,6 +289,18 @@ public final class VectorDriveMap {
                 PropertyFactory.circleStrokeColor("#FFFFFF"),
                 PropertyFactory.circleStrokeWidth(3f));
         style.addLayer(dest);
+        CircleLayer entranceDot = new CircleLayer("dm-entrance-pin", "dm-entrance");
+        entranceDot.setProperties(PropertyFactory.circleColor("#17B68F"),
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(2.5f));
+        style.addLayer(entranceDot);
+        CircleLayer parkedDot = new CircleLayer("dm-parked-pin", "dm-parked");
+        parkedDot.setProperties(PropertyFactory.circleColor("#FFBB38"),
+                PropertyFactory.circleRadius(8f),
+                PropertyFactory.circleStrokeColor("#172E45"),
+                PropertyFactory.circleStrokeWidth(3f));
+        style.addLayer(parkedDot);
         // Directional arrow is screen-aligned. A circle cannot indicate
         // whether the vehicle is following the map or driving across it.
         style.addImage("dm-vehicle-arrow-image", makeVehicleArrow());
@@ -367,6 +391,22 @@ public final class VectorDriveMap {
             destinationSource.setGeoJson(Feature.fromGeometry(
                     Point.fromLngLat(point.lon, point.lat)));
         }
+    }
+
+    public void setEntrance(GeoMath.Point point) {
+        pendingEntrance = point;
+        if (!ready() || entranceSource == null) return;
+        entranceSource.setGeoJson(point == null
+                ? FeatureCollection.fromFeatures(new Feature[0])
+                : Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)));
+    }
+
+    public void setParkedCar(GeoMath.Point point) {
+        pendingParked = point;
+        if (!ready() || parkedSource == null) return;
+        parkedSource.setGeoJson(point == null
+                ? FeatureCollection.fromFeatures(new Feature[0])
+                : Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)));
     }
 
     public void setCamera(GeoMath.Point center, double zoom, double bearing) {
