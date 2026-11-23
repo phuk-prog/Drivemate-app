@@ -32,8 +32,8 @@ public final class DrivingDisplayPolicy {
         return systemNight;
     }
 
-    public static boolean junctionPreview(boolean roundabout, double metresToTurn) {
-        return roundabout && Double.isFinite(metresToTurn)
+    public static boolean junctionPreview(boolean complexJunction, double metresToTurn) {
+        return complexJunction && Double.isFinite(metresToTurn)
                 && metresToTurn >= 0 && metresToTurn <= 520;
     }
 }
