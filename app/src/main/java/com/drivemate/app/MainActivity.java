@@ -318,6 +318,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private final List<TextView> tripMetricCaptions = new ArrayList<>();
     private float guidanceVolume = 0.85f;
     private boolean closeZoom;
+    private boolean highDetailOnline = true;
     private int previousInstructionIndex;
     private double stabilizedAlong = -1;
     private double observedSpeed;
@@ -397,6 +398,7 @@ public final class MainActivity extends Activity implements LocationListener {
         hazardWarningEnabled = settings.getBoolean("hazard_voice_alerts", true);
         speedWarningEnabled = settings.getBoolean("speed_voice_alerts", true);
         closeZoom = settings.getBoolean("close_zoom", false);
+        highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
         trafficEnabled = settings.getBoolean("traffic", false);
         useLocalMap = settings.getBoolean("drivemate_vector_map", true);
@@ -495,6 +497,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 }
                             }
                         });
+                vectorMap.setHighDetailEnabled(highDetailOnline);
                 vectorMap.setOnUserGesture(this::disengageFollowForGesture);
                 vectorMap.setCamera(startupMapView.center, startupMapView.zoom, 0);
                 // Place MapLibre below the existing TomTom map while waiting
@@ -1198,7 +1201,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Verified hazard alerts (when available) · " + (hazardWarningEnabled ? "On" : "Off"),
                 "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
                 "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
-                "Overspeed alert above mapped limit · " + speedToleranceMph + " mph"
+                "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
+                "Close-up road detail (online) · " + (highDetailOnline ? "On" : "Off")
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1311,6 +1315,17 @@ public final class MainActivity extends Activity implements LocationListener {
                             break;
                         case 17: selectRerouteMode(); break;
                         case 18: selectSpeedTolerance(); break;
+                        case 19:
+                            highDetailOnline = !highDetailOnline;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("high_detail_online", highDetailOnline).apply();
+                            if (vectorMap != null)
+                                vectorMap.setHighDetailEnabled(highDetailOnline);
+                            Toast.makeText(this, highDetailOnline
+                                    ? "High-zoom TomTom road detail enabled when available"
+                                    : "Online close-up detail off · local streets remain",
+                                    Toast.LENGTH_LONG).show();
+                            break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
