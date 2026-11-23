@@ -31,6 +31,16 @@
       ],
       "tileSize": 256,
       "maxzoom": 19
+    },
+    "tomtom-high-detail": {
+      "type": "raster",
+      "tiles": [
+        "https://api.tomtom.com/map/1/tile/basic/__TOMTOM_DETAIL_STYLE__/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"
+      ],
+      "tileSize": 256,
+      "minzoom": 16,
+      "maxzoom": 20,
+      "attribution": "© TomTom"
     }
   },
   "layers": [
@@ -115,8 +125,8 @@
       "source-layer": "buildings",
       "minzoom": 13,
       "paint": {
-        "fill-color": "#D7DED6",
-        "fill-outline-color": "#C6D0C8"
+        "fill-color": "#D2DDD5",
+        "fill-outline-color": "#A6B8B0"
       }
     },
     {
@@ -130,7 +140,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#CCD4D2",
+        "line-color": "#A6B7BB",
         "line-width": [
           "interpolate",
           [
@@ -145,8 +155,10 @@
           3.1,
           14,
           6.5,
-          18,
-          17
+          16,
+          10,
+          19,
+          20
         ]
       }
     },
@@ -161,7 +173,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#FFFFFF",
+        "line-color": "#FCFEFF",
         "line-width": [
           "interpolate",
           [
@@ -176,8 +188,10 @@
           2.2,
           14,
           5.1,
-          18,
-          14
+          16,
+          8.2,
+          19,
+          16.5
         ]
       }
     },
@@ -219,7 +233,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#F4C98B",
+        "line-color": "#F2C38C",
         "line-width": [
           "interpolate",
           [
@@ -234,8 +248,97 @@
           3.2,
           14,
           6,
-          18,
-          16
+          16,
+          8.8,
+          19,
+          17
+        ]
+      }
+    },
+    {
+      "id": "uk-motorways",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 7,
+      "filter": [
+        "==",
+        [
+          "get",
+          "kind"
+        ],
+        "motorway"
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#B7DCE6",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          1.4,
+          12,
+          3.4,
+          14,
+          6.4,
+          16,
+          9.4,
+          19,
+          18
+        ]
+      }
+    },
+    {
+      "id": "uk-slip-roads",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 12,
+      "filter": [
+        "in",
+        [
+          "get",
+          "kind"
+        ],
+        [
+          "literal",
+          [
+            "motorway_link",
+            "trunk_link",
+            "primary_link"
+          ]
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#DFE9EE",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          1.8,
+          14,
+          4.2,
+          16,
+          6.5,
+          19,
+          12
         ]
       }
     },
@@ -267,16 +370,22 @@
           ],
           12,
           10,
+          14,
+          12,
           16,
-          14
+          14,
+          19,
+          17
         ],
         "symbol-placement": "line",
-        "text-rotation-alignment": "map"
+        "text-rotation-alignment": "map",
+        "symbol-spacing": 180,
+        "text-max-width": 9
       },
       "paint": {
-        "text-color": "#536372",
+        "text-color": "#294A5B",
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.5
+        "text-halo-width": 2
       }
     },
     {
@@ -314,7 +423,32 @@
       "paint": {
         "text-color": "#394E60",
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.7
+        "text-halo-width": 2
+      }
+    },
+    {
+      "id": "tomtom-street-detail",
+      "type": "raster",
+      "source": "tomtom-high-detail",
+      "minzoom": 16.25,
+      "layout": {
+        "visibility": "none"
+      },
+      "paint": {
+        "raster-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          16.25,
+          0,
+          17.2,
+          0.97
+        ],
+        "raster-fade-duration": 180
       }
     },
     {
