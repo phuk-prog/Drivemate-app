@@ -31,6 +31,16 @@
       ],
       "tileSize": 256,
       "maxzoom": 19
+    },
+    "tomtom-high-detail": {
+      "type": "raster",
+      "tiles": [
+        "https://api.tomtom.com/map/1/tile/basic/__TOMTOM_STYLE__/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"
+      ],
+      "tileSize": 256,
+      "minzoom": 16,
+      "maxzoom": 19,
+      "attribution": "© TomTom (online high-detail tiles)"
     }
   },
   "layers": [
@@ -146,7 +156,9 @@
           14,
           6.5,
           18,
-          17
+          17,
+          19,
+          24
         ]
       }
     },
@@ -177,7 +189,59 @@
           14,
           5.1,
           18,
-          14
+          14,
+          19,
+          19.5
+        ]
+      }
+    },
+    {
+      "id": "uk-secondary-roads",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 11,
+      "filter": [
+        "any",
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "secondary"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "tertiary"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#FAE8CE",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          2.7,
+          14,
+          5.3,
+          18,
+          13.8,
+          19,
+          19.5
         ]
       }
     },
@@ -235,7 +299,125 @@
           14,
           6,
           18,
-          16
+          16,
+          19,
+          22
+        ]
+      }
+    },
+    {
+      "id": "uk-road-link-casing",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 12,
+      "filter": [
+        "any",
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway_link"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "trunk_link"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "primary_link"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#9A927F",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          3.4,
+          14,
+          8.2,
+          18,
+          20,
+          19,
+          26
+        ]
+      }
+    },
+    {
+      "id": "uk-road-links",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 12,
+      "filter": [
+        "any",
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway_link"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "trunk_link"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "primary_link"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#F8D29D",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          2.5,
+          14,
+          5.8,
+          18,
+          16,
+          19,
+          21
         ]
       }
     },
@@ -268,15 +450,18 @@
           12,
           10,
           16,
-          14
+          14,
+          19,
+          17.5
         ],
         "symbol-placement": "line",
-        "text-rotation-alignment": "map"
+        "text-rotation-alignment": "map",
+        "symbol-spacing": 240
       },
       "paint": {
         "text-color": "#536372",
         "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.5
+        "text-halo-width": 1.9
       }
     },
     {
@@ -308,13 +493,42 @@
           6,
           11,
           14,
-          14
+          14,
+          19,
+          16
         ]
       },
       "paint": {
         "text-color": "#394E60",
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.7
+      }
+    },
+    {
+      "id": "dm-tomtom-high-detail",
+      "type": "raster",
+      "source": "tomtom-high-detail",
+      "minzoom": 16.2,
+      "layout": {
+        "visibility": "none"
+      },
+      "paint": {
+        "raster-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          16.2,
+          0,
+          16.85,
+          0.96,
+          19,
+          0.96
+        ],
+        "raster-fade-duration": 180
       }
     },
     {

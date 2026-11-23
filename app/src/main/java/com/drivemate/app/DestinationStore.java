@@ -13,6 +13,7 @@ public final class DestinationStore {
     private static final String RECENTS = "dest_recents";
     private static final String HOME = "dest_home";
     private static final String WORK = "dest_work";
+    private static final String PARKED_CAR = "parked_car_local";
     private final SharedPreferences preferences;
 
     public DestinationStore(Context context) {
@@ -27,6 +28,41 @@ public final class DestinationStore {
     public void setHome(TomTomApi.Destination place) { saveSingle(HOME, place); }
     public void setWork(TomTomApi.Destination place) { saveSingle(WORK, place); }
     public void clearRecent() { preferences.edit().remove(RECENTS).apply(); }
+
+    /** Explicit opt-in, only on this phone: never synced or sent to TomTom. */
+    public void saveParkedCar(GeoMath.Point point, long recordedAtMs) {
+        if (point == null || !Double.isFinite(point.lat) || !Double.isFinite(point.lon)
+                || Math.abs(point.lat) > 90 || Math.abs(point.lon) > 180
+                || recordedAtMs <= 0) return;
+        JSONObject json = new JSONObject();
+        try {
+            json.put("lat", point.lat);
+            json.put("lon", point.lon);
+            json.put("time", recordedAtMs);
+            preferences.edit().putString(PARKED_CAR, json.toString()).apply();
+        } catch (Exception ignored) { }
+    }
+
+    public GeoMath.Point parkedCar() {
+        try {
+            JSONObject json = new JSONObject(preferences.getString(PARKED_CAR, ""));
+            double lat = json.optDouble("lat", Double.NaN);
+            double lon = json.optDouble("lon", Double.NaN);
+            if (Double.isFinite(lat) && Double.isFinite(lon)
+                    && Math.abs(lat) <= 90 && Math.abs(lon) <= 180)
+                return new GeoMath.Point(lat, lon);
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    public long parkedCarTime() {
+        try {
+            return new JSONObject(preferences.getString(PARKED_CAR, ""))
+                    .optLong("time", 0);
+        } catch (Exception ignored) { return 0; }
+    }
+
+    public void clearParkedCar() { preferences.edit().remove(PARKED_CAR).apply(); }
 
     private TomTomApi.Destination first(String key) {
         List<TomTomApi.Destination> result = load(key);
@@ -79,7 +115,10 @@ public final class DestinationStore {
                         || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
                 places.add(new TomTomApi.Destination(
                         place.optString("title"), place.optString("address"),
-                        new GeoMath.Point(lat, lon)));
+                        new GeoMath.Point(lat, lon),
+                        place.has("entryLat") && place.has("entryLon")
+                                ? new GeoMath.Point(place.optDouble("entryLat"),
+                                        place.optDouble("entryLon")) : null));
             }
         } catch (Exception ignored) {
             // Malformed old data must not prevent navigation.
@@ -96,6 +135,10 @@ public final class DestinationStore {
                 object.put("address", place.address);
                 object.put("lat", place.point.lat);
                 object.put("lon", place.point.lon);
+                if (place.mainEntrance != null) {
+                    object.put("entryLat", place.mainEntrance.lat);
+                    object.put("entryLon", place.mainEntrance.lon);
+                }
                 data.put(object);
             } catch (Exception ignored) { }
         }

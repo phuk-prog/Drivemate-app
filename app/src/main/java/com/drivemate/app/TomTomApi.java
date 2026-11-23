@@ -28,10 +28,18 @@ public final class TomTomApi {
         public final String title;
         public final String address;
         public final GeoMath.Point point;
+        /** Main POI entrance only when explicitly returned by TomTom Search. */
+        public final GeoMath.Point mainEntrance;
         public Destination(String title, String address, GeoMath.Point point) {
+            this(title, address, point, null);
+        }
+        public Destination(String title, String address, GeoMath.Point point,
+                           GeoMath.Point mainEntrance) {
             this.title = title;
             this.address = address;
             this.point = point;
+            this.mainEntrance = ArrivalPolicy.trustedEntrance(mainEntrance, point)
+                    ? mainEntrance : null;
         }
         public String toString() {
             return address.isEmpty() || address.equals(title) ? title : title + " — " + address;
@@ -67,13 +75,24 @@ public final class TomTomApi {
         public final double lengthMetres;
         public final int timeSeconds;
         public final int trafficDelaySeconds;
+        public final long fetchedAtMs;
+        public final List<RouteIntelligence.LaneSection> laneSections;
+        public final List<RouteIntelligence.SpeedSection> speedSections;
+        public final List<RouteIntelligence.TrafficSection> trafficSections;
         Route(List<GeoMath.Point> points, List<Instruction> instructions,
-              double lengthMetres, int timeSeconds, int trafficDelaySeconds) {
+              double lengthMetres, int timeSeconds, int trafficDelaySeconds,
+              List<RouteIntelligence.LaneSection> laneSections,
+              List<RouteIntelligence.SpeedSection> speedSections,
+              List<RouteIntelligence.TrafficSection> trafficSections) {
             this.points = points;
             this.instructions = instructions;
             this.lengthMetres = lengthMetres;
             this.timeSeconds = timeSeconds;
             this.trafficDelaySeconds = trafficDelaySeconds;
+            this.fetchedAtMs = System.currentTimeMillis();
+            this.laneSections = laneSections;
+            this.speedSections = speedSections;
+            this.trafficSections = trafficSections;
         }
     }
 
@@ -85,20 +104,71 @@ public final class TomTomApi {
             url += "&lat=" + coordinate(near.lat) + "&lon=" + coordinate(near.lon);
         }
         JSONObject response = requestJson(url);
-        JSONArray hits = response.optJSONArray("results");
+        return parsePlaces(response, query, false);
+    }
+
+    /** Search for explicitly categorised parking POIs near the chosen destination. */
+    public static List<Destination> parkingNearby(String key, GeoMath.Point near)
+            throws IOException, JSONException {
+        if (near == null) throw new IOException("Destination required for parking search.");
+        String url = "https://api.tomtom.com/search/2/categorySearch/parking.json"
+                + "?key=" + encode(key) + "&lat=" + coordinate(near.lat)
+                + "&lon=" + coordinate(near.lon)
+                + "&radius=1400&limit=10&language=en-GB";
+        return parsePlaces(requestJson(url), "Parking", true);
+    }
+
+    /** Package-private, allows testing of provider fields without a real API key. */
+    static List<Destination> parsePlaces(JSONObject response, String fallback,
+                                          boolean parkingOnly) throws JSONException {
         List<Destination> results = new ArrayList<>();
+        JSONArray hits = response.optJSONArray("results");
         if (hits == null) return results;
         for (int i = 0; i < hits.length(); i++) {
-            JSONObject result = hits.getJSONObject(i);
+            JSONObject result = hits.optJSONObject(i);
+            if (result == null) continue;
             JSONObject p = result.optJSONObject("position");
             if (p == null) continue;
+            double lat = p.optDouble("lat", Double.NaN);
+            double lon = p.optDouble("lon", Double.NaN);
+            if (!Double.isFinite(lat) || !Double.isFinite(lon)
+                    || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
             JSONObject poi = result.optJSONObject("poi");
             JSONObject address = result.optJSONObject("address");
+            if (parkingOnly) {
+                if (poi == null) continue;
+                JSONArray categories = poi.optJSONArray("categories");
+                boolean categoryConfirmed = false;
+                if (categories != null)
+                    for (int j = 0; j < categories.length(); j++)
+                        categoryConfirmed |= categories.optString(j, "")
+                                .toLowerCase(Locale.UK).contains("parking");
+                if (!categoryConfirmed) continue;
+            }
+            GeoMath.Point point = new GeoMath.Point(lat, lon);
+            GeoMath.Point mainEntrance = null;
+            JSONArray entries = result.optJSONArray("entryPoints");
+            if (entries == null) entries = result.optJSONArray("entrypoints");
+            if (entries != null) {
+                for (int j = 0; j < entries.length(); j++) {
+                    JSONObject entry = entries.optJSONObject(j);
+                    if (entry == null || !"main".equalsIgnoreCase(
+                            entry.optString("type", ""))) continue;
+                    JSONObject entrancePoint = entry.optJSONObject("position");
+                    if (entrancePoint == null) continue;
+                    GeoMath.Point candidate = new GeoMath.Point(
+                            entrancePoint.optDouble("lat", Double.NaN),
+                            entrancePoint.optDouble("lon", Double.NaN));
+                    if (ArrivalPolicy.trustedEntrance(candidate, point)) {
+                        mainEntrance = candidate;
+                        break;
+                    }
+                }
+            }
             String name = poi != null ? poi.optString("name", "") : "";
             String street = address != null ? address.optString("freeformAddress", "") : "";
-            if (name.isEmpty()) name = street.isEmpty() ? query : street;
-            results.add(new Destination(name, street,
-                    new GeoMath.Point(p.getDouble("lat"), p.getDouble("lon"))));
+            if (name.isEmpty()) name = street.isEmpty() ? fallback : street;
+            results.add(new Destination(name, street, point, mainEntrance));
         }
         return results;
     }
@@ -111,7 +181,24 @@ public final class TomTomApi {
                 + "?key=" + encode(key)
                 + "&travelMode=car&routeType=fastest&traffic=true"
                 + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
-        JSONObject response = requestJson(url);
+        JSONObject response;
+        try {
+            response = requestJson(url
+                    + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic");
+        } catch (IOException error) {
+            // An older/limited key must not prevent normal navigation.
+            // Only retry metadata-related 400/403 errors, not rate limiting,
+            // connection failures or server errors.
+            String message = error.getMessage();
+            if (message == null || (!message.startsWith("TomTom HTTP 400.")
+                    && !message.startsWith("TomTom HTTP 403."))) throw error;
+            response = requestJson(url);
+        }
+        return parseRoute(response);
+    }
+
+    /** Package-private to test real response shapes without network/API keys. */
+    static Route parseRoute(JSONObject response) throws IOException, JSONException {
         JSONArray routes = response.optJSONArray("routes");
         if (routes == null || routes.length() == 0) {
             throw new IOException("TomTom did not return a drivable route.");
@@ -119,6 +206,11 @@ public final class TomTomApi {
         JSONObject route = routes.getJSONObject(0);
         JSONObject summary = route.getJSONObject("summary");
         List<GeoMath.Point> points = new ArrayList<>();
+        // TomTom section point indices refer to the original flattened
+        // polyline. Track every index even where duplicate vertices are
+        // removed from the drawing/guidance geometry.
+        List<Double> originalPointOffsets = new ArrayList<>();
+        double geometryMetres = 0;
         JSONArray legs = route.getJSONArray("legs");
         for (int l = 0; l < legs.length(); l++) {
             JSONArray coords = legs.getJSONObject(l).getJSONArray("points");
@@ -126,10 +218,16 @@ public final class TomTomApi {
                 JSONObject p = coords.getJSONObject(i);
                 GeoMath.Point point = new GeoMath.Point(p.getDouble("latitude"),
                         p.getDouble("longitude"));
-                if (points.isEmpty()
-                        || GeoMath.distance(points.get(points.size() - 1), point) > 0.1) {
+                if (points.isEmpty()) {
                     points.add(point);
+                } else {
+                    double distance = GeoMath.distance(points.get(points.size() - 1), point);
+                    if (distance > 0.1) {
+                        geometryMetres += distance;
+                        points.add(point);
+                    }
                 }
+                originalPointOffsets.add(geometryMetres);
             }
         }
         if (points.size() < 2) throw new IOException("TomTom route geometry is empty.");
@@ -155,9 +253,73 @@ public final class TomTomApi {
         }
         steps.sort(Comparator.comparingDouble(item -> item.routeOffsetMetres));
         if (steps.isEmpty()) throw new IOException("Route has no voice guidance instructions.");
+
+        List<RouteIntelligence.LaneSection> laneSections = new ArrayList<>();
+        List<RouteIntelligence.SpeedSection> speedSections = new ArrayList<>();
+        List<RouteIntelligence.TrafficSection> trafficSections = new ArrayList<>();
+        JSONArray sections = route.optJSONArray("sections");
+        if (sections != null) {
+            for (int i = 0; i < sections.length(); i++) {
+                JSONObject section = sections.optJSONObject(i);
+                if (section == null) continue;
+                int startIndex = section.optInt("startPointIndex", -1);
+                int endIndex = section.optInt("endPointIndex", -1);
+                if (startIndex < 0 || endIndex <= startIndex
+                        || endIndex >= originalPointOffsets.size()) continue;
+                double from = originalPointOffsets.get(startIndex);
+                double to = originalPointOffsets.get(endIndex);
+                if (to <= from) continue;
+                switch (section.optString("sectionType", "")) {
+                    case "LANES":
+                        JSONArray sourceLanes = section.optJSONArray("lanes");
+                        if (sourceLanes == null) break;
+                        List<RouteIntelligence.Lane> lanes = new ArrayList<>();
+                        for (int j = 0; j < sourceLanes.length(); j++) {
+                            JSONObject lane = sourceLanes.optJSONObject(j);
+                            if (lane == null) continue;
+                            String follow = lane.optString("follow", "");
+                            JSONArray directions = lane.optJSONArray("directions");
+                            // A TomTom recommendation must be one of this
+                            // lane's actual marked directions. An inconsistent
+                            // response is insufficient evidence for a lane arrow.
+                            boolean confirmedFollow = false;
+                            if (!follow.isEmpty() && directions != null) {
+                                for (int d = 0; d < directions.length(); d++)
+                                    if (follow.equals(directions.optString(d, "")))
+                                        confirmedFollow = true;
+                            }
+                            String label = confirmedFollow ? follow
+                                    : directions != null && directions.length() == 1
+                                            ? directions.optString(0, "") : "";
+                            lanes.add(new RouteIntelligence.Lane(label, confirmedFollow));
+                        }
+                        RouteIntelligence.LaneSection candidate =
+                                new RouteIntelligence.LaneSection(from, to, lanes);
+                        if (candidate.trusted()) laneSections.add(candidate);
+                        break;
+                    case "SPEED_LIMIT":
+                        int limit = section.optInt("maxSpeedLimitInKmh", -1);
+                        if (limit >= 5 && limit <= 140)
+                            speedSections.add(new RouteIntelligence.SpeedSection(from, to, limit));
+                        break;
+                    case "TRAFFIC":
+                        String category = section.optString("simpleCategory", "");
+                        int delay = section.optInt("delayInSeconds", 0);
+                        // Ignore empty/no-impact traffic sections. The route
+                        // summary retains overall traffic information.
+                        if (delay > 0 || "ROAD_CLOSURE".equals(category)
+                                || "ROAD_WORK".equals(category))
+                            trafficSections.add(new RouteIntelligence.TrafficSection(
+                                    from, to, delay, category));
+                        break;
+                    default: break;
+                }
+            }
+        }
         return new Route(points, steps, summary.getDouble("lengthInMeters"),
                 summary.getInt("travelTimeInSeconds"),
-                summary.optInt("trafficDelayInSeconds", 0));
+                summary.optInt("trafficDelayInSeconds", 0),
+                laneSections, speedSections, trafficSections);
     }
 
     private static String coordinate(double value) {

@@ -48,6 +48,20 @@ public final class NavigationCamera {
                                   GeoMath.Point gps, double routeProgressMetres,
                                   double nextJunctionOffsetMetres, float speedMetresPerSecond,
                                   int screenHeightPx, int headerHeightPx, int panelHeightPx) {
+        return calculate(path, gps, routeProgressMetres, nextJunctionOffsetMetres,
+                speedMetresPerSecond, screenHeightPx, headerHeightPx,
+                panelHeightPx, false);
+    }
+
+    /**
+     * Driver-selectable junction detail. A clear overhead view is favoured
+     * near turns without sacrificing route coverage at road speed.
+     */
+    public static Frame calculate(List<GeoMath.Point> path,
+                                  GeoMath.Point gps, double routeProgressMetres,
+                                  double nextJunctionOffsetMetres, float speedMetresPerSecond,
+                                  int screenHeightPx, int headerHeightPx, int panelHeightPx,
+                                  boolean junctionDetail) {
         if (path == null || path.size() < 2) {
             return new Frame(gps, 16.5, 0, 0);
         }
@@ -63,11 +77,25 @@ public final class NavigationCamera {
         double horizon = clamp(Math.max(
                 junctionAhead + Math.max(55, speed * 4.0),
                 Math.max(180, speed * 9 + 80)), 180, 1350);
+        boolean detailApproach = junctionDetail && junctionAhead <= 420;
+        if (detailApproach) {
+            // More detail without clipping the turn or the safe exit distance.
+            // High-speed driving always reserves a longer visible approach.
+            double safeToShow = junctionAhead + Math.max(62, speed * 4.0);
+            double highSpeedLookAhead = Math.max(160, speed * 8 + 70);
+            horizon = Math.max(safeToShow, Math.max(highSpeedLookAhead,
+                    horizon * 0.86));
+        }
 
         // Stronger forward perspective on long approaches; ease toward a
         // clearer overhead junction diagram as the manoeuvre gets close.
         double tilt = clamp(28 + junctionAhead * 0.033
                 + Math.min(5, speed * 0.16), 28, 48);
+        if (detailApproach) {
+            // More overhead than the default 3D view, especially for exits.
+            double blend = 1 - junctionAhead / 420.0;
+            tilt = Math.max(17, tilt - 13 * blend);
+        }
 
         // Pitch foreshortens the near/far road. Reserve extra world-space
         // height so tilting does not crop the approaching junction.
@@ -88,7 +116,8 @@ public final class NavigationCamera {
         double centerAlong = progress + lead
                 + (visibleCenterY - screenCenterY) * metresPerPixel;
         centerAlong = Math.min(centerAlong,
-                nextJunctionOffsetMetres + Math.max(25, horizon * 0.13));
+                nextJunctionOffsetMetres + Math.max(detailApproach ? 34 : 25,
+                        horizon * (detailApproach ? 0.17 : 0.13)));
         centerAlong = clamp(centerAlong, progress, routeLength);
         GeoMath.Point center = GeoMath.pointAtDistance(path, centerAlong);
 
