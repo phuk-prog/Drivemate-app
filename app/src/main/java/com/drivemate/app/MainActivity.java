@@ -207,7 +207,7 @@ public final class MainActivity extends Activity implements LocationListener {
         updateFollowButton();
         if (!mapGestureWasNotified) {
             mapGestureWasNotified = true;
-            Toast.makeText(this, "Map follow paused · tap ◎ to recenter",
+            Toast.makeText(this, "Map follow paused · tap the highlighted recenter button",
                     Toast.LENGTH_SHORT).show();
         }
     }
@@ -1052,8 +1052,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Clear recent destinations",
                 "About DriveMate",
                 "Map colours · " + themeModeName(),
-                "Verified hazard voice alerts · " + (hazardWarningEnabled ? "On" : "Off"),
-                "Verified speed voice alerts · " + (speedWarningEnabled ? "On" : "Off")
+                "Verified hazard alerts (when available) · " + (hazardWarningEnabled ? "On" : "Off"),
+                "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off")
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
