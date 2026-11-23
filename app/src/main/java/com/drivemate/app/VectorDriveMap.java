@@ -396,17 +396,21 @@ public final class VectorDriveMap {
     public void setEntrance(GeoMath.Point point) {
         pendingEntrance = point;
         if (!ready() || entranceSource == null) return;
-        entranceSource.setGeoJson(point == null
-                ? FeatureCollection.fromFeatures(new Feature[0])
-                : Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)));
+        if (point == null)
+            entranceSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
+        else
+            entranceSource.setGeoJson(Feature.fromGeometry(
+                    Point.fromLngLat(point.lon, point.lat)));
     }
 
     public void setParkedCar(GeoMath.Point point) {
         pendingParked = point;
         if (!ready() || parkedSource == null) return;
-        parkedSource.setGeoJson(point == null
-                ? FeatureCollection.fromFeatures(new Feature[0])
-                : Feature.fromGeometry(Point.fromLngLat(point.lon, point.lat)));
+        if (point == null)
+            parkedSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
+        else
+            parkedSource.setGeoJson(Feature.fromGeometry(
+                    Point.fromLngLat(point.lon, point.lat)));
     }
 
     public void setCamera(GeoMath.Point center, double zoom, double bearing) {
