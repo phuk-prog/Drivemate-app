@@ -23,6 +23,24 @@ The branch-only `.github/workflows/stage1-tests-only.yml` runs:
 
 **No release APK, signing job, PR merge, or release upload** is part of this workflow.
 
+## Isolated preview for on-device testing
+
+The `debug` variant changes only the test package ID to
+`com.drivemate.android.stage1` and labels the app **DriveMate Stage 1 Test**.
+It can be installed beside stable `com.drivemate.android`, without uninstalling
+or updating the stable app. This debug app uses **separate app data and settings**
+and needs its own TomTom API key configuration.
+
+The branch-specific `.github/workflows/stage1-debug-preview.yml` runs
+`gradle :app:testDebugUnitTest :app:assembleDebug` and uploads **only a debug APK**.
+It verifies the alternate package ID and label before uploading. **Never install
+the preview expecting it to update the privately signed 1.6.1 release.** The CI
+debug signing certificate can change between runs, so an older test build may
+need removal before installing a newer preview build.
+
+No `:app:assembleRelease`, private release signing, or `main` merge is permitted
+without separate approval.
+
 ## Physical Android test checklist — still required
 
 - [ ] Start a preview, then navigate: home/header controls disappear while driving, route and turn are visible, bottom ETA/time/distance and four compact controls remain reachable on small screens.
