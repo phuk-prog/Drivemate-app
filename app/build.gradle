@@ -8,15 +8,15 @@ android {
         applicationId 'com.drivemate.android'
         minSdk 26
         targetSdk 34
-        versionCode 100700
-        versionName '1.7.0-rc1'
+        versionCode 100701
+        versionName '1.7.0-rc2'
     }
     // Stage 1 test installs alongside the stable 1.6.1 app.
     // Only the debug variant gets this alternate ID; release settings remain unchanged.
     buildTypes {
         debug {
-            applicationIdSuffix '.all11'
-            versionNameSuffix '-all11-test'
+            applicationIdSuffix '.zoom'
+            versionNameSuffix '-zoom-test'
         }
     }
     // PMTiles archives already compress their own tile/index data. Keep the
