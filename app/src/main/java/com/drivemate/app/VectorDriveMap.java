@@ -203,6 +203,10 @@ public final class VectorDriveMap {
 
     private void loadStyle() {
         if (disposed || map == null) return;
+        // Re-validate rendered UK roads after every theme reload. A previous
+        // READY report must not prove the new style has rendered anything.
+        roadHealth.reset();
+        previouslyReported = RoadDisplayHealth.State.NOT_APPLICABLE;
         try {
             String json = readAsset(activity, nightMode
                     ? "drivemate_vector_style_night.json"
