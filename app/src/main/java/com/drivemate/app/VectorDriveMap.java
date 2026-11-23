@@ -83,6 +83,14 @@ public final class VectorDriveMap {
 
     public View view() { return view; }
     public boolean ready() { return styleReady && map != null; }
+    /** Current GPU map-camera state for seamless vector/legacy switching. */
+    public double currentZoom() {
+        return ready() ? map.getCameraPosition().zoom : pendingZoom;
+    }
+    public double currentBearing() {
+        return ready() ? map.getCameraPosition().bearing : pendingBearing;
+    }
+
     public void setVisible(boolean visible) {
         view.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
     }
