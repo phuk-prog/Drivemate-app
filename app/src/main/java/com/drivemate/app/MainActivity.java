@@ -275,7 +275,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 vectorRoadsReady = true;
                                 if (useLocalMap && !autoFallback) {
                                     updateMapVisibility();
-                                    setStatus("DriveMate map ready · UK streets visible");
+                                    if (!active) setStatus("DriveMate map ready · UK streets visible");
                                 }
                             } else if (status == RoadDisplayHealth.State.FAILED
                                     && useLocalMap && !autoFallback) {
@@ -724,7 +724,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 northUp ? "Map orientation · north up" : "Map orientation · direction up",
                 closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
-                useLocalMap ? "Map · DriveMate local vector" : "Map · TomTom online raster",
+                autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
+                        : useLocalMap ? "Map · DriveMate local vector"
+                        : "Map · TomTom online raster",
                 "Nearby map cache & Wi-Fi prefetch",
                 "Set or change Home",
                 "Set or change Work",
@@ -1153,9 +1155,9 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         userPin.setPosition(point);
-        if (vectorMap != null) {
+        if (vectorMap != null && useLocalMap) {
             vectorMap.setVehicle(smoothed);
-            vectorMap.prefetch(gpsPoint(fix));
+            if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
         }
         if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(fix.getBearing());
@@ -1218,6 +1220,11 @@ public final class MainActivity extends Activity implements LocationListener {
             if (Math.abs(map.getZoomLevelDouble() - zoom) > 0.1)
                 map.getController().setZoom(zoom);
             map.getController().setCenter(new GeoPoint(position.lat, position.lon));
+            if (useLocalMap && !autoFallback && vectorMap != null) {
+                // The candidate map needs the same real UK camera position
+                // in order to request and *render* street tiles for verification.
+                vectorMap.setCamera(position, zoom, 0);
+            }
         }
         lastCameraCenter = position;
     }
@@ -1281,6 +1288,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 map.setMapOrientation(adjusted);
             }
             map.getController().setCenter(new GeoPoint(camera.center.lat, camera.center.lon));
+            if (useLocalMap && !autoFallback && vectorMap != null)
+                vectorMap.setCamera(camera.center, boundedZoom,
+                        northUp ? 0 : camera.roadBearingDegrees);
         }
         lastCameraCenter = camera.center;
         lastCameraUpdate = now;
