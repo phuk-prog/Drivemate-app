@@ -35,7 +35,9 @@ import android.location.GnssStatus;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
+import android.location.LocationRequest;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.media.AudioManager;
 import android.os.Handler;
@@ -1528,6 +1530,22 @@ public final class MainActivity extends Activity implements LocationListener {
                 return;
             }
             boolean requested = false;
+            // Android 12+: the platform fused provider combines GNSS, Wi-Fi, cell and
+            // motion sensors. FixQualityPolicy ranks it above raw GPS; raw GPS stays
+            // registered as a fallback and to drive the satellite count.
+            boolean fused = false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    && locationManager.hasProvider(LocationManager.FUSED_PROVIDER)
+                    && locationManager.isProviderEnabled(LocationManager.FUSED_PROVIDER)) {
+                LocationRequest request = new LocationRequest.Builder(0L)
+                        .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
+                        .setMinUpdateIntervalMillis(0L)
+                        .build();
+                locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER,
+                        request, getMainExecutor(), this);
+                fused = true;
+                requested = true;
+            }
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 // Ask for the fastest rate the GNSS hardware supports (0 ms, 0 m).
                 // Android delivers at the receiver's own maximum, typically 1 Hz
@@ -1538,7 +1556,9 @@ public final class MainActivity extends Activity implements LocationListener {
                         new Handler(Looper.getMainLooper()));
                 requested = true;
             }
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+            // Fused already uses Wi-Fi and cell, so the network provider is only
+            // needed on older phones.
+            if (!fused && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 // Maximum rate here too; the fix gate decides which fixes are used.
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
                         0L, 0f, this);
@@ -1564,7 +1584,7 @@ public final class MainActivity extends Activity implements LocationListener {
         FixQualityPolicy.Sample sample = new FixQualityPolicy.Sample(
                 fix.getLatitude(), fix.getLongitude(), fix.getTime(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
-                LocationManager.GPS_PROVIDER.equals(fix.getProvider()));
+                fixSource(fix));
         if (!FixQualityPolicy.accept(lastAcceptedFix, sample)) return;
         lastAcceptedFix = sample;
         deadReckoner.onFix(new GeoMath.Point(fix.getLatitude(), fix.getLongitude()),
@@ -1643,6 +1663,16 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (active && route != null && !routing) updateGuidance(fix);
         if (!active && !showingVector()) map.postInvalidateOnAnimation();
+    }
+
+    /** Maps a fix's provider to its FixQualityPolicy rank. */
+    private static int fixSource(Location fix) {
+        String provider = fix.getProvider();
+        // "fused" is LocationManager.FUSED_PROVIDER (API 31); the literal keeps
+        // this method safe to call on older phones.
+        if ("fused".equals(provider)) return FixQualityPolicy.SOURCE_FUSED;
+        if (LocationManager.GPS_PROVIDER.equals(provider)) return FixQualityPolicy.SOURCE_GPS;
+        return FixQualityPolicy.SOURCE_NETWORK;
     }
 
     /** " · N satellites" once GNSS has reported; empty before that. */
