@@ -127,6 +127,20 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean homeMode = true;
     private LinearLayout homePanel;
     private LinearLayout navigationPanel;
+    private LinearLayout topMapOverlay;
+    private LinearLayout searchBar;
+    private LinearLayout drivingTopPanel;
+    private LinearLayout previewTurnRow;
+    private LinearLayout previewDetailsRow;
+    private LinearLayout bottomActionRow;
+    private LinearLayout.LayoutParams bottomActionsParams;
+    private TextView tripEtaValue;
+    private TextView tripMinutesValue;
+    private TextView tripDistanceValue;
+    private TextView topInstructionText;
+    private TextView topTurnTitle;
+    private TextView topNextTurnText;
+    private TurnArrowView topTurnArrow;
     private LinearLayout recentList;
     private Button homeTile;
     private Button workTile;
@@ -330,7 +344,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.4.1", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.4.2", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -344,7 +358,8 @@ public final class MainActivity extends Activity implements LocationListener {
         header.addView(settings, new LinearLayout.LayoutParams(dp(49), dp(49)));
         top.addView(header, new LinearLayout.LayoutParams(-1, dp(68)));
 
-        LinearLayout search = new LinearLayout(this);
+        searchBar = new LinearLayout(this);
+        LinearLayout search = searchBar;
         search.setGravity(Gravity.CENTER_VERTICAL);
         search.setPadding(dp(10), dp(5), dp(8), dp(5));
         search.setBackground(rounded(Color.rgb(246, 251, 253), 16));
@@ -411,6 +426,13 @@ public final class MainActivity extends Activity implements LocationListener {
         searchPos.setMargins(dp(10), dp(11), dp(10), dp(7));
         top.addView(search, searchPos);
 
+        drivingTopPanel = createDrivingTopPanel();
+        LinearLayout.LayoutParams guidanceTopPos = new LinearLayout.LayoutParams(-1, -2);
+        guidanceTopPos.setMargins(dp(10), dp(6), dp(10), dp(6));
+        top.addView(drivingTopPanel, guidanceTopPos);
+        drivingTopPanel.setVisibility(View.GONE);
+        topMapOverlay = top;
+
         FrameLayout.LayoutParams topPos = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
         frame.addView(top, topPos);
 
@@ -422,7 +444,8 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.setElevation(dp(10));
         banner = text("Ready to navigate", 12, CYAN, true);
         navigationPanel.addView(banner);
-        LinearLayout turnRow = new LinearLayout(this);
+        previewTurnRow = new LinearLayout(this);
+        LinearLayout turnRow = previewTurnRow;
         turnRow.setOrientation(LinearLayout.HORIZONTAL);
         turnRow.setGravity(Gravity.CENTER_VERTICAL);
         maneuverIcon = new TurnArrowView(this);
@@ -445,7 +468,8 @@ public final class MainActivity extends Activity implements LocationListener {
         routeSummary = text("", 13, Color.rgb(194, 226, 238), false);
         routeSummary.setVisibility(View.GONE);
         navigationPanel.addView(routeSummary);
-        LinearLayout details = new LinearLayout(this);
+        previewDetailsRow = new LinearLayout(this);
+        LinearLayout details = previewDetailsRow;
         details.setGravity(Gravity.CENTER_VERTICAL);
         distanceText = text("Distance: —", 13, Color.WHITE, false);
         details.addView(distanceText, new LinearLayout.LayoutParams(0, -2, 1));
@@ -458,7 +482,8 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.addView(details, detailsPos);
         gpsAccuracyText = text("", 11, Color.rgb(190, 219, 230), false);
         navigationPanel.addView(gpsAccuracyText);
-        LinearLayout navActions = new LinearLayout(this);
+        bottomActionRow = new LinearLayout(this);
+        LinearLayout navActions = bottomActionRow;
         navActions.setGravity(Gravity.CENTER);
         startButton = chip("▶ Start");
         startButton.setVisibility(View.GONE);
@@ -470,6 +495,7 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setOnClickListener(v -> saveCurrentDestination());
         navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         repeatButton = chip("🔊 Repeat");
+        repeatButton.setContentDescription("Repeat next spoken turn");
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
             if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
@@ -477,21 +503,22 @@ public final class MainActivity extends Activity implements LocationListener {
         });
         navActions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         refreshButton = chip("↻ Refresh");
+        refreshButton.setContentDescription("Refresh traffic-aware route");
         refreshButton.setVisibility(View.GONE);
         refreshButton.setOnClickListener(v -> planRoute(false));
         navActions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        LinearLayout.LayoutParams navActionsPos = new LinearLayout.LayoutParams(-1, -2);
-        navActionsPos.topMargin = dp(10);
-        navigationPanel.addView(navActions, navActionsPos);
+        bottomActionsParams = new LinearLayout.LayoutParams(-1, -2);
+        bottomActionsParams.topMargin = dp(10);
+        navigationPanel.addView(navActions, bottomActionsParams);
         stopButton = chip("End navigation");
         stopButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
                 Color.rgb(42, 80, 100)));
         stopButton.setTextColor(Color.WHITE);
         stopButton.setVisibility(View.GONE);
         stopButton.setOnClickListener(v -> stopNavigation(false));
-        LinearLayout.LayoutParams stopPos = new LinearLayout.LayoutParams(-1, dp(42));
-        stopPos.topMargin = dp(8);
-        navigationPanel.addView(stopButton, stopPos);
+        // On a route the three compact controls occupy one row at the bottom.
+        // The map is no longer covered by a large instruction/control sheet.
+        navActions.addView(stopButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         FrameLayout.LayoutParams navPanelPos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         navPanelPos.setMargins(dp(8), 0, dp(8), dp(9));
         frame.addView(navigationPanel, navPanelPos);
@@ -615,6 +642,102 @@ public final class MainActivity extends Activity implements LocationListener {
                     ? View.VISIBLE : View.INVISIBLE);
     }
 
+    /**
+     * High-priority driving information stays at the top of the actual road map,
+     * below the DriveMate brand bar. Search and the large bottom guidance pane
+     * are reserved for Home / route preview, not live driving.
+     */
+    private LinearLayout createDrivingTopPanel() {
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setElevation(dp(7));
+
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setGravity(Gravity.CENTER_VERTICAL);
+        metrics.setPadding(dp(7), dp(5), dp(7), dp(5));
+        metrics.setBackground(rounded(DARK, 14));
+        tripEtaValue = addDrivingMetric(metrics, "ETA");
+        tripMinutesValue = addDrivingMetric(metrics, "MIN LEFT");
+        tripDistanceValue = addDrivingMetric(metrics, "DISTANCE LEFT");
+        container.addView(metrics, new LinearLayout.LayoutParams(-1, dp(67)));
+
+        LinearLayout turnCard = new LinearLayout(this);
+        turnCard.setOrientation(LinearLayout.VERTICAL);
+        turnCard.setPadding(dp(12), dp(9), dp(12), dp(10));
+        turnCard.setBackground(rounded(Color.rgb(14, 47, 66), 14));
+        LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
+        turnCardPos.topMargin = dp(6);
+        container.addView(turnCard, turnCardPos);
+
+        topTurnTitle = text("NEXT TURN", 10, CYAN, true);
+        topTurnTitle.setLetterSpacing(0.08f);
+        topTurnTitle.setSingleLine(true);
+        topTurnTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        turnCard.addView(topTurnTitle);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.HORIZONTAL);
+        content.setGravity(Gravity.CENTER_VERTICAL);
+        topTurnArrow = new TurnArrowView(this);
+        LinearLayout.LayoutParams arrow = new LinearLayout.LayoutParams(dp(54), dp(55));
+        arrow.rightMargin = dp(11);
+        content.addView(topTurnArrow, arrow);
+        topInstructionText = text("Preparing next instruction…", 18, Color.WHITE, true);
+        topInstructionText.setMaxLines(2);
+        topInstructionText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        content.addView(topInstructionText, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams contentPos = new LinearLayout.LayoutParams(-1, -2);
+        contentPos.topMargin = dp(2);
+        turnCard.addView(content, contentPos);
+
+        topNextTurnText = text("", 12, Color.rgb(201, 231, 239), false);
+        topNextTurnText.setSingleLine(true);
+        topNextTurnText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
+        thenPos.topMargin = dp(1);
+        turnCard.addView(topNextTurnText, thenPos);
+        return container;
+    }
+
+    private TextView addDrivingMetric(LinearLayout row, String label) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER);
+        TextView caption = text(label, 10, Color.rgb(189, 220, 230), true);
+        caption.setGravity(Gravity.CENTER);
+        cell.addView(caption);
+        TextView number = text("—", 21, Color.WHITE, true);
+        number.setGravity(Gravity.CENTER);
+        number.setSingleLine(true);
+        number.setAutoSizeTextTypeUniformWithConfiguration(
+                13, 21, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        cell.addView(number);
+        row.addView(cell, new LinearLayout.LayoutParams(0, -1, 1));
+        return number;
+    }
+
+    private void applyNavigationChrome() {
+        boolean navigating = active;
+        if (drivingTopPanel != null)
+            drivingTopPanel.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if (searchBar != null)
+            searchBar.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (banner != null) banner.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (previewTurnRow != null)
+            previewTurnRow.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (previewDetailsRow != null)
+            previewDetailsRow.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (gpsAccuracyText != null)
+            gpsAccuracyText.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (bottomActionsParams != null)
+            bottomActionsParams.topMargin = dp(navigating ? 0 : 10);
+        if (navigationPanel != null) {
+            navigationPanel.setPadding(dp(12), dp(navigating ? 6 : 12),
+                    dp(12), dp(navigating ? 6 : 12));
+            navigationPanel.requestLayout();
+        }
+    }
+
     private Button quickTile(String symbol, String label) {
         Button button = new Button(this);
         button.setAllCaps(false);
@@ -643,9 +766,12 @@ public final class MainActivity extends Activity implements LocationListener {
             followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
         }
         if (speedBadgePos != null && gpsButtonPos != null) {
-            speedBadgePos.bottomMargin = dp(show ? 320 : 225);
-            gpsButtonPos.bottomMargin = dp(show ? 327 : 230);
+            // During navigation the compact control row is only ~60dp tall.
+            // Keep GPS speed and recenter reachable without hiding the road.
+            speedBadgePos.bottomMargin = dp(show ? 320 : active ? 100 : 225);
+            gpsButtonPos.bottomMargin = dp(show ? 327 : active ? 105 : 230);
         }
+        applyNavigationChrome();
         if (show && !keyboardOpen) refreshHomePanel();
     }
 
@@ -832,7 +958,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 13:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.1")
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.2")
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
                                             + "Online TomTom routing, traffic and spoken directions. " +
@@ -1247,9 +1373,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (lastCameraUpdate > 0 && now - lastCameraUpdate < 600) return;
         if (map.getHeight() < dp(350)) return;
 
-        int headerHeight = dp(145);
+        // Use measured overlays rather than the old 145dp search/header
+        // assumption: the driving ETA and turn card now occupy the top.
+        int headerHeight = topMapOverlay != null && topMapOverlay.getHeight() > 0
+                ? topMapOverlay.getHeight() + dp(5) : dp(260);
         int bottomPanelHeight = navigationPanel.getHeight() > 0
-                ? navigationPanel.getHeight() + dp(18) : dp(245);
+                ? navigationPanel.getHeight() + dp(18) : dp(95);
         NavigationCamera.Frame camera = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), progress.alongMetres,
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
@@ -1435,10 +1564,11 @@ public final class MainActivity extends Activity implements LocationListener {
                         + calculated.timeSeconds * 1000L)));
         startButton.setVisibility(View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
-        saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save place");
+        saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save");
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
-        stopButton.setText("Cancel route");
+        stopButton.setText("Cancel");
+        stopButton.setContentDescription("Cancel route preview");
         stopButton.setVisibility(View.VISIBLE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setStatus("Route ready · tap Start when parked and ready");
@@ -1451,9 +1581,14 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        keyboardOpen = false;
+        destinationInput.clearFocus();
+        ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
         setHomeVisible(false);
         followLocation = true;
         followButton.setText("◎");
+        topTurnTitle.setText("NEXT TURN · " + destination.title);
         maneuverIcon.setVisibility(View.VISIBLE);
         nextTurnText.setVisibility(View.VISIBLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1462,7 +1597,8 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setVisibility(View.GONE);
         repeatButton.setVisibility(View.VISIBLE);
         refreshButton.setVisibility(View.VISIBLE);
-        stopButton.setText("End navigation");
+        stopButton.setText("End");
+        stopButton.setContentDescription("End navigation");
         setStatus("Navigating to " + destination.title);
         say("Navigation started. Follow the directions.");
         lastCameraUpdate = 0;
@@ -1667,15 +1803,29 @@ public final class MainActivity extends Activity implements LocationListener {
         distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
         long seconds = GuidanceLogic.remainingSeconds(leftMetres, route.lengthMetres,
                 route.timeSeconds, observedSpeed);
+        String etaClock = new SimpleDateFormat("HH:mm", Locale.UK)
+                .format(new Date(System.currentTimeMillis() + seconds * 1000L));
         journeyTimeText.setText("Time: " + NavigationUnits.duration(seconds));
-        etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
-                .format(new Date(System.currentTimeMillis() + seconds * 1000L)));
+        etaText.setText("ETA: " + etaClock);
+        // These three values live at the TOP of the driving map.
+        tripEtaValue.setText(etaClock);
+        tripEtaValue.setContentDescription("Estimated arrival " + etaClock);
+        tripMinutesValue.setText(TripHeaderFormat.minutesLeft(seconds));
+        tripMinutesValue.setContentDescription(
+                TripHeaderFormat.minutesLeft(seconds) + " remaining");
+        tripDistanceValue.setText(TripHeaderFormat.distanceLeft(leftMetres, metricUnits));
+        tripDistanceValue.setContentDescription(
+                TripHeaderFormat.distanceLeft(leftMetres, metricUnits) + " remaining");
 
         double[] offsets = new double[route.instructions.size()];
         for (int i = 0; i < route.instructions.size(); i++)
             offsets[i] = route.instructions.get(i).routeOffsetMetres;
         int next = GuidanceLogic.nextInstructionIndex(offsets, along, previousInstructionIndex);
-        if (next < 0) return;
+        if (next < 0) {
+            topInstructionText.setText("Continue along the highlighted route");
+            topNextTurnText.setText("Follow road signs");
+            return;
+        }
         previousInstructionIndex = next;
         TomTomApi.Instruction step = route.instructions.get(next);
         double untilTurn = Math.max(0, step.routeOffsetMetres - along);
@@ -1685,23 +1835,32 @@ public final class MainActivity extends Activity implements LocationListener {
                 step.turnAngleDegrees);
         maneuverIcon.update(glyph, step.exitNumber);
         maneuverIcon.setVisibility(View.VISIBLE);
-        instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)
-                + " · " + direction);
+        topTurnArrow.update(glyph, step.exitNumber);
+        String nextTurnLabel = NavigationUnits.displayDistance(untilTurn, metricUnits)
+                + " · " + direction;
+        instructionText.setText(nextTurnLabel);
+        topInstructionText.setText(nextTurnLabel);
+        topInstructionText.setContentDescription(
+                "Next turn in " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
+                + ": " + direction);
 
         if (next + 1 < route.instructions.size()) {
             TomTomApi.Instruction after = route.instructions.get(next + 1);
             double afterTurn = Math.max(0, after.routeOffsetMetres - step.routeOffsetMetres);
             String followUp = GuidanceLogic.actionLine(after.message, after.junctionType,
                     after.exitNumber);
-            nextTurnText.setText("Then "
+            String followingTurn = "Then "
                     + GuidanceLogic.symbol(after.maneuver, after.junctionType,
                             after.turnAngleDegrees) + " "
                     + NavigationUnits.displayDistance(afterTurn, metricUnits)
-                    + " later · " + followUp);
-            nextTurnText.setVisibility(View.VISIBLE);
+                    + " later · " + followUp;
+            nextTurnText.setText(followingTurn);
+            topNextTurnText.setText(followingTurn);
+            nextTurnText.setVisibility(View.GONE);
         } else {
             nextTurnText.setText("Continue towards your destination");
-            nextTurnText.setVisibility(View.VISIBLE);
+            topNextTurnText.setText("Continue towards your destination");
+            nextTurnText.setVisibility(View.GONE);
         }
 
         nextInstruction = untilTurn <= 30 ? direction
