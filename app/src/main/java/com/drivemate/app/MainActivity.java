@@ -1305,6 +1305,10 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (topTurnTitle != null) topTurnTitle.setTextColor(
                 night ? CYAN : Color.rgb(0, 105, 130));
+        if (banner != null) banner.setTextColor(
+                night ? CYAN : Color.rgb(0, 96, 130));
+        if (topTurnArrow != null) topTurnArrow.setNightMode(night);
+        if (maneuverIcon != null) maneuverIcon.setNightMode(night);
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
     }
 
