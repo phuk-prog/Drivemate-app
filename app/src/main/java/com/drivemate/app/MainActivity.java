@@ -115,6 +115,102 @@ public final class MainActivity extends Activity implements LocationListener {
             gpsHandler.postDelayed(this, 5000);
         }
     };
+    /**
+     * The Android display vsync clock drives visual interpolation, independently
+     * of the ~1Hz GPS fixes. GPU camera updates are capped near 30fps;
+     * the legacy raster engine remains near 9fps to avoid tile redraw stalls.
+     * Choreographer avoids the timer drift of repeated Handler.postDelayed.
+     */
+    private long lastVisualTickMs;
+    private long motionStatsStartMs;
+    private int motionFrames;
+    private final android.view.Choreographer.FrameCallback smoothFrameClock =
+            new android.view.Choreographer.FrameCallback() {
+        @Override public void doFrame(long frameTimeNanos) {
+            if (!active || !followLocation || smoothFollow == null || isFinishing()) {
+                smoothLoopRunning = false;
+                return;
+            }
+            long now = SystemClock.elapsedRealtime();
+            long interval = showingVector() ? 32 : 110;
+            if (lastVisualTickMs == 0 || now - lastVisualTickMs >= interval) {
+                lastVisualTickMs = now;
+                SmoothFollowCamera.Frame frame = smoothFollow.frame(now);
+                if (frame != null) {
+                    if (showingVector() && vectorMap != null) {
+                        vectorMap.followFrame(frame);
+                    } else {
+                        if (map != null) {
+                            if (userPin != null) {
+                                userPin.setPosition(new GeoPoint(
+                                        frame.vehicle.lat, frame.vehicle.lon));
+                                userPin.setRotation((float) frame.bearing);
+                            }
+                            map.getController().setCenter(new GeoPoint(
+                                    frame.center.lat, frame.center.lon));
+                            if (smoothTick % 3 == 0
+                                    && Math.abs(map.getZoomLevelDouble() - frame.zoom) >= 0.12)
+                                map.getController().setZoom(frame.zoom);
+                            float delta = (float) MapFollowPolicy.shortestHeadingDifference(
+                                    -frame.bearing, map.getMapOrientation());
+                            if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
+                                map.setMapOrientation(map.getMapOrientation() + delta);
+                            map.postInvalidateOnAnimation();
+                        }
+                        if (vectorMap != null && useLocalMap && !autoFallback
+                                && smoothTick % 5 == 0) vectorMap.followFrame(frame);
+                    }
+                    motionFrames++;
+                }
+                smoothTick++;
+                if (motionStatsStartMs == 0) motionStatsStartMs = now;
+                if (now - motionStatsStartMs >= 10000) {
+                    int fps = (int) Math.round(motionFrames * 1000.0
+                            / Math.max(1, now - motionStatsStartMs));
+                    // Performance metrics never contain GPS coordinates or
+                    // destination information.
+                    android.util.Log.i("DriveMateCamera",
+                            "Display camera updates/sec=" + fps
+                                    + ", engine=" + (showingVector() ? "gpu" : "raster"));
+                    motionFrames = 0;
+                    motionStatsStartMs = now;
+                }
+            }
+            android.view.Choreographer.getInstance().postFrameCallback(this);
+        }
+    };
+
+    private void startSmoothLoop() {
+        if (smoothLoopRunning || !foreground || !active
+                || !followLocation || smoothFollow == null) return;
+        smoothLoopRunning = true;
+        smoothTick = 0;
+        lastVisualTickMs = 0;
+        motionFrames = 0;
+        motionStatsStartMs = 0;
+        android.view.Choreographer.getInstance().postFrameCallback(smoothFrameClock);
+    }
+
+    private void stopSmoothLoop() {
+        android.view.Choreographer.getInstance().removeFrameCallback(smoothFrameClock);
+        smoothLoopRunning = false;
+    }
+
+    private void disengageFollowForGesture() {
+        if (!active || !followLocation) return;
+        followLocation = false;
+        stopSmoothLoop();
+        if (followButton != null) {
+            followButton.setText("◎");
+            followButton.setContentDescription("Resume map following my location");
+        }
+        if (!mapGestureWasNotified) {
+            mapGestureWasNotified = true;
+            Toast.makeText(this, "Map follow paused · tap ◎ to recenter",
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private MapView map;
     private DriveTileServer driveTiles;
     private VectorDriveMap vectorMap;
@@ -202,6 +298,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private long offRouteSince;
     private long lastCameraUpdate;
     private GeoMath.Point lastCameraCenter;
+    private GeoMath.Point displayGps;
+    private SmoothFollowCamera smoothFollow;
+    private boolean smoothLoopRunning;
+    private boolean foreground;
+    private int smoothTick;
+    private boolean mapGestureWasNotified;
     private int requestGeneration;
     private int spokenDistanceIndex = -1;
     private int spokenCloseIndex = -1;
@@ -272,6 +374,18 @@ public final class MainActivity extends Activity implements LocationListener {
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
         map = new MapView(this);
         map.setMultiTouchControls(true);
+        final float[] touchAnchor = new float[2];
+        map.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
+                touchAnchor[0] = event.getX();
+                touchAnchor[1] = event.getY();
+            } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_MOVE
+                    && Math.hypot(event.getX() - touchAnchor[0],
+                            event.getY() - touchAnchor[1]) > dp(16)) {
+                disengageFollowForGesture();
+            }
+            return false;
+        });
         map.setMinZoomLevel(2.0);
         map.getController().setZoom(15.5);
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
@@ -305,6 +419,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 }
                             }
                         });
+                vectorMap.setOnUserGesture(this::disengageFollowForGesture);
                 // Place MapLibre below the existing TomTom map while waiting
                 // for first verifiably painted UK street features.
                 mapHost.addView(vectorMap.view(), 0,
@@ -344,7 +459,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.4.2", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.5.0", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -600,9 +715,12 @@ public final class MainActivity extends Activity implements LocationListener {
         followButton.setOnClickListener(v -> {
             followLocation = true;
             followButton.setText("◎");
+            followButton.setContentDescription("Centre map on my GPS position");
             if (currentLocation != null && active && route != null) {
+                smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
                 lastCameraUpdate = 0;
                 updateGuidance(currentLocation);
+                startSmoothLoop();
             } else if (currentLocation != null) {
                 centreOnLocation(true);
             }
@@ -958,7 +1076,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 13:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.2")
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.5.0")
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
                                             + "Online TomTom routing, traffic and spoken directions. " +
@@ -1272,6 +1390,7 @@ public final class MainActivity extends Activity implements LocationListener {
         GeoMath.Point smoothed = vehicleFilter.apply(gpsPoint(fix), fix.getTime(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fix.hasSpeed() ? fix.getSpeed() : 0f);
+        displayGps = smoothed;
         GeoPoint point = new GeoPoint(smoothed.lat, smoothed.lon);
         if (userPin == null) {
             userPin = new Marker(map);
@@ -1280,12 +1399,15 @@ public final class MainActivity extends Activity implements LocationListener {
             userPin.setIcon(makeCarIcon());
             map.getOverlays().add(userPin);
         }
-        userPin.setPosition(point);
+        // The independent frame clock owns the moving marker while driving.
+        // Never teleport it back to each noisy 1Hz GPS fix.
+        if (!active || smoothFollow == null) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
-            vectorMap.setVehicle(smoothed);
+            if (!active || smoothFollow == null) vectorMap.setVehicle(smoothed);
             if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
         }
-        if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
+        if ((!active || smoothFollow == null) && fix.hasBearing()
+                && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
@@ -1312,7 +1434,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
-        if (!showingVector()) map.postInvalidateOnAnimation();
+        if (!active && !showingVector()) map.postInvalidateOnAnimation();
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -1360,69 +1482,38 @@ public final class MainActivity extends Activity implements LocationListener {
      * map, with the next manoeuvre and exit road above it. The camera uses
      * road geometry rather than a noisy stopped-vehicle compass bearing.
      */
+    /**
+     * GPS-cadence planning only: heavy route geometry and junction look-ahead
+     * never run on every rendered frame. SmoothFollowCamera owns interpolation,
+     * zoom hysteresis and bearing changes on the independent UI clock.
+     */
     private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
                                      double nextJunctionOffsetMetres) {
         if (!active || !followLocation || route == null || gpsLost
-                || (fix.hasAccuracy() && fix.getAccuracy() > 55)
-                || progress.offRouteMetres > 110) {
-            return;
-        }
+                || progress.offRouteMetres > 110
+                || (fix.hasAccuracy() && fix.getAccuracy() > 75)
+                || map.getHeight() < dp(350)) return;
         long now = SystemClock.elapsedRealtime();
-        // GPS arrives about once a second. Do not queue another animated pan:
-        // by the time osmdroid finishes it, the vehicle has already moved.
-        if (lastCameraUpdate > 0 && now - lastCameraUpdate < 600) return;
-        if (map.getHeight() < dp(350)) return;
+        if (lastCameraUpdate > 0 && now - lastCameraUpdate < 450) return;
+        if (smoothFollow == null)
+            smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
 
-        // Use measured overlays rather than the old 145dp search/header
-        // assumption: the driving ETA and turn card now occupy the top.
         int headerHeight = topMapOverlay != null && topMapOverlay.getHeight() > 0
                 ? topMapOverlay.getHeight() + dp(5) : dp(260);
         int bottomPanelHeight = navigationPanel.getHeight() > 0
                 ? navigationPanel.getHeight() + dp(18) : dp(95);
-        NavigationCamera.Frame camera = NavigationCamera.calculate(
-                route.points, gpsPoint(fix), progress.alongMetres,
-                nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
-                map.getHeight(), headerHeight, bottomPanelHeight);
-
-        boolean vector = showingVector();
-        double targetZoom = Math.min(19.0, camera.zoom + (closeZoom ? 0.45 : 0));
-        double currentZoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
-        double wantedOrientation = northUp ? 0
-                : (vector ? camera.roadBearingDegrees : -camera.roadBearingDegrees);
-        double currentOrientation = vector ? vectorMap.currentBearing() : map.getMapOrientation();
-        double headingChange = MapFollowPolicy.shortestHeadingDifference(
-                wantedOrientation, currentOrientation);
-        double centerMovement = lastCameraCenter == null ? Double.POSITIVE_INFINITY
-                : GeoMath.distance(lastCameraCenter, camera.center);
-        float speed = fix.hasSpeed() ? fix.getSpeed() : 0f;
-        if (!MapFollowPolicy.shouldMove(lastCameraUpdate, now, centerMovement,
-                speed, targetZoom - currentZoom, headingChange)) return;
-
-        double boundedZoom = currentZoom + Math.max(-0.5,
-                Math.min(0.5, targetZoom - currentZoom));
-        if (vector) {
-            double bearing = northUp ? 0 : currentOrientation +
-                    (speed >= 1.8f ? Math.max(-20, Math.min(20, headingChange)) : 0);
-            // Moving the hidden raster map too would request the same roads
-            // twice and undo much of the GPU renderer's responsiveness gain.
-            vectorMap.setCamera(camera.center, boundedZoom, bearing);
-        } else {
-            if (Math.abs(targetZoom - currentZoom) > 0.30)
-                map.getController().setZoom(boundedZoom);
-            if (northUp) {
-                if (Math.abs(headingChange) >= 1) map.setMapOrientation(0);
-            } else if (speed >= 1.8f && Math.abs(headingChange) >= 8) {
-                float adjusted = (float) (currentOrientation
-                        + Math.max(-20, Math.min(20, headingChange)));
-                map.setMapOrientation(adjusted);
-            }
-            map.getController().setCenter(new GeoPoint(camera.center.lat, camera.center.lon));
-            if (useLocalMap && !autoFallback && vectorMap != null)
-                vectorMap.setCamera(camera.center, boundedZoom,
-                        northUp ? 0 : camera.roadBearingDegrees);
-        }
-        lastCameraCenter = camera.center;
+        double along = stabilizedAlong < 0 ? progress.alongMetres : stabilizedAlong;
+        float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
+        NavigationCamera.Frame target = NavigationCamera.calculate(
+                route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
+                velocity, map.getHeight(), headerHeight, bottomPanelHeight);
+        float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
+        smoothFollow.onGps(displayGps != null ? displayGps : gpsPoint(fix),
+                along, progress.offRouteMetres, accuracy, velocity,
+                Math.max(0, nextJunctionOffsetMetres - along),
+                target, northUp, now);
         lastCameraUpdate = now;
+        startSmoothLoop();
     }
 
     private void searchDestination() {
@@ -1581,6 +1672,7 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
         keyboardOpen = false;
         destinationInput.clearFocus();
         ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE))
@@ -1606,6 +1698,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stabilizedAlong = -1;
         observedSpeed = 0;
         updateGuidance(currentLocation);
+        startSmoothLoop();
     }
 
     private void selectDestination(TomTomApi.Destination selected) {
@@ -1677,6 +1770,14 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
                     route = calculated;
+                    if (active) {
+                        // New route means a new geometry arc-length index.
+                        // Never blend the camera through an unrelated route.
+                        smoothFollow = new SmoothFollowCamera(
+                                new RouteMotionIndex(calculated.points));
+                        lastCameraUpdate = 0;
+                        lastCameraCenter = null;
+                    }
                     offRouteSince = 0;
                     previousInstructionIndex = 0;
                     stabilizedAlong = -1;
@@ -1880,6 +1981,8 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void stopNavigation(boolean arrived) {
+        stopSmoothLoop();
+        smoothFollow = null;
         ++requestGeneration;
         routing = false;
         active = false;
@@ -1988,14 +2091,18 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override public void onResume() {
         super.onResume();
+        foreground = true;
         if (map != null) map.onResume();
         if (vectorMap != null) vectorMap.onResume();
         startLocation();
         gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.postDelayed(gpsWatchdog, 5000);
+        if (active) startSmoothLoop();
     }
 
     @Override public void onPause() {
+        foreground = false;
+        stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
         if (map != null) map.onPause();
