@@ -1,4 +1,18 @@
-## DriveMate v1.5.0 — smoother follow-route camera
+## DriveMate v1.6.0 — forward-looking junction camera
+
+The MapLibre driving view now pitches into a forward-looking perspective,
+zooms toward the upcoming turn, and compensates for on-screen navigation
+panels so the approaching road and junction remain visible. The camera eases
+from a stronger tilted overview to a clearer, closer view at a turn. Directional
+vehicle arrows now show travel relative to the rotating map in both GPU and
+raster views. The osmdroid/TomTom fallback remains **2D**; map tilt is only
+available when the DriveMate Map vector renderer is functioning.
+
+[Camera changes, limits and testing guidance](docs/DRIVEMATE-1.6-JUNCTION-CAMERA.md).
+This is not yet verified on a moving Android device and must not be relied upon
+until appropriately tested.
+
+# DriveMate v1.5.0 — smoother follow-route camera
 
 DriveMate now samples an indexed TomTom route on Android's display clock for
 continuous camera/vehicle motion between GPS updates (GPU up to 30fps, raster
