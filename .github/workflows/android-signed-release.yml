@@ -1,25 +1,19 @@
 name: Build privately signed DriveMate update APK
 
-# One-time DriveMate 1.6.1 signed build on this isolated release branch.
-# Default branch signed workflow remains manual-only.
+# Manual only: ensures GitHub Actions signing secrets never run for pull requests.
 on:
   workflow_dispatch:
-  push:
-    branches: ['release/build-signed-1-6-1-20261123']
-    paths: ['.github/workflows/android-signed-release.yml']
 
 permissions:
   contents: read
 
 jobs:
   signed-apk:
-    if: github.ref == 'refs/heads/release/build-signed-1-6-1-20261123'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: 110d944435b4320806f44c01b7efc7360c83db05 # verified v1.6.1 main commit
 
       - uses: actions/setup-java@v4
         with:
