@@ -76,7 +76,8 @@ public final class SmoothFollowCamera {
         // fix. Never use snapped position for actual routing decisions.
         roadSnap = trustworthy && accuracyMetres <= 25 && offRouteMetres <= 23
                 && safeSpeed >= 1.5;
-        vehicleFix = filteredGps;
+        vehicleFix = trustworthy ? filteredGps
+                : (vehicle == null ? filteredGps : vehicle);
         if (!initialized) {
             measuredProgress = Math.max(0, Math.min(path.lengthMetres, routeProgress));
             lastAnimatedProgress = measuredProgress;
