@@ -969,6 +969,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (tripMetricsRow != null)
             tripMetricsRow.setVisibility(navigating ? View.VISIBLE : View.GONE);
         if (voiceButton != null) voiceButton.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if (!navigating) {
+            if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
+            if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
+            if (rerouteSuggestionRow != null) rerouteSuggestionRow.setVisibility(View.GONE);
+            if (speedLimitText != null) speedLimitText.setText("Limit —");
+        }
         if (searchBar != null)
             searchBar.setVisibility(navigating ? View.GONE : View.VISIBLE);
         if (banner != null) banner.setVisibility(navigating ? View.GONE : View.VISIBLE);
@@ -1110,7 +1116,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 "About DriveMate",
                 "Map colours · " + themeModeName(),
                 "Verified hazard alerts (when available) · " + (hazardWarningEnabled ? "On" : "Off"),
-                "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off")
+                "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
+                "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
+                "Overspeed alert above mapped limit · " + speedToleranceMph + " mph"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1221,6 +1229,8 @@ public final class MainActivity extends Activity implements LocationListener {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("speed_voice_alerts", speedWarningEnabled).apply();
                             break;
+                        case 17: selectRerouteMode(); break;
+                        case 18: selectSpeedTolerance(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1305,6 +1315,34 @@ public final class MainActivity extends Activity implements LocationListener {
                 }).setNegativeButton("Cancel", null).show();
     }
 
+    private void selectRerouteMode() {
+        new AlertDialog.Builder(this).setTitle("Faster-route suggestions")
+                .setSingleChoiceItems(new String[]{
+                        "Automatic · switch for substantial estimated savings",
+                        "Ask first · stay on route until I approve"
+                }, rerouteMode, (dialog, which) -> {
+                    rerouteMode = which;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("reroute_mode", which).apply();
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void selectSpeedTolerance() {
+        final String[] labels = {"3 mph", "5 mph", "7 mph", "10 mph", "15 mph"};
+        final int[] values = {3, 5, 7, 10, 15};
+        int selected = 1;
+        for (int i = 0; i < values.length; i++)
+            if (values[i] == speedToleranceMph) selected = i;
+        new AlertDialog.Builder(this).setTitle("Above mapped speed limit")
+                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                    speedToleranceMph = values[which];
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("speed_tolerance_mph", speedToleranceMph).apply();
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
     private String themeModeName() {
         return new String[]{"Automatic", "Day", "Night"}[themePreference];
     }
@@ -1364,6 +1402,10 @@ public final class MainActivity extends Activity implements LocationListener {
                 night ? CYAN : Color.rgb(0, 105, 130));
         if (banner != null) banner.setTextColor(
                 night ? CYAN : Color.rgb(0, 96, 130));
+        if (laneGuidanceText != null) laneGuidanceText.setTextColor(
+                night ? CYAN : Color.rgb(0, 101, 130));
+        if (trafficNoticeText != null) trafficNoticeText.setTextColor(
+                night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
         if (topTurnArrow != null) topTurnArrow.setNightMode(night);
         if (maneuverIcon != null) maneuverIcon.setNightMode(night);
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
