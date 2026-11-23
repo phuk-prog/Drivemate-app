@@ -48,6 +48,19 @@ public final class NavigationCamera {
                                   GeoMath.Point gps, double routeProgressMetres,
                                   double nextJunctionOffsetMetres, float speedMetresPerSecond,
                                   int screenHeightPx, int headerHeightPx, int panelHeightPx) {
+        return calculate(path, gps, routeProgressMetres, nextJunctionOffsetMetres,
+                Double.NaN, speedMetresPerSecond, screenHeightPx,
+                headerHeightPx, panelHeightPx, false, false);
+    }
+
+    /** Camera target with two-turn framing and explicitly selected detail zoom. */
+    public static Frame calculate(List<GeoMath.Point> path,
+                                  GeoMath.Point gps, double routeProgressMetres,
+                                  double nextJunctionOffsetMetres,
+                                  double followingJunctionOffsetMetres,
+                                  float speedMetresPerSecond, int screenHeightPx,
+                                  int headerHeightPx, int panelHeightPx,
+                                  boolean junctionDetailZoom, boolean complexJunction) {
         if (path == null || path.size() < 2) {
             return new Frame(gps, 16.5, 0, 0);
         }
@@ -60,14 +73,39 @@ public final class NavigationCamera {
 
         // Fit the *whole* approach, including a little road past the turn.
         // At speed the safe look-ahead expands, even for a very close turn.
-        double horizon = clamp(Math.max(
-                junctionAhead + Math.max(55, speed * 4.0),
-                Math.max(180, speed * 9 + 80)), 180, 1350);
+        // A closer, more overhead view is useful for a near urban junction.
+        // At motorway speeds retain the longer safe look-ahead and never let
+        // an optional preference crop the upcoming turning.
+        boolean detailedApproach = junctionDetailZoom && junctionAhead <= 650
+                && speed <= 22;
+        double approachPadding = detailedApproach
+                ? Math.max(42, speed * 3.2) : Math.max(55, speed * 4.0);
+        double speedHorizon = detailedApproach
+                ? Math.max(155, speed * 7.8 + 70) : Math.max(180, speed * 9 + 80);
+        double horizon = Math.max(junctionAhead + approachPadding, speedHorizon);
+
+        // A closely following second turn should stay visible rather than
+        // being cropped by a tighter close-up of the first one.
+        if (Double.isFinite(followingJunctionOffsetMetres)
+                && followingJunctionOffsetMetres >= nextJunctionOffsetMetres
+                && followingJunctionOffsetMetres - nextJunctionOffsetMetres <= 450
+                && junctionAhead <= 650) {
+            double secondAhead = followingJunctionOffsetMetres - progress;
+            horizon = Math.max(horizon, secondAhead + Math.max(55, speed * 3));
+        }
+        horizon = clamp(horizon, 155, 1350);
 
         // Stronger forward perspective on long approaches; ease toward a
         // clearer overhead junction diagram as the manoeuvre gets close.
         double tilt = clamp(28 + junctionAhead * 0.033
                 + Math.min(5, speed * 0.16), 28, 48);
+        if (complexJunction && junctionAhead < 520) {
+            // Roundabouts/forks become more top-down as the car nears them.
+            tilt = Math.max(20, tilt - 8 * (1 - junctionAhead / 520));
+        }
+        if (detailedApproach) {
+            tilt = Math.max(18, tilt - 5 * (1 - junctionAhead / 650));
+        }
 
         // Pitch foreshortens the near/far road. Reserve extra world-space
         // height so tilting does not crop the approaching junction.
@@ -87,8 +125,15 @@ public final class NavigationCamera {
         double screenCenterY = screenHeightPx * 0.5;
         double centerAlong = progress + lead
                 + (visibleCenterY - screenCenterY) * metresPerPixel;
+        // Never let the camera lead beyond the road a driver must choose.
+        // A validated second turn can extend the look-ahead, not teleport the
+        // vehicle marker or cause the camera to face an unconfirmed exit.
+        double lookAheadLimit = Double.isFinite(followingJunctionOffsetMetres)
+                && followingJunctionOffsetMetres >= nextJunctionOffsetMetres
+                && followingJunctionOffsetMetres - nextJunctionOffsetMetres <= 450
+                ? followingJunctionOffsetMetres : nextJunctionOffsetMetres;
         centerAlong = Math.min(centerAlong,
-                nextJunctionOffsetMetres + Math.max(25, horizon * 0.13));
+                lookAheadLimit + Math.max(25, horizon * 0.13));
         centerAlong = clamp(centerAlong, progress, routeLength);
         GeoMath.Point center = GeoMath.pointAtDistance(path, centerAlong);
 
