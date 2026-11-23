@@ -1,0 +1,332 @@
+{
+  "version": 8,
+  "name": "DriveMate local vector map · night",
+  "glyphs": "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+  "sources": {
+    "world": {
+      "type": "vector",
+      "url": "pmtiles://asset://world-z0-6.pmtiles",
+      "minzoom": 0,
+      "maxzoom": 6
+    },
+    "uk": {
+      "type": "vector",
+      "tiles": [
+        "__TILE_URL__"
+      ],
+      "minzoom": 0,
+      "maxzoom": 14,
+      "bounds": [
+        -14.858498,
+        49.4191999,
+        2.641786,
+        61.13564
+      ],
+      "attribution": "© OpenStreetMap contributors (ODbL 1.0)"
+    },
+    "tomtom-traffic": {
+      "type": "raster",
+      "tiles": [
+        "https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"
+      ],
+      "tileSize": 256,
+      "maxzoom": 19
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#101C2B"
+      }
+    },
+    {
+      "id": "world-earth",
+      "type": "fill",
+      "source": "world",
+      "source-layer": "earth",
+      "paint": {
+        "fill-color": "#1A2934"
+      }
+    },
+    {
+      "id": "world-water",
+      "type": "fill",
+      "source": "world",
+      "source-layer": "water",
+      "paint": {
+        "fill-color": "#123D50"
+      }
+    },
+    {
+      "id": "world-roads",
+      "type": "line",
+      "source": "world",
+      "source-layer": "roads",
+      "minzoom": 3,
+      "maxzoom": 7,
+      "paint": {
+        "line-color": "#556C80",
+        "line-width": 1.1
+      }
+    },
+    {
+      "id": "uk-land",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "land",
+      "paint": {
+        "fill-color": "#182937"
+      }
+    },
+    {
+      "id": "uk-ocean",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "ocean",
+      "paint": {
+        "fill-color": "#103B4F"
+      }
+    },
+    {
+      "id": "uk-water",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "water_polygons",
+      "paint": {
+        "fill-color": "#144257"
+      }
+    },
+    {
+      "id": "uk-park",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "sites",
+      "paint": {
+        "fill-color": "#244137",
+        "fill-opacity": 0.55
+      }
+    },
+    {
+      "id": "uk-buildings",
+      "type": "fill",
+      "source": "uk",
+      "source-layer": "buildings",
+      "minzoom": 13,
+      "paint": {
+        "fill-color": "#273B47",
+        "fill-outline-color": "#364E5D"
+      }
+    },
+    {
+      "id": "uk-road-casing",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 7,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#10202D",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          1.2,
+          12,
+          3.1,
+          14,
+          6.5,
+          18,
+          17
+        ]
+      }
+    },
+    {
+      "id": "uk-roads",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 7,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#687E8D",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          0.9,
+          12,
+          2.2,
+          14,
+          5.1,
+          18,
+          14
+        ]
+      }
+    },
+    {
+      "id": "uk-trunk",
+      "type": "line",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 6,
+      "filter": [
+        "any",
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "trunk"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "primary"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#A48453",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          7,
+          1.5,
+          12,
+          3.2,
+          14,
+          6,
+          18,
+          16
+        ]
+      }
+    },
+    {
+      "id": "uk-street-labels",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 12,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          10,
+          16,
+          14
+        ],
+        "symbol-placement": "line",
+        "text-rotation-alignment": "map"
+      },
+      "paint": {
+        "text-color": "#E0EAF0",
+        "text-halo-color": "#1C2F3D",
+        "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "uk-place-labels",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "place_labels",
+      "minzoom": 6,
+      "layout": {
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name"
+          ],
+          ""
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          6,
+          11,
+          14,
+          14
+        ]
+      },
+      "paint": {
+        "text-color": "#D5E5EC",
+        "text-halo-color": "#162B38",
+        "text-halo-width": 1.7
+      }
+    },
+    {
+      "id": "tomtom-traffic-flow",
+      "type": "raster",
+      "source": "tomtom-traffic",
+      "layout": {
+        "visibility": "none"
+      },
+      "paint": {
+        "raster-opacity": 0.57
+      }
+    }
+  ]
+}
