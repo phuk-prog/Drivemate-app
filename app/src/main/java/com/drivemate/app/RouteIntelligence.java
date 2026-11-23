@@ -114,12 +114,16 @@ public final class RouteIntelligence {
                 || !Double.isFinite(offRoute) || !Float.isFinite(accuracy)
                 || offRoute > 20 || accuracy > 25 || ageMs < 0 || ageMs > 480000)
             return null;
+        SpeedSection selected = null;
         for (SpeedSection s : sections) {
             if (s.kmh >= 5 && s.kmh <= 140 && progress >= s.start + 3
-                    && progress <= s.end - 3)
-                return s;
+                    && progress <= s.end - 3) {
+                // Conflicting overlapping values are ambiguous: show unknown.
+                if (selected != null && selected.kmh != s.kmh) return null;
+                selected = s;
+            }
         }
-        return null;
+        return selected;
     }
 
     public static boolean overspeed(double metresPerSecond, SpeedSection section,
