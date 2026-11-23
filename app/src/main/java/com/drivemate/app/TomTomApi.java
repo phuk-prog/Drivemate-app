@@ -220,11 +220,19 @@ public final class TomTomApi {
                             if (lane == null) continue;
                             String follow = lane.optString("follow", "");
                             JSONArray directions = lane.optJSONArray("directions");
-                            // Only display one unambiguous direction per lane.
-                            String label = !follow.isEmpty() ? follow
+                            // A TomTom recommendation must be one of this
+                            // lane's actual marked directions. An inconsistent
+                            // response is insufficient evidence for a lane arrow.
+                            boolean confirmedFollow = false;
+                            if (!follow.isEmpty() && directions != null) {
+                                for (int d = 0; d < directions.length(); d++)
+                                    if (follow.equals(directions.optString(d, "")))
+                                        confirmedFollow = true;
+                            }
+                            String label = confirmedFollow ? follow
                                     : directions != null && directions.length() == 1
                                             ? directions.optString(0, "") : "";
-                            lanes.add(new RouteIntelligence.Lane(label, !follow.isEmpty()));
+                            lanes.add(new RouteIntelligence.Lane(label, confirmedFollow));
                         }
                         RouteIntelligence.LaneSection candidate =
                                 new RouteIntelligence.LaneSection(from, to, lanes);
