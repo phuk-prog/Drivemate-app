@@ -1274,7 +1274,13 @@ public final class MainActivity extends Activity implements LocationListener {
                 && (vectorMap == null || vectorMap.nightMode() == night)) return;
         nightDisplay = night;
         themeApplied = true;
-        if (vectorMap != null) vectorMap.setNightMode(night);
+        boolean vectorStyleChanging = vectorMap != null && vectorMap.nightMode() != night;
+        if (vectorStyleChanging) {
+            // Keep the validated raster map visible while the next MapLibre
+            // style loads. Never present an unverified empty road surface.
+            vectorRoadsReady = false;
+            vectorMap.setNightMode(night);
+        }
         if (map != null && !apiKey.isEmpty())
             map.setTileSource(tileSource(night ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
                     night ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
@@ -1299,6 +1305,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (topTurnTitle != null) topTurnTitle.setTextColor(
                 night ? CYAN : Color.rgb(0, 105, 130));
+        if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
     }
 
 
@@ -2474,6 +2481,13 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override protected void onSaveInstanceState(Bundle state) {
         if (vectorMap != null) vectorMap.onSaveInstanceState(state);
         super.onSaveInstanceState(state);
+    }
+
+    @Override public void onConfigurationChanged(
+            android.content.res.Configuration newConfiguration) {
+        super.onConfigurationChanged(newConfiguration);
+        // Switching system day/night colours must not end an active journey.
+        applyTheme();
     }
 
     @Override public void onResume() {
