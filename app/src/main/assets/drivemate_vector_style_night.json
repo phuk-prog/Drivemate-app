@@ -1,7 +1,7 @@
 {
   "version": 8,
   "name": "DriveMate local vector map · night",
-  "glyphs": "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+  "glyphs": "asset://glyphs/{fontstack}/{range}.pbf",
   "sources": {
     "world": {
       "type": "vector",
