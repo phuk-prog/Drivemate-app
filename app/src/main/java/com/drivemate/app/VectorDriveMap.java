@@ -292,6 +292,11 @@ public final class VectorDriveMap {
         style.addLayer(routeLayer);
         // This stroke traces the real calculated route through an approaching
         // roundabout. It never attempts to deduce geometry from an exit count.
+        LineLayer junctionHalo = new LineLayer("dm-junction-casing", "dm-junction");
+        junctionHalo.setProperties(
+                PropertyFactory.lineColor(nightMode ? "#0D2030" : "#FFFFFF"),
+                PropertyFactory.lineWidth(13f), PropertyFactory.lineOpacity(0.98f));
+        style.addLayer(junctionHalo);
         LineLayer junctionLayer = new LineLayer("dm-junction-highlight", "dm-junction");
         junctionLayer.setProperties(PropertyFactory.lineColor("#12DFC7"),
                 PropertyFactory.lineWidth(8f),
