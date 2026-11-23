@@ -15,12 +15,19 @@ public final class NavigationCamera {
         public final double zoom;
         public final double roadBearingDegrees;
         public final double junctionMetres;
+        /** Exact arc length of the camera centre on the original route. */
+        public final double cameraCenterAlongMetres;
         public Frame(GeoMath.Point center, double zoom, double roadBearingDegrees,
                      double junctionMetres) {
+            this(center, zoom, roadBearingDegrees, junctionMetres, Double.NaN);
+        }
+        public Frame(GeoMath.Point center, double zoom, double roadBearingDegrees,
+                     double junctionMetres, double cameraCenterAlongMetres) {
             this.center = center;
             this.zoom = zoom;
             this.roadBearingDegrees = roadBearingDegrees;
             this.junctionMetres = junctionMetres;
+            this.cameraCenterAlongMetres = cameraCenterAlongMetres;
         }
     }
 
@@ -32,12 +39,16 @@ public final class NavigationCamera {
             return new Frame(gps, 16.5, 0, 0);
         }
 
-        double progress = clamp(routeProgressMetres, 0, GeoMath.length(path));
+        double routeLength = GeoMath.length(path);
+        double progress = clamp(routeProgressMetres, 0, routeLength);
         double junctionAhead = Math.max(0, nextJunctionOffsetMetres - progress);
         // At walking/stopped speed show junction detail; at motorway speed look
         // further ahead to allow time for safe decisions.
-        double horizon = clamp(Math.max(junctionAhead + 100,
-                Math.max(170, Math.max(0, speedMetresPerSecond) * 12)), 170, 1100);
+        // Look farther up the road BEFORE motorway speeds make a junction
+        // urgent; at slow speed retain useful street-level details.
+        double speedHorizon = Math.max(190,
+                Math.max(0, speedMetresPerSecond) * 16 + 110);
+        double horizon = clamp(Math.max(junctionAhead + 100, speedHorizon), 190, 1100);
         double viewHeight = Math.max(220, screenHeightPx - headerHeightPx - panelHeightPx);
         double metresPerPixel = horizon / (viewHeight * 0.75);
         double latFactor = Math.max(0.1, Math.cos(Math.toRadians(gps.lat)));
@@ -46,12 +57,14 @@ public final class NavigationCamera {
 
         // Centre the map on a road point ahead of the driver, then account
         // for the usable area between the header and navigation panel.
-        double leadMetres = clamp(junctionAhead * 0.53 + 40, 65, horizon * 0.52);
+        double leadMetres = clamp(junctionAhead * 0.53
+                + Math.max(40, Math.max(0, speedMetresPerSecond) * 1.5),
+                65, horizon * 0.52);
         double visibleCenterY = headerHeightPx + viewHeight * 0.5;
         double screenCenterY = screenHeightPx * 0.5;
-        double mapCenterAlong = progress + leadMetres
-                + (visibleCenterY - screenCenterY) * metresPerPixel;
-        GeoMath.Point center = GeoMath.pointAtDistance(path, Math.max(0, mapCenterAlong));
+        double mapCenterAlong = clamp(progress + leadMetres
+                + (visibleCenterY - screenCenterY) * metresPerPixel, 0, routeLength);
+        GeoMath.Point center = GeoMath.pointAtDistance(path, mapCenterAlong);
 
         GeoMath.Point a = GeoMath.pointAtDistance(path, progress + 10);
         GeoMath.Point b = GeoMath.pointAtDistance(path, progress + 70);
@@ -60,7 +73,7 @@ public final class NavigationCamera {
             b = GeoMath.pointAtDistance(path, progress);
         }
         double bearing = GeoMath.bearingDegrees(a, b);
-        return new Frame(center, zoom, bearing, junctionAhead);
+        return new Frame(center, zoom, bearing, junctionAhead, mapCenterAlong);
     }
 
     static double clamp(double value, double min, double max) {
