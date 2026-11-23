@@ -280,6 +280,8 @@ public final class MainActivity extends Activity implements LocationListener {
                             && !isFinishing()) {
                         autoFallback = true;
                         updateMapVisibility();
+                        if (route != null && !active) showRoute(route, true);
+                        else if (currentLocation != null) centreOnLocation(true);
                         setStatus("DriveMate map unavailable · showing TomTom map instead");
                     }
                 }, 15000);
@@ -584,8 +586,12 @@ public final class MainActivity extends Activity implements LocationListener {
         refreshHomePanel();
     }
 
+    private boolean showingVector() {
+        return useLocalMap && !autoFallback && vectorMap != null;
+    }
+
     private void updateMapVisibility() {
-        boolean vector = useLocalMap && !autoFallback && vectorMap != null;
+        boolean vector = showingVector();
         if (vectorMap != null) vectorMap.setVisible(vector);
         if (map != null) {
             map.setVisibility(!vector && !apiKey.isEmpty()
@@ -1153,7 +1159,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
-        map.postInvalidateOnAnimation();
+        if (!showingVector()) map.postInvalidateOnAnimation();
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -1177,15 +1183,18 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void centreOnLocation(boolean forceZoom) {
         if (currentLocation == null) return;
-        if (forceZoom || map.getZoomLevelDouble() < 14.0)
-            map.getController().setZoom(16.5);
-        // One-second animated moves were repeatedly restarting on GPS fixes.
-        // A direct centre update follows the current location immediately.
-        map.getController().setCenter(
-                new GeoPoint(currentLocation.getLatitude(), currentLocation.getLongitude()));
-        if (vectorMap != null)
-            vectorMap.setCamera(gpsPoint(currentLocation), map.getZoomLevelDouble(), 0);
-        lastCameraCenter = gpsPoint(currentLocation);
+        GeoMath.Point position = gpsPoint(currentLocation);
+        boolean vector = showingVector();
+        double zoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
+        if (forceZoom || zoom < 14.0) zoom = 16.5;
+        if (vector) {
+            vectorMap.setCamera(position, zoom, 0);
+        } else {
+            if (Math.abs(map.getZoomLevelDouble() - zoom) > 0.1)
+                map.getController().setZoom(zoom);
+            map.getController().setCenter(new GeoPoint(position.lat, position.lon));
+        }
+        lastCameraCenter = position;
     }
 
     /**
@@ -1214,39 +1223,40 @@ public final class MainActivity extends Activity implements LocationListener {
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
                 map.getHeight(), headerHeight, bottomPanelHeight);
 
+        boolean vector = showingVector();
         double targetZoom = Math.min(19.0, camera.zoom + (closeZoom ? 0.45 : 0));
-        double currentZoom = map.getZoomLevelDouble();
-        double wantedOrientation = northUp ? 0 : -camera.roadBearingDegrees;
+        double currentZoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
+        double wantedOrientation = northUp ? 0
+                : (vector ? camera.roadBearingDegrees : -camera.roadBearingDegrees);
+        double currentOrientation = vector ? vectorMap.currentBearing() : map.getMapOrientation();
         double headingChange = MapFollowPolicy.shortestHeadingDifference(
-                wantedOrientation, map.getMapOrientation());
+                wantedOrientation, currentOrientation);
         double centerMovement = lastCameraCenter == null ? Double.POSITIVE_INFINITY
                 : GeoMath.distance(lastCameraCenter, camera.center);
         float speed = fix.hasSpeed() ? fix.getSpeed() : 0f;
         if (!MapFollowPolicy.shouldMove(lastCameraUpdate, now, centerMovement,
                 speed, targetZoom - currentZoom, headingChange)) return;
 
-        // Keep zoom stable to avoid expensive high-resolution tile reloads
-        // for tiny GPS fluctuations. Move at most one half zoom level/update.
         double boundedZoom = currentZoom + Math.max(-0.5,
                 Math.min(0.5, targetZoom - currentZoom));
-        if (Math.abs(targetZoom - currentZoom) > 0.30)
-            map.getController().setZoom(boundedZoom);
-
-        if (northUp) {
-            if (Math.abs(headingChange) >= 1) map.setMapOrientation(0);
-        } else if (speed >= 1.8f && Math.abs(headingChange) >= 8) {
-            // Rotate only during actual movement, not on stopped GPS jitter.
-            float adjusted = (float) (map.getMapOrientation()
-                    + Math.max(-20, Math.min(20, headingChange)));
-            map.setMapOrientation(adjusted);
+        if (vector) {
+            double bearing = northUp ? 0 : currentOrientation +
+                    (speed >= 1.8f ? Math.max(-20, Math.min(20, headingChange)) : 0);
+            // Moving the hidden raster map too would request the same roads
+            // twice and undo much of the GPU renderer's responsiveness gain.
+            vectorMap.setCamera(camera.center, boundedZoom, bearing);
+        } else {
+            if (Math.abs(targetZoom - currentZoom) > 0.30)
+                map.getController().setZoom(boundedZoom);
+            if (northUp) {
+                if (Math.abs(headingChange) >= 1) map.setMapOrientation(0);
+            } else if (speed >= 1.8f && Math.abs(headingChange) >= 8) {
+                float adjusted = (float) (currentOrientation
+                        + Math.max(-20, Math.min(20, headingChange)));
+                map.setMapOrientation(adjusted);
+            }
+            map.getController().setCenter(new GeoPoint(camera.center.lat, camera.center.lon));
         }
-
-        // Immediate centre adjustment; no animations running behind live GPS.
-        map.getController().setCenter(
-                new GeoPoint(camera.center.lat, camera.center.lon));
-        if (vectorMap != null)
-            vectorMap.setCamera(camera.center, boundedZoom,
-                    northUp ? 0 : camera.roadBearingDegrees);
         lastCameraCenter = camera.center;
         lastCameraUpdate = now;
     }
@@ -1559,7 +1569,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (preview) vectorMap.previewRoute(calculated.points);
             else vectorMap.setRoute(calculated.points);
         }
-        if (preview) {
+        if (preview && !showingVector()) {
             map.setMapOrientation(0);
             double north = -90, south = 90, east = -180, west = 180;
             for (GeoMath.Point point : calculated.points) {
