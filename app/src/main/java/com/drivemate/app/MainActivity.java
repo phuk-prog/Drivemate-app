@@ -2338,6 +2338,8 @@ public final class MainActivity extends Activity implements LocationListener {
             offsets[i] = route.instructions.get(i).routeOffsetMetres;
         int next = GuidanceLogic.nextInstructionIndex(offsets, along, previousInstructionIndex);
         if (next < 0) {
+            updateRoadIntelligence(fix, along, projected.offRouteMetres,
+                    accuracy, Double.POSITIVE_INFINITY);
             topInstructionText.setText("Continue along the highlighted route");
             topNextTurnText.setVisibility(View.GONE);
             clearJunctionHighlight();
@@ -2346,6 +2348,8 @@ public final class MainActivity extends Activity implements LocationListener {
         previousInstructionIndex = next;
         TomTomApi.Instruction step = route.instructions.get(next);
         double untilTurn = Math.max(0, step.routeOffsetMetres - along);
+        updateRoadIntelligence(fix, along, projected.offRouteMetres,
+                accuracy, untilTurn);
         String direction = GuidanceLogic.actionLine(step.message, step.junctionType,
                 step.exitNumber);
         String glyph = GuidanceLogic.symbol(step.maneuver, step.junctionType,
@@ -2413,6 +2417,104 @@ public final class MainActivity extends Activity implements LocationListener {
             spokenDistanceIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 0)) say(nextInstruction);
         }
+    }
+
+    /**
+     * Show only route-indexed data supplied by TomTom for the current route.
+     * No road-class, lane or hazard guesses are ever made.
+     */
+    private void updateRoadIntelligence(Location fix, double along, double offRoute,
+                                        float accuracy, double distanceToTurn) {
+        if (!active || route == null) return;
+        long age = System.currentTimeMillis() - route.fetchedAtMs;
+        boolean confident = accuracy <= 35 && offRoute <= 30 && age >= 0
+                && age <= 480000 && !gpsLost;
+        RouteIntelligence.LaneSection lanes = confident
+                ? RouteIntelligence.approachingLanes(route.laneSections, along, 650) : null;
+        if (laneGuidanceText != null) {
+            laneGuidanceText.setText(lanes == null ? "" : lanes.display());
+            laneGuidanceText.setVisibility(lanes == null ? View.GONE : View.VISIBLE);
+        }
+        RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
+                route.speedSections, along, offRoute, accuracy, age);
+        boolean speeding = limit != null && fix.hasSpeed()
+                && RouteIntelligence.overspeed(fix.getSpeed(), limit, speedToleranceMph);
+        if (speedLimitText != null) {
+            if (limit == null) {
+                speedLimitText.setText("Limit —");
+                speedLimitText.setContentDescription("Posted speed limit unavailable");
+            } else {
+                int shown = metricUnits ? limit.kmh
+                        : (int) Math.round(limit.kmh / 1.609344);
+                String label = shown + (metricUnits ? " km/h" : " mph");
+                speedLimitText.setText("Limit " + label);
+                speedLimitText.setContentDescription("Mapped speed limit " + label
+                        + ". Road signs take precedence.");
+            }
+        }
+        speedText.setTextColor(speeding ? Color.rgb(255, 197, 85) : Color.WHITE);
+        long now = SystemClock.elapsedRealtime();
+        if (speeding && speedWarningEnabled && distanceToTurn > 120
+                && (lastSpeedWarningAt == 0 || now - lastSpeedWarningAt > 120000)) {
+            lastSpeedWarningAt = now;
+            sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",
+                    true);
+        }
+
+        RouteIntelligence.TrafficSection traffic = confident
+                ? RouteIntelligence.nextTraffic(route.trafficSections, along, 2500) : null;
+        if (trafficNoticeText != null) {
+            if (traffic == null) {
+                trafficNoticeText.setVisibility(View.GONE);
+            } else {
+                int minutes = (int) Math.ceil(traffic.delaySeconds / 60.0);
+                String suffix = traffic.delaySeconds > 0 ? " · +" + minutes + " min" : "";
+                trafficNoticeText.setText("⚠ " + traffic.label() + " in "
+                        + NavigationUnits.displayDistance(
+                                Math.max(0, traffic.start - along), metricUnits)
+                        + suffix + "  ·  Timeline");
+                trafficNoticeText.setVisibility(View.VISIBLE);
+            }
+        }
+        if (traffic != null && hazardWarningEnabled && traffic.start > along
+                && traffic.start - along <= 450 && distanceToTurn > 300
+                && (lastTrafficWarningStart < 0
+                        || Math.abs(lastTrafficWarningStart - traffic.start) > 50)
+                && (lastTrafficWarningAt == 0 || now - lastTrafficWarningAt > 90000)) {
+            lastTrafficWarningStart = traffic.start;
+            lastTrafficWarningAt = now;
+            sayVerifiedAlert(traffic.label() + " reported ahead. Check road conditions.",
+                    false);
+        }
+    }
+
+    private void showTrafficTimeline() {
+        if (!active || route == null || currentLocation == null) return;
+        if (System.currentTimeMillis() - route.fetchedAtMs > 480000) {
+            Toast.makeText(this, "Route traffic information is old; refresh the route",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        GeoMath.Progress progress = GeoMath.project(route.points, gpsPoint(currentLocation));
+        StringBuilder timeline = new StringBuilder();
+        int count = 0;
+        for (RouteIntelligence.TrafficSection item : route.trafficSections) {
+            if (item.end < progress.alongMetres) continue;
+            timeline.append(item.label()).append(" · ")
+                    .append(NavigationUnits.displayDistance(
+                            Math.max(0, item.start - progress.alongMetres), metricUnits))
+                    .append(" ahead");
+            if (item.delaySeconds > 0)
+                timeline.append(" · approx +")
+                        .append((int) Math.ceil(item.delaySeconds / 60.0)).append(" min");
+            timeline.append("\n\n");
+            if (++count >= 5) break;
+        }
+        if (count == 0) timeline.append("No route-positioned incidents reported.");
+        new AlertDialog.Builder(this).setTitle("Upcoming traffic · TomTom")
+                .setMessage(timeline.toString()
+                        + "\nTraffic conditions can change. Follow road signs.")
+                .setPositiveButton("Close", null).show();
     }
 
     /**
