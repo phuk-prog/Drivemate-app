@@ -138,6 +138,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView tripMinutesValue;
     private TextView tripDistanceValue;
     private TextView topInstructionText;
+    private TextView topTurnTitle;
     private TextView topNextTurnText;
     private TurnArrowView topTurnArrow;
     private LinearLayout recentList;
@@ -668,9 +669,11 @@ public final class MainActivity extends Activity implements LocationListener {
         turnCardPos.topMargin = dp(6);
         container.addView(turnCard, turnCardPos);
 
-        TextView turnTitle = text("NEXT TURN", 10, CYAN, true);
-        turnTitle.setLetterSpacing(0.12f);
-        turnCard.addView(turnTitle);
+        topTurnTitle = text("NEXT TURN", 10, CYAN, true);
+        topTurnTitle.setLetterSpacing(0.08f);
+        topTurnTitle.setSingleLine(true);
+        topTurnTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        turnCard.addView(topTurnTitle);
 
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.HORIZONTAL);
@@ -1585,6 +1588,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         followLocation = true;
         followButton.setText("◎");
+        topTurnTitle.setText("NEXT TURN · " + destination.title);
         maneuverIcon.setVisibility(View.VISIBLE);
         nextTurnText.setVisibility(View.VISIBLE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
