@@ -35,6 +35,9 @@ public class RouteIntelligenceTest {
                 Collections.singletonList(limit), 120, 5, 15, 500000));
         assertNull(RouteIntelligence.speedAt(
                 Collections.singletonList(limit), 302, 5, 15, 1000));
+        assertNull(RouteIntelligence.speedAt(
+                Arrays.asList(limit, new RouteIntelligence.SpeedSection(40, 300, 80)),
+                120, 5, 15, 1000)); // Two conflicting limits are unknown.
         assertTrue(RouteIntelligence.overspeed(17, limit, 5));
         assertFalse(RouteIntelligence.overspeed(13, limit, 5));
         assertFalse(RouteIntelligence.overspeed(40, null, 5));
