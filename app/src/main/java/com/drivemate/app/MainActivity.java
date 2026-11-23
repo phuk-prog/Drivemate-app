@@ -229,6 +229,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private LinearLayout topMapOverlay;
     private LinearLayout searchBar;
     private LinearLayout drivingTopPanel;
+    private LinearLayout brandHeader;
+    private LinearLayout tripMetricsRow;
+    private LinearLayout drivingTurnCard;
     private LinearLayout previewTurnRow;
     private LinearLayout previewDetailsRow;
     private LinearLayout bottomActionRow;
@@ -488,6 +491,7 @@ public final class MainActivity extends Activity implements LocationListener {
         settings.setOnClickListener(v -> showSettings());
         header.addView(settings, new LinearLayout.LayoutParams(dp(49), dp(49)));
         top.addView(header, new LinearLayout.LayoutParams(-1, dp(68)));
+        brandHeader = header;
 
         searchBar = new LinearLayout(this);
         LinearLayout search = searchBar;
@@ -611,6 +615,10 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams detailsPos = new LinearLayout.LayoutParams(-1, -2);
         detailsPos.topMargin = dp(10);
         navigationPanel.addView(details, detailsPos);
+        // ETA, journey duration and distance belong at the bottom while driving,
+        // leaving the road and the next manoeuvre unobstructed above.
+        navigationPanel.addView(tripMetricsRow, new LinearLayout.LayoutParams(-1, dp(57)));
+        tripMetricsRow.setVisibility(View.GONE);
         gpsAccuracyText = text("", 11, Color.rgb(190, 219, 230), false);
         navigationPanel.addView(gpsAccuracyText);
         bottomActionRow = new LinearLayout(this);
@@ -625,7 +633,7 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setVisibility(View.GONE);
         saveButton.setOnClickListener(v -> saveCurrentDestination());
         navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        repeatButton = chip("🔊 Repeat");
+        repeatButton = chip("🔊");
         repeatButton.setContentDescription("Repeat next spoken turn");
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
@@ -633,11 +641,16 @@ public final class MainActivity extends Activity implements LocationListener {
             else say(nextInstruction);
         });
         navActions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        refreshButton = chip("↻ Refresh");
+        refreshButton = chip("↻");
         refreshButton.setContentDescription("Refresh traffic-aware route");
         refreshButton.setVisibility(View.GONE);
         refreshButton.setOnClickListener(v -> planRoute(false));
         navActions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        voiceButton = chip("🔊");
+        voiceButton.setContentDescription("Change navigation voice mode");
+        voiceButton.setVisibility(View.GONE);
+        voiceButton.setOnClickListener(v -> cycleVoiceMode());
+        navActions.addView(voiceButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         bottomActionsParams = new LinearLayout.LayoutParams(-1, -2);
         bottomActionsParams.topMargin = dp(10);
         navigationPanel.addView(navActions, bottomActionsParams);
@@ -801,12 +814,13 @@ public final class MainActivity extends Activity implements LocationListener {
         tripEtaValue = addDrivingMetric(metrics, "ETA");
         tripMinutesValue = addDrivingMetric(metrics, "MIN LEFT");
         tripDistanceValue = addDrivingMetric(metrics, "DISTANCE LEFT");
-        container.addView(metrics, new LinearLayout.LayoutParams(-1, dp(67)));
+        tripMetricsRow = metrics;
 
         LinearLayout turnCard = new LinearLayout(this);
         turnCard.setOrientation(LinearLayout.VERTICAL);
         turnCard.setPadding(dp(12), dp(9), dp(12), dp(10));
         turnCard.setBackground(rounded(Color.rgb(14, 47, 66), 14));
+        drivingTurnCard = turnCard;
         LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
         turnCardPos.topMargin = dp(6);
         container.addView(turnCard, turnCardPos);
@@ -862,6 +876,11 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean navigating = active;
         if (drivingTopPanel != null)
             drivingTopPanel.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if (brandHeader != null)
+            brandHeader.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (tripMetricsRow != null)
+            tripMetricsRow.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if (voiceButton != null) voiceButton.setVisibility(navigating ? View.VISIBLE : View.GONE);
         if (searchBar != null)
             searchBar.setVisibility(navigating ? View.GONE : View.VISIBLE);
         if (banner != null) banner.setVisibility(navigating ? View.GONE : View.VISIBLE);
@@ -1812,9 +1831,9 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         followLocation = true;
         followButton.setText("◎");
-        topTurnTitle.setText("NEXT TURN · " + destination.title);
+        topTurnTitle.setText("NEXT TURN");
         maneuverIcon.setVisibility(View.VISIBLE);
-        nextTurnText.setVisibility(View.VISIBLE);
+        nextTurnText.setVisibility(View.GONE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         routeSummary.setVisibility(View.GONE);
         startButton.setVisibility(View.GONE);
