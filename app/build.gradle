@@ -15,8 +15,8 @@ android {
     // Only the debug variant gets this alternate ID; release settings remain unchanged.
     buildTypes {
         debug {
-            applicationIdSuffix '.stage2'
-            versionNameSuffix '-stage2-test'
+            applicationIdSuffix '.all11'
+            versionNameSuffix '-all11-test'
         }
     }
     // PMTiles archives already compress their own tile/index data. Keep the
