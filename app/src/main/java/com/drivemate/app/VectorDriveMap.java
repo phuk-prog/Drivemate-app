@@ -121,14 +121,16 @@ public final class VectorDriveMap {
     /** Checks the actual MapLibre street layers in the on-screen viewport. */
     private void inspectRoadDisplay() {
         if (disposed) return;
+        // When the user pans or pinches manually, examine the *actual*
+        // onscreen camera, not the last GPS-follow position.
         GeoMath.Point target = pendingCamera;
-        if (target == null && map != null && map.getCameraPosition().target != null) {
+        double zoom = pendingZoom;
+        if (ready() && map.getCameraPosition().target != null) {
             LatLng at = map.getCameraPosition().target;
             target = new GeoMath.Point(at.getLatitude(), at.getLongitude());
+            zoom = map.getCameraPosition().zoom;
         }
         if (target == null) return;
-        double zoom = pendingCamera == null && map != null
-                ? map.getCameraPosition().zoom : pendingZoom;
         int visible = 0;
         if (ready() && view.getWidth() > 80 && view.getHeight() > 80) {
             try {
