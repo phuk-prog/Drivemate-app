@@ -11,6 +11,14 @@ android {
         versionCode 100601
         versionName '1.6.1'
     }
+    // Stage 1 test installs alongside the stable 1.6.1 app.
+    // Only the debug variant gets this alternate ID; release settings remain unchanged.
+    buildTypes {
+        debug {
+            applicationIdSuffix '.stage1'
+            versionNameSuffix '-stage1-test'
+        }
+    }
     // PMTiles archives already compress their own tile/index data. Keep the
     // bundled overview uncompressed in APK so MapLibre can seek by byte range.
     androidResources {
