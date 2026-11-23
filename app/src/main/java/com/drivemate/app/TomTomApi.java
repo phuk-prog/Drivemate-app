@@ -121,9 +121,25 @@ public final class TomTomApi {
         String url = "https://api.tomtom.com/routing/1/calculateRoute/" + pair + "/json"
                 + "?key=" + encode(key)
                 + "&travelMode=car&routeType=fastest&traffic=true"
-                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all"
-                + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic";
-        JSONObject response = requestJson(url);
+                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
+        JSONObject response;
+        try {
+            response = requestJson(url
+                    + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic");
+        } catch (IOException error) {
+            // An older/limited key must not prevent normal navigation.
+            // Only retry metadata-related 400/403 errors, not rate limiting,
+            // connection failures or server errors.
+            String message = error.getMessage();
+            if (message == null || (!message.startsWith("TomTom HTTP 400.")
+                    && !message.startsWith("TomTom HTTP 403."))) throw error;
+            response = requestJson(url);
+        }
+        return parseRoute(response);
+    }
+
+    /** Package-private to test real response shapes without network/API keys. */
+    static Route parseRoute(JSONObject response) throws IOException, JSONException {
         JSONArray routes = response.optJSONArray("routes");
         if (routes == null || routes.length() == 0) {
             throw new IOException("TomTom did not return a drivable route.");
