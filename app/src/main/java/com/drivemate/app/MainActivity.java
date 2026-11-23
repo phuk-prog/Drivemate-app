@@ -494,6 +494,7 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setOnClickListener(v -> saveCurrentDestination());
         navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         repeatButton = chip("🔊 Repeat");
+        repeatButton.setContentDescription("Repeat next spoken turn");
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
             if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
@@ -501,6 +502,7 @@ public final class MainActivity extends Activity implements LocationListener {
         });
         navActions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         refreshButton = chip("↻ Refresh");
+        refreshButton.setContentDescription("Refresh traffic-aware route");
         refreshButton.setVisibility(View.GONE);
         refreshButton.setOnClickListener(v -> planRoute(false));
         navActions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
@@ -1559,10 +1561,11 @@ public final class MainActivity extends Activity implements LocationListener {
                         + calculated.timeSeconds * 1000L)));
         startButton.setVisibility(View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
-        saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save place");
+        saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save");
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
-        stopButton.setText("Cancel route");
+        stopButton.setText("Cancel");
+        stopButton.setContentDescription("Cancel route preview");
         stopButton.setVisibility(View.VISIBLE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setStatus("Route ready · tap Start when parked and ready");
@@ -1590,7 +1593,8 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setVisibility(View.GONE);
         repeatButton.setVisibility(View.VISIBLE);
         refreshButton.setVisibility(View.VISIBLE);
-        stopButton.setText("End navigation");
+        stopButton.setText("End");
+        stopButton.setContentDescription("End navigation");
         setStatus("Navigating to " + destination.title);
         say("Navigation started. Follow the directions.");
         lastCameraUpdate = 0;
