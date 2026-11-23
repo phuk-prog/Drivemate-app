@@ -26,6 +26,10 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Verify actual UK road features and style layer compatibility
+        run: python3 tools/verify_drive_map_roads.py
+      - name: Reject blank map screenshots (regression fixtures)
+        run: python3 tools/check_drive_map_pixels.py --self-test
       - name: Verify DriveMate Map UK archive supports safe partial downloads
         run: python3 tools/probe_drive_map_range.py
       - name: Fetch checksum-verified DriveMate world map (45 MB)
