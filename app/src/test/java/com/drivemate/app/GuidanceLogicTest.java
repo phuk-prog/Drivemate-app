@@ -12,6 +12,13 @@ public class GuidanceLogicTest {
         assertTrue(GuidanceLogic.actionLine("At roundabout", "ROUNDABOUT", 2)
                 .contains("2nd exit"));
     }
+    @Test public void verifiedForksUseBearArrowsInsteadOfSharpTurns() {
+        assertEquals("↖", GuidanceLogic.symbol("KEEP_LEFT", "BIFURCATION", -35));
+        assertEquals("↗", GuidanceLogic.symbol("KEEP_RIGHT", "BIFURCATION", 35));
+        assertEquals("↑", GuidanceLogic.symbol("STRAIGHT", "BIFURCATION", 0));
+        assertEquals("↻", GuidanceLogic.symbol("ROUNDABOUT_RIGHT", "ROUNDABOUT", 45));
+    }
+
     @Test public void avoidsBacktrackingThroughRoundabout() {
         double[] offsets = {0, 70, 90, 130, 250};
         assertEquals(4, GuidanceLogic.nextInstructionIndex(offsets, 150, 2));
