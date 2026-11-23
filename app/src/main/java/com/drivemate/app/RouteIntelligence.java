@@ -111,6 +111,7 @@ public final class RouteIntelligence {
     public static SpeedSection speedAt(List<SpeedSection> sections, double progress,
                                        double offRoute, float accuracy, long ageMs) {
         if (sections == null || !Double.isFinite(progress)
+                || !Double.isFinite(offRoute) || !Float.isFinite(accuracy)
                 || offRoute > 20 || accuracy > 25 || ageMs < 0 || ageMs > 480000)
             return null;
         for (SpeedSection s : sections) {
