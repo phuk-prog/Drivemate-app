@@ -330,7 +330,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.4.0", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.4.1", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -832,7 +832,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 13:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.0")
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.1")
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
                                             + "Online TomTom routing, traffic and spoken directions. " +
