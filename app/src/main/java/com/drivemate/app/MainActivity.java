@@ -279,6 +279,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView rerouteSuggestionText;
     private TomTomApi.Route pendingRoute;
     private long pendingRouteAtMs;
+    private GeoMath.Point pendingRouteOrigin;
     private int pendingSavingSeconds;
     private int rerouteMode = 1; // 0 automatic, 1 ask first
     private int speedToleranceMph = 5;
@@ -2183,30 +2184,51 @@ public final class MainActivity extends Activity implements LocationListener {
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
-                    route = calculated;
-                    if (active) {
-                        // New route means a new geometry arc-length index.
-                        // Never blend the camera through an unrelated route.
-                        smoothFollow = new SmoothFollowCamera(
-                                new RouteMotionIndex(calculated.points));
-                        lastCameraUpdate = 0;
-                        lastCameraCenter = null;
+                    // Route updates start from the *current* GPS. Compare only
+                    // after confirming the old route is still being followed.
+                    if (!firstRoute && active && route != null) {
+                        if (currentLocation == null || !currentLocation.hasAccuracy()
+                                || currentLocation.getAccuracy() > 55
+                                || System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+                            setStatus("Uncertain GPS · current route retained");
+                            return;
+                        }
+                        GeoMath.Progress old = GeoMath.project(route.points, start);
+                        boolean confirmedOffRoute = old.offRouteMetres > 90
+                                && currentLocation.getAccuracy() <= 35;
+                        if (!confirmedOffRoute && old.offRouteMetres > 45) {
+                            setStatus("Checking GPS alignment · previous route retained");
+                            return;
+                        }
+                        if (!confirmedOffRoute) {
+                            boolean different = RouteIntelligence.genuinelyDifferent(
+                                    route.points, old.alongMetres, calculated.points);
+                            double remaining = Math.max(0, route.lengthMetres
+                                    - old.alongMetres);
+                            int oldSeconds = (int) Math.round(
+                                    route.timeSeconds * remaining
+                                            / Math.max(1, route.lengthMetres));
+                            boolean oldFresh = System.currentTimeMillis()
+                                    - route.fetchedAtMs <= 480000;
+                            int saving = oldFresh ? RouteIntelligence.meaningfulSaving(
+                                    oldSeconds, calculated.timeSeconds, different) : 0;
+                            if (different) {
+                                if (saving > 0 || !oldFresh) {
+                                    if (rerouteMode == 1) {
+                                        showPendingRoute(calculated, start, saving);
+                                        setStatus(saving > 0
+                                                ? "A faster route is available · choose Switch or Keep"
+                                                : "Updated route available · choose Switch or Keep");
+                                        return;
+                                    }
+                                } else {
+                                    setStatus("Current route retained · no worthwhile saving");
+                                    return;
+                                }
+                            }
+                        }
                     }
-                    offRouteSince = 0;
-                    previousInstructionIndex = 0;
-                    stabilizedAlong = -1;
-                    observedSpeed = 0;
-                    spokenDistanceIndex = -1;
-                    spokenCloseIndex = -1;
-                    spokenNowIndex = -1;
-                    showRoute(calculated, firstRoute);
-                    if (firstRoute) {
-                        showPreview(calculated);
-                    } else {
-                        setStatus("Route updated · latest TomTom traffic included");
-                        say("Updated route ready.");
-                        if (currentLocation != null) updateGuidance(currentLocation);
-                    }
+                    installCalculatedRoute(calculated, firstRoute);
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -2223,6 +2245,82 @@ public final class MainActivity extends Activity implements LocationListener {
                 });
             }
         });
+    }
+
+    /** Only accept a suggestion if still close to the GPS it was planned for. */
+    private void acceptPendingRoute() {
+        if (!active || pendingRoute == null || pendingRouteOrigin == null
+                || currentLocation == null) {
+            clearPendingRoute();
+            return;
+        }
+        if (System.currentTimeMillis() - pendingRouteAtMs > 45000
+                || System.currentTimeMillis() - currentLocation.getTime() > 12000
+                || GeoMath.distance(gpsPoint(currentLocation), pendingRouteOrigin) > 110) {
+            clearPendingRoute();
+            setStatus("Suggested route expired · checking again");
+            planRoute(false);
+            return;
+        }
+        TomTomApi.Route chosen = pendingRoute;
+        clearPendingRoute();
+        installCalculatedRoute(chosen, false);
+        setStatus("Chosen faster or updated route ready");
+    }
+
+    private void showPendingRoute(TomTomApi.Route candidate, GeoMath.Point origin,
+                                  int savingSeconds) {
+        pendingRoute = candidate;
+        pendingRouteOrigin = origin;
+        pendingRouteAtMs = System.currentTimeMillis();
+        pendingSavingSeconds = savingSeconds;
+        if (rerouteSuggestionText != null) {
+            String label = savingSeconds > 0
+                    ? "Faster route · save about " + Math.max(1,
+                            Math.round(savingSeconds / 60f)) + " min"
+                    : "Updated route available";
+            rerouteSuggestionText.setText(label);
+        }
+        if (rerouteSuggestionRow != null)
+            rerouteSuggestionRow.setVisibility(View.VISIBLE);
+    }
+
+    private void clearPendingRoute() {
+        pendingRoute = null;
+        pendingRouteOrigin = null;
+        pendingRouteAtMs = 0;
+        pendingSavingSeconds = 0;
+        if (rerouteSuggestionRow != null) rerouteSuggestionRow.setVisibility(View.GONE);
+    }
+
+    private void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
+        clearPendingRoute();
+        route = calculated;
+        if (active) {
+            // A new route needs an independent motion index, never a blend
+            // through the unrelated polyline of the previous route.
+            smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(calculated.points));
+            lastCameraUpdate = 0;
+            lastCameraCenter = null;
+        }
+        offRouteSince = 0;
+        previousInstructionIndex = 0;
+        stabilizedAlong = -1;
+        observedSpeed = 0;
+        spokenDistanceIndex = -1;
+        spokenCloseIndex = -1;
+        spokenNowIndex = -1;
+        lastTrafficWarningStart = -1;
+        lastTrafficWarningAt = 0;
+        lastSpeedWarningAt = 0;
+        showRoute(calculated, firstRoute);
+        if (firstRoute) {
+            showPreview(calculated);
+        } else {
+            setStatus("Route updated · latest TomTom traffic included");
+            say("Updated route ready.");
+            if (currentLocation != null) updateGuidance(currentLocation);
+        }
     }
 
     private void showRoute(TomTomApi.Route calculated, boolean preview) {
@@ -2575,6 +2673,7 @@ public final class MainActivity extends Activity implements LocationListener {
         networkLost = false;
         lastRerouteAttempt = 0;
         nextInstruction = "";
+        clearPendingRoute();
         clearJunctionHighlight();
         if (routeLine != null) {
             map.getOverlays().remove(routeLine);
