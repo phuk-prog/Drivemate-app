@@ -287,8 +287,6 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView arrivalHintText;
     private Button findParkingButton;
     private Button previewParkingButton;
-    private Button parkedCarButton;
-    private Button saveParkingHereButton;
     private final ArrivalPolicy arrivalPolicy = new ArrivalPolicy();
     private LinearLayout rerouteSuggestionRow;
     private TextView rerouteSuggestionText;
@@ -829,33 +827,7 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams recentPos = new LinearLayout.LayoutParams(-1, dp(138));
         recentPos.topMargin = dp(2);
         homePanel.addView(recentScroll, recentPos);
-        parkedCarButton = chip("🅿 Find my parked car");
-        parkedCarButton.setContentDescription("Show my saved parked-car location");
-        parkedCarButton.setOnClickListener(v -> showParkedCar());
-        parkedCarButton.setVisibility(View.GONE);
-        LinearLayout.LayoutParams parkedPos = new LinearLayout.LayoutParams(-1, dp(43));
-        parkedPos.topMargin = dp(6);
-        homePanel.addView(parkedCarButton, parkedPos);
-        saveParkingHereButton = chip("Save where I parked");
-        saveParkingHereButton.setContentDescription(
-                "Save current precise stationary GPS location to this phone only");
-        saveParkingHereButton.setOnClickListener(v -> {
-            if (currentLocation == null || !ArrivalPolicy.canSaveParking(
-                    currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
-                    currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
-                    currentLocation.getTime(), System.currentTimeMillis())) {
-                showError("Park safely and wait for precise stationary GPS before saving.");
-                return;
-            }
-            new AlertDialog.Builder(this).setTitle("Save parked-car location?")
-                    .setMessage("Only the current GPS estimate is saved on this phone. "
-                            + "It can be cleared from the home screen.")
-                    .setPositiveButton("Save", (d, w) -> saveParkedCarNow())
-                    .setNegativeButton("Cancel", null).show();
-        });
-        LinearLayout.LayoutParams saveParkedPos = new LinearLayout.LayoutParams(-1, dp(43));
-        saveParkedPos.topMargin = dp(5);
-        homePanel.addView(saveParkingHereButton, saveParkedPos);
+        // Parking actions live in Settings, not on the home screen.
         FrameLayout.LayoutParams homePos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         homePos.setMargins(dp(4), 0, dp(4), 0);
         frame.addView(homePanel, homePos);
@@ -1165,9 +1137,6 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void refreshHomePanel() {
         if (places == null || recentList == null) return;
-        if (parkedCarButton != null)
-            parkedCarButton.setVisibility(places.parkedCar() != null
-                    ? View.VISIBLE : View.GONE);
         TomTomApi.Destination home = places.home();
         TomTomApi.Destination work = places.work();
         homeTile.setContentDescription(home == null ? "Set Home" : "Navigate Home to " + home);
@@ -1267,7 +1236,10 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
                 "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
                 "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
-                "Online close-up map detail · " + (highDetailOnline ? "On" : "Off")
+                "Online close-up map detail · " + (highDetailOnline ? "On" : "Off"),
+                "Save where I parked",
+                places != null && places.parkedCar() != null
+                        ? "Find my parked car" : "Find my parked car · none saved"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1391,6 +1363,8 @@ public final class MainActivity extends Activity implements LocationListener {
                                     : "Close-up map uses cached local vector streets",
                                     Toast.LENGTH_LONG).show();
                             break;
+                        case 20: promptSaveParking(); break;
+                        case 21: showParkedCar(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -2498,6 +2472,22 @@ public final class MainActivity extends Activity implements LocationListener {
         places.saveParkedCar(gpsPoint(currentLocation), System.currentTimeMillis());
         refreshHomePanel();
         Toast.makeText(this, "Parked car saved locally", Toast.LENGTH_LONG).show();
+    }
+
+    /** Settings → "Save where I parked": only saves a precise, stationary GPS fix. */
+    private void promptSaveParking() {
+        if (currentLocation == null || !ArrivalPolicy.canSaveParking(
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
+                currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
+                currentLocation.getTime(), System.currentTimeMillis())) {
+            showError("Park safely and wait for precise stationary GPS before saving.");
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Save parked-car location?")
+                .setMessage("Only the current GPS estimate is saved on this phone. "
+                        + "It can be cleared from Settings → Find my parked car.")
+                .setPositiveButton("Save", (d, w) -> saveParkedCarNow())
+                .setNegativeButton("Cancel", null).show();
     }
 
     private void showParkedCar() {

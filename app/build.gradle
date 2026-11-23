@@ -8,8 +8,8 @@ android {
         applicationId 'com.drivemate.android'
         minSdk 26
         targetSdk 34
-        versionCode 100701
-        versionName '1.7.1-rc1'
+        versionCode 100702
+        versionName '1.7.2-rc1'
     }
     // The map/zoom test variant installs alongside stable DriveMate.
     // The signed release variant retains the established update-compatible ID.
