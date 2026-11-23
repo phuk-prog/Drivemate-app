@@ -98,7 +98,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
-                    say("GPS signal lost. Waiting for location.");
+                    saySystemWarning("GPS signal lost. Waiting for location.");
                 }
             }
             if (active && !hasNetwork()) {
@@ -106,7 +106,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     networkLost = true;
                     lastNetworkWarning = SystemClock.elapsedRealtime();
                     setStatus("Internet unavailable · following cached on-screen route");
-                    say("Internet connection lost. Continue carefully.");
+                    saySystemWarning("Internet connection lost. Continue carefully.");
                 }
             } else if (active && networkLost) {
                 networkLost = false;
@@ -273,9 +273,14 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean metricUnits;
     private String nextInstruction = "";
     private final VehicleFilter vehicleFilter = new VehicleFilter();
-    private int speechMode = 1; // 0 detailed, 1 normal, 2 minimal
+    private int voiceMode = DrivingVoicePolicy.NORMAL;
+    private int cameraMode = DrivingDisplayPolicy.CAMERA_AUTO_3D;
+    private int themePreference = DrivingDisplayPolicy.THEME_AUTO;
+    private boolean nightDisplay;
+    private boolean hazardWarningEnabled = true;
+    private boolean speedWarningEnabled = true;
+    private final List<TextView> tripMetricCaptions = new ArrayList<>();
     private float guidanceVolume = 0.85f;
-    private boolean northUp;
     private boolean closeZoom;
     private int previousInstructionIndex;
     private double stabilizedAlong = -1;
@@ -292,7 +297,6 @@ public final class MainActivity extends Activity implements LocationListener {
     private TilesOverlay trafficTiles;
     private TextToSpeech speech;
     private boolean speechReady;
-    private boolean voiceEnabled = true;
     private boolean trafficEnabled = true;
     private boolean followLocation = true;
     private boolean routing;
@@ -335,11 +339,20 @@ public final class MainActivity extends Activity implements LocationListener {
         Configuration.getInstance().setTileFileSystemCacheTrimBytes(140L * 1024L * 1024L);
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         apiKey = settings.getString("tomtom_key", "");
-        voiceEnabled = settings.getBoolean("voice", true);
         metricUnits = settings.getBoolean("metric_units", false);
-        speechMode = Math.max(0, Math.min(2, settings.getInt("speech_mode", 1)));
+        voiceMode = settings.contains("voice_mode_v2")
+                ? Math.max(0, Math.min(3, settings.getInt("voice_mode_v2", 1)))
+                : DrivingVoicePolicy.fromLegacy(settings.getInt("speech_mode", 1),
+                        settings.getBoolean("voice", true));
         guidanceVolume = Math.max(0.1f, Math.min(1f, settings.getFloat("speech_volume", 0.85f)));
-        northUp = settings.getBoolean("north_up", false);
+        cameraMode = settings.contains("camera_mode")
+                ? Math.max(0, Math.min(2, settings.getInt("camera_mode", 0)))
+                : settings.getBoolean("north_up", false)
+                        ? DrivingDisplayPolicy.CAMERA_NORTH_2D
+                        : DrivingDisplayPolicy.CAMERA_AUTO_3D;
+        themePreference = Math.max(0, Math.min(2, settings.getInt("map_theme", 0)));
+        hazardWarningEnabled = settings.getBoolean("hazard_voice_alerts", true);
+        speedWarningEnabled = settings.getBoolean("speed_voice_alerts", true);
         closeZoom = settings.getBoolean("close_zoom", false);
         places = new DestinationStore(this);
         trafficEnabled = settings.getBoolean("traffic", false);
@@ -357,6 +370,8 @@ public final class MainActivity extends Activity implements LocationListener {
             useLocalMap = false;
         }
         buildScreen();
+        applyTheme();
+        updateVoiceButton();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         speech = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && speech != null) {
@@ -862,6 +877,7 @@ public final class MainActivity extends Activity implements LocationListener {
         TextView caption = text(label, 10, Color.rgb(189, 220, 230), true);
         caption.setGravity(Gravity.CENTER);
         cell.addView(caption);
+        tripMetricCaptions.add(caption);
         TextView number = text("—", 21, Color.WHITE, true);
         number.setGravity(Gravity.CENTER);
         number.setSingleLine(true);
@@ -1004,12 +1020,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private void showSettings() {
         String[] options = {
                 "TomTom API key",
-                voiceEnabled ? "Mute voice guidance" : "Enable voice guidance",
-                "Voice instructions · " + speechModeName(),
+                voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
+                "Voice guidance · " + voiceModeName(),
                 "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
                 trafficEnabled ? "Hide live traffic overlay" : "Show live traffic overlay",
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
-                northUp ? "Map orientation · north up" : "Map orientation · direction up",
+                "Camera · " + cameraModeName(),
                 closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
                 autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
                         : useLocalMap ? "Map · DriveMate local vector"
@@ -1018,20 +1034,20 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Set or change Home",
                 "Set or change Work",
                 "Clear recent destinations",
-                "About DriveMate"
+                "About DriveMate",
+                "Map colours · " + themeModeName(),
+                "Verified hazard voice alerts · " + (hazardWarningEnabled ? "On" : "Off"),
+                "Verified speed voice alerts · " + (speedWarningEnabled ? "On" : "Off")
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
                     switch (which) {
                         case 0: showKeyDialog(); break;
                         case 1:
-                            voiceEnabled = !voiceEnabled;
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putBoolean("voice", voiceEnabled).apply();
-                            if (!voiceEnabled && speech != null) speech.stop();
-                            else say("Voice guidance enabled.");
+                            setVoiceMode(voiceMode == DrivingVoicePolicy.SILENT
+                                    ? DrivingVoicePolicy.NORMAL : DrivingVoicePolicy.SILENT);
                             break;
-                        case 2: selectSpeechMode(); break;
+                        case 2: selectVoiceMode(); break;
                         case 3: selectSpeechVolume(); break;
                         case 4:
                             trafficEnabled = !trafficEnabled;
@@ -1050,14 +1066,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             }
                             if (route != null && !active) showPreview(route);
                             break;
-                        case 6:
-                            northUp = !northUp;
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putBoolean("north_up", northUp).apply();
-                            lastCameraUpdate = 0;
-                            if (northUp) map.setMapOrientation(0);
-                            if (active && currentLocation != null) updateGuidance(currentLocation);
-                            break;
+                        case 6: selectCameraMode(); break;
                         case 7:
                             closeZoom = !closeZoom;
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -1128,6 +1137,17 @@ public final class MainActivity extends Activity implements LocationListener {
                                             "before testing directions on a real device.")
                                     .setPositiveButton("OK", null).show();
                             break;
+                        case 14: selectThemeMode(); break;
+                        case 15:
+                            hazardWarningEnabled = !hazardWarningEnabled;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("hazard_voice_alerts", hazardWarningEnabled).apply();
+                            break;
+                        case 16:
+                            speedWarningEnabled = !speedWarningEnabled;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("speed_voice_alerts", speedWarningEnabled).apply();
+                            break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1145,21 +1165,123 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    private String speechModeName() {
-        return new String[]{"Detailed", "Normal", "Minimal"}[speechMode];
+
+    private String voiceModeName() {
+        return new String[]{"Full", "Normal", "Alerts only", "Silent"}[voiceMode];
     }
 
-    private void selectSpeechMode() {
-        new AlertDialog.Builder(this).setTitle("Voice instruction frequency")
-                .setSingleChoiceItems(new String[]{"Detailed · early and close prompts",
-                        "Normal · approach and turn", "Minimal · turn only"}, speechMode,
-                        (dialog, which) -> {
-                            speechMode = which;
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putInt("speech_mode", which).apply();
-                            dialog.dismiss();
-                        }).setNegativeButton("Cancel", null).show();
+    private void setVoiceMode(int selected) {
+        voiceMode = Math.max(DrivingVoicePolicy.FULL,
+                Math.min(DrivingVoicePolicy.SILENT, selected));
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt("voice_mode_v2", voiceMode).apply();
+        if (voiceMode == DrivingVoicePolicy.SILENT && speech != null) speech.stop();
+        updateVoiceButton();
+        Toast.makeText(this, "Voice: " + voiceModeName(), Toast.LENGTH_SHORT).show();
     }
+
+    private void updateVoiceButton() {
+        if (voiceButton == null) return;
+        String[] symbols = {"🔊", "🔉", "⚠", "🔇"};
+        voiceButton.setText(symbols[voiceMode]);
+        voiceButton.setContentDescription("Voice: " + voiceModeName()
+                + ". Tap to change voice mode.");
+    }
+
+    private void cycleVoiceMode() {
+        setVoiceMode((voiceMode + 1) % 4);
+    }
+
+    private void selectVoiceMode() {
+        new AlertDialog.Builder(this).setTitle("Voice guidance")
+                .setSingleChoiceItems(new String[]{
+                        "Full · early, approach and turn",
+                        "Normal · approach and turn",
+                        "Alerts only · no routine turns",
+                        "Silent · no navigation speech"
+                }, voiceMode, (dialog, which) -> {
+                    setVoiceMode(which);
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private String cameraModeName() {
+        return new String[]{"Auto 3D", "2D direction up", "2D north up"}[cameraMode];
+    }
+
+    private void selectCameraMode() {
+        new AlertDialog.Builder(this).setTitle("Navigation camera")
+                .setSingleChoiceItems(new String[]{
+                        "Automatic 3D · adaptive tilt and zoom",
+                        "2D · direction of travel up",
+                        "2D · north always up"
+                }, cameraMode, (dialog, which) -> {
+                    cameraMode = which;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("camera_mode", which).apply();
+                    lastCameraUpdate = 0;
+                    if (active && route != null && currentLocation != null) {
+                        smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
+                        updateGuidance(currentLocation);
+                    } else if (which == DrivingDisplayPolicy.CAMERA_NORTH_2D) {
+                        map.setMapOrientation(0);
+                    }
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private String themeModeName() {
+        return new String[]{"Automatic", "Day", "Night"}[themePreference];
+    }
+
+    private void selectThemeMode() {
+        new AlertDialog.Builder(this).setTitle("Navigation map colours")
+                .setSingleChoiceItems(new String[]{
+                        "Automatic · follow phone appearance", "Day", "Night"
+                }, themePreference, (dialog, which) -> {
+                    themePreference = which;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("map_theme", which).apply();
+                    applyTheme();
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void applyTheme() {
+        boolean systemNight = (getResources().getConfiguration().uiMode
+                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        boolean night = DrivingDisplayPolicy.night(themePreference, systemNight);
+        if (night == nightDisplay && vectorMap != null && vectorMap.nightMode() == night)
+            return;
+        nightDisplay = night;
+        if (vectorMap != null) vectorMap.setNightMode(night);
+        if (map != null && !apiKey.isEmpty())
+            map.setTileSource(tileSource(night ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
+                    night ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
+        int panel = night ? DARK : Color.WHITE;
+        int foreground = night ? Color.WHITE : Color.rgb(25, 48, 62);
+        int subdued = night ? Color.rgb(191, 225, 236) : Color.rgb(55, 80, 96);
+        if (navigationPanel != null) navigationPanel.setBackground(rounded(panel, 22));
+        if (tripMetricsRow != null)
+            tripMetricsRow.setBackground(rounded(night ? DARK : Color.rgb(232, 242, 247), 14));
+        if (drivingTurnCard != null)
+            drivingTurnCard.setBackground(rounded(night ? Color.rgb(14, 47, 66)
+                    : Color.rgb(247, 251, 252), 14));
+        for (TextView caption : tripMetricCaptions) caption.setTextColor(subdued);
+        for (TextView value : new TextView[]{tripEtaValue, tripMinutesValue,
+                tripDistanceValue, topInstructionText, instructionText,
+                distanceText, journeyTimeText, etaText}) {
+            if (value != null) value.setTextColor(foreground);
+        }
+        for (TextView value : new TextView[]{topNextTurnText, nextTurnText,
+                routeSummary, gpsAccuracyText}) {
+            if (value != null) value.setTextColor(subdued);
+        }
+        if (topTurnTitle != null) topTurnTitle.setTextColor(
+                night ? CYAN : Color.rgb(0, 105, 130));
+    }
+
 
     private void selectSpeechVolume() {
         SeekBar slider = new SeekBar(this);
@@ -1361,8 +1483,9 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void configureTiles() {
         if (apiKey.isEmpty()) return;
-        map.setTileSource(tileSource("DriveMate-TomTom-Map",
-                "map/1/tile/basic/main/"));
+        map.setTileSource(tileSource(
+                nightDisplay ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
+                nightDisplay ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
         if (vectorMap != null) vectorMap.setTomTomKey(apiKey);
         updateMapVisibility();
         configureTrafficTiles();
@@ -2207,7 +2330,23 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void say(String message) {
-        if (voiceEnabled && speechReady && speech != null && message != null
+        if (voiceMode != DrivingVoicePolicy.SILENT
+                && voiceMode != DrivingVoicePolicy.ALERTS_ONLY)
+            speak(message);
+    }
+
+    private void saySystemWarning(String message) {
+        if (DrivingVoicePolicy.systemWarning(voiceMode)) speak(message);
+    }
+
+    /** Future verified road feeds must use this gate, never a guessed warning. */
+    private void sayVerifiedAlert(String message, boolean speedCategory) {
+        boolean allowed = speedCategory ? speedWarningEnabled : hazardWarningEnabled;
+        if (DrivingVoicePolicy.verifiedAlert(voiceMode, allowed)) speak(message);
+    }
+
+    private void speak(String message) {
+        if (speechReady && speech != null && message != null
                 && !message.trim().isEmpty()) {
             Bundle params = new Bundle();
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, guidanceVolume);
@@ -2250,6 +2389,7 @@ public final class MainActivity extends Activity implements LocationListener {
         foreground = true;
         if (map != null) map.onResume();
         if (vectorMap != null) vectorMap.onResume();
+        applyTheme();
         startLocation();
         gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.postDelayed(gpsWatchdog, 5000);
