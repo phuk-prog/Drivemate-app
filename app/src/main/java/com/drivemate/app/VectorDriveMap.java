@@ -51,15 +51,18 @@ public final class VectorDriveMap {
     private final DriveTileServer tiles;
     private MapLibreMap map;
     private GeoJsonSource routeSource;
+    private GeoJsonSource junctionSource;
     private GeoJsonSource vehicleSource;
     private GeoJsonSource destinationSource;
     private boolean styleReady;
     private boolean trafficEnabled;
+    private boolean nightMode;
     private String tomtomKey;
     private boolean disposed;
     private GeoMath.Point pendingGps;
     private GeoMath.Point pendingDest;
     private List<GeoMath.Point> pendingRoute;
+    private List<GeoMath.Point> pendingJunctionRoute;
     private GeoMath.Point pendingCamera;
     private GeoMath.Point lastRenderedCamera;
     private GeoMath.Point lastRenderedVehicle;
@@ -114,6 +117,13 @@ public final class VectorDriveMap {
     public View view() { return view; }
     public void setOnUserGesture(Runnable callback) { onUserGesture = callback; }
     public boolean ready() { return styleReady && map != null; }
+    public boolean nightMode() { return nightMode; }
+
+    public void setNightMode(boolean enabled) {
+        if (nightMode == enabled) return;
+        nightMode = enabled;
+        if (map != null) loadStyle();
+    }
     /** Current GPU map-camera state for seamless vector/legacy switching. */
     public double currentZoom() {
         return ready() ? map.getCameraPosition().zoom : pendingZoom;
@@ -194,7 +204,9 @@ public final class VectorDriveMap {
     private void loadStyle() {
         if (disposed || map == null) return;
         try {
-            String json = readAsset(activity, "drivemate_vector_style.json")
+            String json = readAsset(activity, nightMode
+                    ? "drivemate_vector_style_night.json"
+                    : "drivemate_vector_style.json")
                     .replace("__TILE_URL__", tiles.tilesUrl())
                     .replace("__TOMTOM_KEY__", android.net.Uri.encode(tomtomKey));
             // Parse first so invalid style substitutions don't leave a half-loaded map.
@@ -214,6 +226,7 @@ public final class VectorDriveMap {
                 if (pendingGps != null) setVehicle(pendingGps);
                 if (pendingDest != null) setDestination(pendingDest);
                 if (pendingRoute != null) setRoute(pendingRoute);
+                if (pendingJunctionRoute != null) setJunctionPreview(pendingJunctionRoute);
                 if (pendingCamera != null) setCamera(pendingCamera,
                         pendingZoom, pendingBearing);
             });
@@ -232,10 +245,14 @@ public final class VectorDriveMap {
         destinationSource = new GeoJsonSource("dm-destination",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(routeSource);
+        junctionSource = new GeoJsonSource("dm-junction",
+                FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(junctionSource);
         style.addSource(destinationSource);
         style.addSource(vehicleSource);
         LineLayer routeHalo = new LineLayer("dm-route-halo", "dm-route");
-        routeHalo.setProperties(PropertyFactory.lineColor("#FFFFFF"),
+        routeHalo.setProperties(PropertyFactory.lineColor(
+                        nightMode ? "#112B3B" : "#FFFFFF"),
                 PropertyFactory.lineWidth(10f),
                 PropertyFactory.lineOpacity(0.9f));
         style.addLayer(routeHalo);
@@ -243,6 +260,13 @@ public final class VectorDriveMap {
         routeLayer.setProperties(PropertyFactory.lineColor("#157EED"),
                 PropertyFactory.lineWidth(6.5f));
         style.addLayer(routeLayer);
+        // This stroke traces the real calculated route through an approaching
+        // roundabout. It never attempts to deduce geometry from an exit count.
+        LineLayer junctionLayer = new LineLayer("dm-junction-highlight", "dm-junction");
+        junctionLayer.setProperties(PropertyFactory.lineColor("#12DFC7"),
+                PropertyFactory.lineWidth(8f),
+                PropertyFactory.lineOpacity(0.95f));
+        style.addLayer(junctionLayer);
         CircleLayer dest = new CircleLayer("dm-dest-dot", "dm-destination");
         dest.setProperties(PropertyFactory.circleColor("#E14343"),
                 PropertyFactory.circleRadius(8f),
@@ -305,6 +329,19 @@ public final class VectorDriveMap {
         for (GeoMath.Point p : DisplayPolyline.simplify(path, 1.5))
             geometry.add(Point.fromLngLat(p.lon, p.lat));
         routeSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geometry)));
+    }
+
+    public void setJunctionPreview(List<GeoMath.Point> segment) {
+        pendingJunctionRoute = segment;
+        if (!ready() || junctionSource == null) return;
+        if (segment == null || segment.size() < 2) {
+            junctionSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
+            return;
+        }
+        List<Point> geometry = new ArrayList<>();
+        for (GeoMath.Point point : segment)
+            geometry.add(Point.fromLngLat(point.lon, point.lat));
+        junctionSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geometry)));
     }
 
     public void setVehicle(GeoMath.Point point) {
