@@ -134,4 +134,32 @@ public class SmoothFollowCameraTest {
                 target(102,16,270,195),false,2000);
         assertEquals(90,motion.frame(2100).bearing,0.001);
     }
+
+    @Test public void tiltingSlowsSmoothlyAsJunctionGetsCloser() {
+        SmoothFollowCamera motion = new SmoothFollowCamera(index);
+        NavigationCamera.Frame far = new NavigationCamera.Frame(
+                index.pointAt(200), 16, 90, 500, 200, 48);
+        motion.onGps(index.pointAt(100), 100, 0, 5, 8, 500,
+                far, false, 1000);
+        assertEquals(48, motion.frame(1000).tilt, 0.001);
+        NavigationCamera.Frame near = new NavigationCamera.Frame(
+                index.pointAt(210), 18, 90, 70, 210, 28);
+        motion.onGps(index.pointAt(110), 110, 0, 5, 8, 70,
+                near, false, 2000);
+        SmoothFollowCamera.Frame partial = motion.frame(2100);
+        assertTrue(partial.tilt < 48 && partial.tilt > 28);
+        assertTrue(partial.tilt >= 43.99); // 20 deg/s capped to a 200 ms frame
+        assertTrue(motion.frame(2200).tilt < partial.tilt);
+    }
+
+    @Test public void northUpCameraDoesNotEraseTrueVehicleHeading() {
+        SmoothFollowCamera motion = new SmoothFollowCamera(index);
+        motion.onGps(index.pointAt(100), 100, 0, 5, 8, 500,
+                target(100, 16, 90, 500), true, 1000);
+        SmoothFollowCamera.Frame frame = motion.frame(1000);
+        assertEquals(0, frame.bearing, 0.001);
+        assertEquals(90, frame.travelBearing, 1);
+        assertEquals(90, CameraHeadingPolicy.screenDegrees(
+                frame.travelBearing, frame.bearing), 1);
+    }
 }

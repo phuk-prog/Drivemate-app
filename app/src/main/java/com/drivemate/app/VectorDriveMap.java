@@ -1,6 +1,11 @@
 package com.drivemate.app;
 
 import android.app.Activity;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.os.SystemClock;
 import android.util.Log;
@@ -18,6 +23,7 @@ import org.maplibre.android.maps.Style;
 import org.maplibre.android.style.layers.CircleLayer;
 import org.maplibre.android.style.layers.LineLayer;
 import org.maplibre.android.style.layers.PropertyFactory;
+import org.maplibre.android.style.layers.SymbolLayer;
 import org.maplibre.android.style.sources.GeoJsonSource;
 import org.maplibre.geojson.Feature;
 import org.maplibre.geojson.FeatureCollection;
@@ -59,6 +65,8 @@ public final class VectorDriveMap {
     private GeoMath.Point lastRenderedVehicle;
     private double lastRenderedZoom = Double.NaN;
     private double lastRenderedBearing = Double.NaN;
+    private double lastRenderedTilt = Double.NaN;
+    private double lastRenderedVehicleAngle = Double.NaN;
     private Runnable onUserGesture;
     private double pendingZoom = 14.5, pendingBearing;
     private static final String LOG_TAG = "DriveMateVector";
@@ -196,6 +204,8 @@ public final class VectorDriveMap {
             lastRenderedCamera = null;
             lastRenderedZoom = Double.NaN;
             lastRenderedBearing = Double.NaN;
+            lastRenderedTilt = Double.NaN;
+            lastRenderedVehicleAngle = Double.NaN;
             map.setStyle(new Style.Builder().fromJson(json), style -> {
                 if (disposed) return;
                 installOverlays(style);
@@ -239,12 +249,48 @@ public final class VectorDriveMap {
                 PropertyFactory.circleStrokeColor("#FFFFFF"),
                 PropertyFactory.circleStrokeWidth(3f));
         style.addLayer(dest);
-        CircleLayer vehicle = new CircleLayer("dm-vehicle-dot", "dm-vehicle");
-        vehicle.setProperties(PropertyFactory.circleColor("#10A3E1"),
-                PropertyFactory.circleRadius(11f),
-                PropertyFactory.circleStrokeColor("#FFFFFF"),
-                PropertyFactory.circleStrokeWidth(4f));
+        // Directional arrow is screen-aligned. A circle cannot indicate
+        // whether the vehicle is following the map or driving across it.
+        style.addImage("dm-vehicle-arrow-image", makeVehicleArrow());
+        SymbolLayer vehicle = new SymbolLayer("dm-vehicle-arrow-layer", "dm-vehicle");
+        vehicle.setProperties(
+                PropertyFactory.iconImage("dm-vehicle-arrow-image"),
+                PropertyFactory.iconAllowOverlap(true),
+                PropertyFactory.iconIgnorePlacement(true),
+                PropertyFactory.iconRotationAlignment("viewport"),
+                PropertyFactory.iconRotate(0f));
         style.addLayer(vehicle);
+    }
+
+    private static Bitmap makeVehicleArrow() {
+        Bitmap bitmap = Bitmap.createBitmap(56, 56, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.WHITE);
+        canvas.drawCircle(28, 28, 22, paint);
+        paint.setColor(Color.rgb(21, 126, 237));
+        Path arrow = new Path();
+        arrow.moveTo(28, 7);
+        arrow.lineTo(42, 43);
+        arrow.lineTo(28, 34);
+        arrow.lineTo(14, 43);
+        arrow.close();
+        canvas.drawPath(arrow, paint);
+        return bitmap;
+    }
+
+    private void setVehicleHeading(double clockwiseScreenDegrees) {
+        if (!ready() || map.getStyle() == null) return;
+        double delta = Double.isFinite(lastRenderedVehicleAngle)
+                ? (clockwiseScreenDegrees - lastRenderedVehicleAngle + 540) % 360 - 180
+                : 360;
+        if (Math.abs(delta) < 0.5) return;
+        org.maplibre.android.style.layers.Layer layer =
+                map.getStyle().getLayer("dm-vehicle-arrow-layer");
+        if (layer != null) {
+            layer.setProperties(PropertyFactory.iconRotate((float) clockwiseScreenDegrees));
+            lastRenderedVehicleAngle = clockwiseScreenDegrees;
+        }
     }
 
     public void setRoute(List<GeoMath.Point> path) {
@@ -295,6 +341,7 @@ public final class VectorDriveMap {
                                 .target(new LatLng(center.lat, center.lon))
                                 .zoom(zoom)
                                 .bearing((bearing % 360 + 360) % 360)
+                                .tilt(0)
                                 .build());
         // Native GPU linear interpolation is short enough to finish before
         // the next typical one-second GPS fix. Sudden position jumps, startup
@@ -307,6 +354,7 @@ public final class VectorDriveMap {
         lastRenderedCamera = center;
         lastRenderedZoom = zoom;
         lastRenderedBearing = bearing;
+        lastRenderedTilt = 0;
     }
 
     /**
@@ -322,22 +370,28 @@ public final class VectorDriveMap {
         pendingGps = frame.vehicle;
         if (!ready()) return;
         setVehicle(frame.vehicle);
+        setVehicleHeading(CameraHeadingPolicy.screenDegrees(
+                frame.travelBearing, frame.bearing));
         boolean moved = lastRenderedCamera == null
                 || GeoMath.distance(lastRenderedCamera, frame.center) > 0.32;
         boolean zoomed = !Double.isFinite(lastRenderedZoom)
                 || Math.abs(frame.zoom - lastRenderedZoom) > 0.006;
         double yaw = !Double.isFinite(lastRenderedBearing) ? 360
                 : (frame.bearing - lastRenderedBearing + 540) % 360 - 180;
-        if (!moved && !zoomed && Math.abs(yaw) < 0.28) return;
+        boolean tilted = !Double.isFinite(lastRenderedTilt)
+                || Math.abs(frame.tilt - lastRenderedTilt) > 0.16;
+        if (!moved && !zoomed && Math.abs(yaw) < 0.28 && !tilted) return;
         map.moveCamera(CameraUpdateFactory.newCameraPosition(
                 new CameraPosition.Builder()
                         .target(new LatLng(frame.center.lat, frame.center.lon))
                         .zoom(frame.zoom)
                         .bearing((frame.bearing % 360 + 360) % 360)
+                        .tilt(frame.tilt)
                         .build()));
         lastRenderedCamera = frame.center;
         lastRenderedZoom = frame.zoom;
         lastRenderedBearing = frame.bearing;
+        lastRenderedTilt = frame.tilt;
     }
 
     public void previewRoute(List<GeoMath.Point> path) {
