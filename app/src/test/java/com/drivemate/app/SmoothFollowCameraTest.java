@@ -67,7 +67,10 @@ public class SmoothFollowCameraTest {
         for (long now=3100;now<=4000;now+=100){
             SmoothFollowCamera.Frame step=motion.frame(now);
             assertTrue(step.zoom>=last-0.001);
-            assertTrue(step.zoom-last<=0.076);
+            // The first frame follows a simulated long scheduler gap, so
+            // its elapsed time is intentionally capped to 200ms. Later
+            // frames are 100ms apart: the 0.75 zoom/s rate limit applies.
+            assertTrue(step.zoom-last <= (now == 3100 ? 0.151 : 0.076));
             last=step.zoom;
         }
         assertTrue(last>16 && last<18);
