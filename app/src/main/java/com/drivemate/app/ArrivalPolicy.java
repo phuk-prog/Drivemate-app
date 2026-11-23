@@ -14,6 +14,19 @@ public final class ArrivalPolicy {
 
     public enum State { EN_ROUTE, APPROACHING, NEARBY, ARRIVED }
 
+    /**
+     * Which side of the road the destination is on, from TomTom's own final
+     * manoeuvre code (ARRIVE_LEFT / ARRIVE_RIGHT). Returns null when TomTom
+     * didn't say, so the app never guesses.
+     */
+    public static String sideLabel(String finalManeuver) {
+        if (finalManeuver == null) return null;
+        String m = finalManeuver.trim().toUpperCase(java.util.Locale.UK);
+        if (m.equals("ARRIVE_LEFT")) return "Destination on your left";
+        if (m.equals("ARRIVE_RIGHT")) return "Destination on your right";
+        return null;
+    }
+
     public void reset() { consecutive = 0; lastFixAt = -1; }
 
     public State observe(double pinDistance, double remainingRoute, double offRoute,

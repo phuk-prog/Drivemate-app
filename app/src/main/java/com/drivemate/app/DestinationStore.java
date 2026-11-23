@@ -84,6 +84,12 @@ public final class DestinationStore {
     public void addFavorite(TomTomApi.Destination target) { prepend(FAVORITES, target, 15); }
     public void addRecent(TomTomApi.Destination target) { prepend(RECENTS, target, 8); }
 
+    public void removeRecent(TomTomApi.Destination target) {
+        List<TomTomApi.Destination> places = recent();
+        places.removeIf(item -> same(item, target));
+        store(RECENTS, places);
+    }
+
     public void removeFavorite(TomTomApi.Destination target) {
         List<TomTomApi.Destination> places = favorites();
         places.removeIf(item -> same(item, target));

@@ -1,11 +1,21 @@
 name: Build privately signed DriveMate update APK
 
-# Manual only: ensures GitHub Actions signing secrets never run for pull requests.
+# Runs on every push to main (the owner wants a signed APK for each change)
+# and can still be started by hand. Signing secrets are never exposed to
+# pull_request events or other branches: there is no pull_request trigger,
+# and the job refuses any ref other than main.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Two quick merges queue their signed builds rather than cancelling one.
+concurrency:
+  group: signed-release-main
+  cancel-in-progress: false
 
 jobs:
   signed-apk:
@@ -14,6 +24,28 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          # All branches, so the version check below can see dev builds too.
+          fetch-depth: 0
+
+      - name: Refuse a version code that would not install as an update
+        shell: bash
+        run: |
+          set -euo pipefail
+          code() { sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' | head -n 1; }
+          this="$(code < app/build.gradle)"
+          test -n "$this"
+          highest=0
+          from=""
+          for ref in $(git for-each-ref --format='%(refname)' refs/remotes/origin | grep -v '/HEAD$'); do
+            v="$(git show "$ref:app/build.gradle" 2>/dev/null | code || true)"
+            if [[ -n "$v" ]] && (( v > highest )); then highest=$v; from=${ref#refs/remotes/origin/}; fi
+          done
+          echo "This build: versionCode $this. Highest on any branch: $highest ($from)."
+          if (( this < highest )); then
+            echo "::error::versionCode $this is lower than $highest on branch '$from'. A phone with that build installed refuses this APK (\"You can't install the app\"). Raise versionCode in app/build.gradle." >&2
+            exit 1
+          fi
 
       - uses: actions/setup-java@v4
         with:
@@ -83,6 +115,18 @@ jobs:
             echo "Signing certificate does not match the DriveMate v1.2 update certificate." >&2
             exit 1
           fi
+
+      - name: Confirm the signed APK carries the expected version
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -x "$AAPT"
+          BADGE="$("$AAPT" dump badging app/build/outputs/apk/release/DriveMate-update.apk | grep -m1 '^package:')"
+          echo "$BADGE"
+          EXPECTED="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
+          echo "$BADGE" | grep -F "name='com.drivemate.android'" >/dev/null
+          echo "$BADGE" | grep -F "versionCode='$EXPECTED'" >/dev/null
 
       - name: Upload privately signed installable APK
         uses: actions/upload-artifact@v4

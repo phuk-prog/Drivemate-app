@@ -57,6 +57,14 @@ public class ArrivalPolicyTest {
         assertFalse(ArrivalPolicy.canSaveParking(10, 0, 10000, 20000));
         assertFalse(ArrivalPolicy.canSaveParking(Float.NaN, 0, 10000, 12000));
     }
+    @Test public void roadSideComesOnlyFromTomTomArrivalCode() {
+        assertEquals("Destination on your left", ArrivalPolicy.sideLabel("ARRIVE_LEFT"));
+        assertEquals("Destination on your right", ArrivalPolicy.sideLabel("arrive_right"));
+        assertNull(ArrivalPolicy.sideLabel("ARRIVE"));
+        assertNull(ArrivalPolicy.sideLabel("TURN_LEFT"));
+        assertNull(ArrivalPolicy.sideLabel(null));
+    }
+
     @Test public void verifiedEntranceMustBeActualNearbyCoordinate() {
         GeoMath.Point place = new GeoMath.Point(51.5000, -0.1000);
         assertTrue(ArrivalPolicy.trustedEntrance(new GeoMath.Point(51.5002, -0.1002), place));

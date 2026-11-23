@@ -84,6 +84,7 @@ import java.util.concurrent.Executors;
  */
 public final class MainActivity extends Activity implements LocationListener {
     private static final int LOCATION_PERMISSION = 10;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 13;
     private static final String PREFS = "drivemate_settings";
     private static final int BLUE = Color.rgb(24, 110, 235);
     private static final int DARK = Color.rgb(10, 39, 59);
@@ -145,6 +146,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 lastVisualTickMs = now;
                 SmoothFollowCamera.Frame frame = smoothFollow.frame(now);
                 if (frame != null) {
+                    lastCameraBearing = frame.bearing;
+                    lastTravelBearing = frame.travelBearing;
                     if (showingVector() && vectorMap != null) {
                         vectorMap.followFrame(frame);
                     } else {
@@ -347,6 +350,18 @@ public final class MainActivity extends Activity implements LocationListener {
     private Location currentLocation;
     /** Last fix that passed FixQualityPolicy; the gate compares every new fix to it. */
     private FixQualityPolicy.Sample lastAcceptedFix;
+    /** Whether the current location registration uses the navigating rate. */
+    private boolean subscribedForNavigation;
+    private boolean resubscribing;
+    private boolean fusedActive;
+    /** Latest camera angles, kept only for the shareable diagnostics report. */
+    private double lastCameraBearing = Double.NaN;
+    private double lastTravelBearing = Double.NaN;
+    private double lastOffRouteMetres = Double.NaN;
+    /** Real Home/Work drive times from TomTom, refreshed at most every 5 minutes. */
+    private String homeEtaLabel;
+    private String workEtaLabel;
+    private long quickEtaFetchedAt;
     /** Display-only estimate of the vehicle position during short GPS gaps. */
     private final DeadReckoner deadReckoner = new DeadReckoner();
     private final Runnable deadReckonTick = new Runnable() {
@@ -1067,7 +1082,7 @@ public final class MainActivity extends Activity implements LocationListener {
         junctionPos.topMargin = dp(5);
         turnCard.addView(junctionDiagram, junctionPos);
 
-        laneGuidanceText = text("", 15, CYAN, true);
+        laneGuidanceText = text("", 24, CYAN, true);
         laneGuidanceText.setGravity(Gravity.CENTER);
         laneGuidanceText.setContentDescription("Verified route lane recommendations");
         laneGuidanceText.setVisibility(View.GONE);
@@ -1219,8 +1234,12 @@ public final class MainActivity extends Activity implements LocationListener {
         TomTomApi.Destination work = places.work();
         homeTile.setContentDescription(home == null ? "Set Home" : "Navigate Home to " + home);
         workTile.setContentDescription(work == null ? "Set Work" : "Navigate Work to " + work);
-        setTileText(homeTile, "Home", home == null ? "Not set" : home.title);
-        setTileText(workTile, "Work", work == null ? "Not set" : work.title);
+        // Real drive time from TomTom when available, otherwise the place name.
+        setTileText(homeTile, "Home", home == null ? "Not set"
+                : homeEtaLabel != null ? homeEtaLabel : home.title);
+        setTileText(workTile, "Work", work == null ? "Not set"
+                : workEtaLabel != null ? workEtaLabel : work.title);
+        maybeFetchQuickEtas();
         recentList.removeAllViews();
         List<TomTomApi.Destination> recents = places.recent();
         if (recents.isEmpty()) {
@@ -1246,12 +1265,65 @@ public final class MainActivity extends Activity implements LocationListener {
                     distance.setPadding(dp(8), 0, 0, 0);
                     row.addView(distance);
                 }
+                // Remove just this entry; "Clear recent destinations" in
+                // Settings still clears them all.
+                TextView remove = text("×", 22, Color.rgb(143, 176, 192), false);
+                remove.setGravity(Gravity.CENTER);
+                remove.setContentDescription("Remove " + item.title + " from recent destinations");
+                remove.setOnClickListener(v -> {
+                    places.removeRecent(item);
+                    refreshHomePanel();
+                    refreshSearchSuggestions();
+                });
+                row.addView(remove, new LinearLayout.LayoutParams(dp(44), dp(44)));
                 row.setOnClickListener(v -> selectDestination(item));
                 recentList.addView(row, new LinearLayout.LayoutParams(-1, dp(46)));
                 View line = new View(this);
                 line.setBackgroundColor(Color.rgb(40, 86, 104));
                 recentList.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
             }
+        }
+    }
+
+    /**
+     * Fetch real Home/Work drive times (with traffic) from TomTom when the home
+     * screen is showing. At most once every 5 minutes, and only with a fresh
+     * GPS fix and a TomTom key, to keep API use low.
+     */
+    private void maybeFetchQuickEtas() {
+        if (apiKey.isEmpty() || places == null || currentLocation == null || active) return;
+        if (!MapStartupPolicy.freshForRouting(
+                currentLocation.getLatitude(), currentLocation.getLongitude(),
+                currentLocation.getTime(), System.currentTimeMillis(),
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : 101f)) return;
+        long now = SystemClock.elapsedRealtime();
+        if (quickEtaFetchedAt != 0 && now - quickEtaFetchedAt < 5 * 60_000L) return;
+        TomTomApi.Destination home = places.home();
+        TomTomApi.Destination work = places.work();
+        if (home == null && work == null) return;
+        quickEtaFetchedAt = now;
+        GeoMath.Point from = gpsPoint(currentLocation);
+        String key = apiKey;
+        network.execute(() -> {
+            String homeLabel = home == null ? null : quickEta(key, from, home);
+            String workLabel = work == null ? null : quickEta(key, from, work);
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                homeEtaLabel = homeLabel;
+                workEtaLabel = workLabel;
+                if (homeMode) refreshHomePanel();
+            });
+        });
+    }
+
+    /** Drive time such as "14 min", or null if TomTom can't route right now. */
+    private static String quickEta(String key, GeoMath.Point from, TomTomApi.Destination to) {
+        if (to == null || to.point == null) return null;
+        try {
+            TomTomApi.Route trip = TomTomApi.route(key, from, to.point);
+            return NavigationUnits.duration(trip.timeSeconds);
+        } catch (Exception error) {
+            return null;
         }
     }
 
@@ -1317,7 +1389,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Online close-up map detail · " + (highDetailOnline ? "On" : "Off"),
                 "Save where I parked",
                 places != null && places.parkedCar() != null
-                        ? "Find my parked car" : "Find my parked car · none saved"
+                        ? "Find my parked car" : "Find my parked car · none saved",
+                "Share diagnostics (no location included)"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1443,6 +1516,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             break;
                         case 20: promptSaveParking(); break;
                         case 21: showParkedCar(); break;
+                        case 22: shareDiagnostics(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1732,6 +1806,10 @@ public final class MainActivity extends Activity implements LocationListener {
                                         .setTitle("Save " + label + " location")
                                         .setItems(labels, (d, index) -> {
                                             TomTomApi.Destination chosen = options.get(index);
+                                            // A new Home/Work needs a fresh drive time.
+                                            quickEtaFetchedAt = 0;
+                                            homeEtaLabel = null;
+                                            workEtaLabel = null;
                                             if (home) places.setHome(chosen);
                                             else places.setWork(chosen);
                                             refreshHomePanel();
@@ -1963,13 +2041,20 @@ public final class MainActivity extends Activity implements LocationListener {
             // Android 12+: the platform fused provider combines GNSS, Wi-Fi, cell and
             // motion sensors. FixQualityPolicy ranks it above raw GPS; raw GPS stays
             // registered as a fallback and to drive the satellite count.
+            // Fastest rate while navigating, lighter on the home screen and route
+            // preview (see LocationRatePolicy). resubscribeLocationForMode()
+            // switches between the two when guidance starts or ends.
+            boolean navigating = active;
+            long interval = LocationRatePolicy.gpsIntervalMs(navigating);
+            float minDistance = LocationRatePolicy.minDistanceMetres(navigating);
             boolean fused = false;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
                     && locationManager.hasProvider(LocationManager.FUSED_PROVIDER)
                     && locationManager.isProviderEnabled(LocationManager.FUSED_PROVIDER)) {
-                LocationRequest request = new LocationRequest.Builder(0L)
+                LocationRequest request = new LocationRequest.Builder(interval)
                         .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY)
-                        .setMinUpdateIntervalMillis(0L)
+                        .setMinUpdateIntervalMillis(interval)
+                        .setMinUpdateDistanceMeters(minDistance)
                         .build();
                 locationManager.requestLocationUpdates(LocationManager.FUSED_PROVIDER,
                         request, getMainExecutor(), this);
@@ -1977,11 +2062,10 @@ public final class MainActivity extends Activity implements LocationListener {
                 requested = true;
             }
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-                // Ask for the fastest rate the GNSS hardware supports (0 ms, 0 m).
-                // Android delivers at the receiver's own maximum, typically 1 Hz
-                // on most phones and higher on some. This is the main battery cost.
+                // While navigating this is 0 ms / 0 m: the fastest the GNSS
+                // hardware supports, typically 1 Hz. This is the main battery cost.
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
-                        0L, 0f, this);
+                        interval, minDistance, this);
                 locationManager.registerGnssStatusCallback(gnssCallback,
                         new Handler(Looper.getMainLooper()));
                 requested = true;
@@ -1989,18 +2073,42 @@ public final class MainActivity extends Activity implements LocationListener {
             // Fused already uses Wi-Fi and cell, so the network provider is only
             // needed on older phones.
             if (!fused && locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                // Maximum rate here too; the fix gate decides which fixes are used.
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                        0L, 0f, this);
+                        LocationRatePolicy.networkIntervalMs(navigating), minDistance, this);
                 requested = true;
             }
             locationSubscribed = requested;
+            subscribedForNavigation = navigating;
+            fusedActive = fused;
             gpsHandler.removeCallbacks(deadReckonTick);
             if (requested) gpsHandler.post(deadReckonTick);
-            if (requested) restoreLastKnownMapArea();
+            // A rate switch mid-session must not jump the map to a stale area.
+            if (requested && !resubscribing) restoreLastKnownMapArea();
         } catch (SecurityException error) {
             locationSubscribed = false;
             setStatus("Location permission denied. Enable Precise Location.");
+        }
+    }
+
+    /**
+     * Re-register location updates when guidance starts or ends, so the rate
+     * matches the mode: fastest while navigating, lighter otherwise.
+     */
+    private void resubscribeLocationForMode() {
+        if (locationManager == null || !locationSubscribed
+                || subscribedForNavigation == active) return;
+        try {
+            locationManager.removeUpdates(this);
+            locationManager.unregisterGnssStatusCallback(gnssCallback);
+        } catch (SecurityException ignored) {
+            // Permission revoked; startLocation() reports it.
+        }
+        locationSubscribed = false;
+        resubscribing = true;
+        try {
+            startLocation();
+        } finally {
+            resubscribing = false;
         }
     }
 
@@ -2329,6 +2437,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private void showPreview(TomTomApi.Route calculated) {
         active = false;
         applyHighDetailPolicy();
+        NavigationService.stop(this);
+        resubscribeLocationForMode();
         setHomeVisible(false);
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
@@ -2389,8 +2499,31 @@ public final class MainActivity extends Activity implements LocationListener {
         stabilizedAlong = -1;
         observedSpeed = 0;
         applyHighDetailPolicy();
+        startBackgroundNavigation();
+        resubscribeLocationForMode();
         updateGuidance(currentLocation);
         startSmoothLoop();
+    }
+
+    /**
+     * Keep guidance alive with the screen off or another app in front. Android
+     * 13+ also needs the notification permission to show the ongoing
+     * "navigating" notification; navigation still works if it is refused.
+     */
+    private void startBackgroundNavigation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                    NOTIFICATION_PERMISSION_REQUEST);
+        }
+        try {
+            NavigationService.start(this, destination == null ? "" : destination.title);
+        } catch (RuntimeException error) {
+            // Android can refuse a foreground service in rare states; on-screen
+            // navigation still works, it just won't continue in the background.
+            android.util.Log.w("DriveMateNav", "Background navigation unavailable", error);
+        }
     }
 
     /**
@@ -2464,13 +2597,20 @@ public final class MainActivity extends Activity implements LocationListener {
             panel.setVisibility(View.GONE);
             return;
         }
-        String label = state == ArrivalPolicy.State.NEARBY
-                ? "Destination nearby · slow down and check access"
-                : "Destination ahead · follow final road";
+        // Road side comes only from TomTom's final manoeuvre (ARRIVE_LEFT/RIGHT).
+        String side = route == null || route.instructions.isEmpty() ? null
+                : ArrivalPolicy.sideLabel(
+                        route.instructions.get(route.instructions.size() - 1).maneuver);
+        boolean nearby = state == ArrivalPolicy.State.NEARBY;
+        String label = side != null
+                ? side + (nearby ? " · slow down" : " · follow final road")
+                : nearby ? "Destination nearby · slow down and check access"
+                        : "Destination ahead · follow final road";
         if (destination.mainEntrance != null)
             label += "\nMap-listed entrance marked · verify access";
         else
-            label += "\nEntrance and correct road side not verified";
+            label += side != null ? "\nEntrance not verified · check access"
+                    : "\nEntrance and correct road side not verified";
         arrivalHintText.setText(label);
         panel.setVisibility(View.VISIBLE);
         // The parking lookup is offered only when the driver is stationary.
@@ -2566,6 +2706,43 @@ public final class MainActivity extends Activity implements LocationListener {
         places.saveParkedCar(gpsPoint(currentLocation), System.currentTimeMillis());
         refreshHomePanel();
         Toast.makeText(this, "Parked car saved locally", Toast.LENGTH_LONG).show();
+    }
+
+    /**
+     * Settings → "Share diagnostics": a text snapshot of GPS quality and the
+     * camera/arrow angles, for reporting display problems such as a sideways
+     * car arrow. No coordinates, addresses or destination names are included,
+     * and nothing is sent unless the driver picks an app to share it with.
+     */
+    private void shareDiagnostics() {
+        DiagnosticsReport.Snapshot s = new DiagnosticsReport.Snapshot();
+        s.appVersion = installedVersionName();
+        s.androidSdk = Build.VERSION.SDK_INT;
+        s.device = Build.MANUFACTURER + " " + Build.MODEL;
+        s.navigating = active;
+        s.gpsLost = gpsLost;
+        s.fixSource = lastAcceptedFix == null ? ""
+                : lastAcceptedFix.source == FixQualityPolicy.SOURCE_FUSED ? "fused"
+                : lastAcceptedFix.source == FixQualityPolicy.SOURCE_GPS ? "gps" : "network";
+        if (fusedActive && s.fixSource.isEmpty()) s.fixSource = "fused (no fix yet)";
+        if (currentLocation != null) {
+            if (currentLocation.hasAccuracy()) s.accuracyMetres = currentLocation.getAccuracy();
+            if (currentLocation.hasSpeed()) s.speedMps = currentLocation.getSpeed();
+            if (currentLocation.hasBearing()) s.gpsBearing = currentLocation.getBearing();
+        }
+        s.satellitesUsed = satellitesUsed;
+        s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
+        s.cameraMode = cameraModeName();
+        s.followingCar = followLocation;
+        s.highDetailTiles = highDetailOnline
+                && !(active && cameraMode != DrivingDisplayPolicy.CAMERA_NORTH_2D);
+        s.cameraBearing = lastCameraBearing;
+        s.travelBearing = lastTravelBearing;
+        Intent share = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "DriveMate diagnostics")
+                .putExtra(Intent.EXTRA_TEXT, DiagnosticsReport.build(s));
+        startActivity(Intent.createChooser(share, "Share DriveMate diagnostics"));
     }
 
     /** Settings → "Save where I parked": only saves a precise, stationary GPS fix. */
@@ -2873,6 +3050,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active || route == null || destination == null) return;
         GeoMath.Point current = gpsPoint(fix);
         GeoMath.Progress projected = GeoMath.project(route.points, current);
+        lastOffRouteMetres = projected.offRouteMetres;
         long now = SystemClock.elapsedRealtime();
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
 
@@ -3051,8 +3229,11 @@ public final class MainActivity extends Activity implements LocationListener {
         RouteIntelligence.LaneSection lanes = confident
                 ? RouteIntelligence.approachingLanes(route.laneSections, along, 650) : null;
         if (laneGuidanceText != null) {
-            laneGuidanceText.setText(lanes == null ? "" : lanes.display());
-            laneGuidanceText.setVisibility(lanes == null ? View.GONE : View.VISIBLE);
+            CharSequence arrows = laneArrows(lanes);
+            laneGuidanceText.setText(arrows);
+            laneGuidanceText.setContentDescription(lanes == null ? ""
+                    : "Lane guidance: " + lanes.display());
+            laneGuidanceText.setVisibility(arrows.length() == 0 ? View.GONE : View.VISIBLE);
         }
         RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
                 route.speedSections, along, offRoute, accuracy, age);
@@ -3106,6 +3287,28 @@ public final class MainActivity extends Activity implements LocationListener {
             sayVerifiedAlert(traffic.label() + " reported ahead. Check road conditions.",
                     false);
         }
+    }
+
+    /**
+     * Lane guidance as arrows, quicker to read at a glance than text:
+     * recommended lanes bright cyan and larger, other lanes dimmed. Only
+     * TomTom-supplied lanes are shown (LaneSection.trusted()).
+     */
+    private CharSequence laneArrows(RouteIntelligence.LaneSection lanes) {
+        if (lanes == null || !lanes.trusted()) return "";
+        android.text.SpannableStringBuilder out = new android.text.SpannableStringBuilder();
+        for (int i = 0; i < lanes.lanes.size(); i++) {
+            RouteIntelligence.Lane lane = lanes.lanes.get(i);
+            if (i > 0) out.append("   ");
+            int start = out.length();
+            out.append(lane.symbol());
+            out.setSpan(new ForegroundColorSpan(lane.recommended
+                    ? CYAN : Color.rgb(96, 120, 132)), start, out.length(), 0);
+            if (lane.recommended)
+                out.setSpan(new android.text.style.RelativeSizeSpan(1.35f),
+                        start, out.length(), 0);
+        }
+        return out;
     }
 
     private void showTrafficTimeline() {
@@ -3213,6 +3416,8 @@ public final class MainActivity extends Activity implements LocationListener {
         routing = false;
         active = false;
         applyHighDetailPolicy();
+        NavigationService.stop(this);
+        resubscribeLocationForMode();
         arrivalPolicy.reset();
         route = null;
         destination = null;
@@ -3366,19 +3571,32 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override public void onPause() {
         foreground = false;
         stopSmoothLoop();
-        gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.removeCallbacks(deadReckonTick);
-        if (locationManager != null) {
-            locationManager.removeUpdates(this);
-            locationManager.unregisterGnssStatusCallback(gnssCallback);
+        if (active) {
+            // Navigating: NavigationService keeps the app in the foreground, so
+            // keep GPS, guidance, voice and the GPS-lost watchdog running while
+            // the screen is off or another app is in front. Only the on-screen
+            // animation stops.
+        } else {
+            gpsHandler.removeCallbacks(gpsWatchdog);
+            if (locationManager != null) {
+                locationManager.removeUpdates(this);
+                locationManager.unregisterGnssStatusCallback(gnssCallback);
+            }
+            locationSubscribed = false;
         }
-        locationSubscribed = false;
         if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
         super.onPause();
     }
 
     @Override public void onDestroy() {
+        // The app is closing: the background-navigation notification must go too.
+        NavigationService.stop(this);
+        if (locationManager != null) {
+            locationManager.removeUpdates(this);
+            locationManager.unregisterGnssStatusCallback(gnssCallback);
+        }
         ++requestGeneration;
         network.shutdownNow();
         if (speech != null) {
