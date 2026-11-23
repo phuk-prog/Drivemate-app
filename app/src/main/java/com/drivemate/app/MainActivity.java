@@ -2358,6 +2358,10 @@ public final class MainActivity extends Activity implements LocationListener {
             refreshHomePanel();
             return;
         }
+        // Leave the saved position visible rather than having the next live
+        // GPS fix immediately drag the map back to the driver's location.
+        followLocation = false;
+        updateFollowButton();
         if (parkedCarPin != null) map.getOverlays().remove(parkedCarPin);
         parkedCarPin = new Marker(map);
         parkedCarPin.setPosition(new GeoPoint(saved.lat, saved.lon));
