@@ -48,7 +48,7 @@ assert get_layer(day, "uk-road-casing")["paint"]["line-color"] != (
        get_layer(night, "uk-road-casing")["paint"]["line-color"])
 
 vector = (ROOT / "app/src/main/java/com/drivemate/app/VectorDriveMap.java").read_text()
-assert '".replace("__TOMTOM_DETAIL_STYLE__"' in vector
+assert '.replace("__TOMTOM_DETAIL_STYLE__"' in vector
 assert "highDetailEnabled && !tomtomKey.isEmpty()" in vector
 assert "dm-junction-halo" in vector
 camera = (ROOT / "app/src/main/java/com/drivemate/app/NavigationCamera.java").read_text()
