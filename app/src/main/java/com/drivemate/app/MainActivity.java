@@ -734,8 +734,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 lastCameraUpdate = 0;
                 updateGuidance(currentLocation);
                 startSmoothLoop();
-            } else if (currentLocation != null) {
+            } else if (currentLocation != null
+                    && MapStartupPolicy.freshForRouting(
+                            currentLocation.getLatitude(), currentLocation.getLongitude(),
+                            currentLocation.getTime(), System.currentTimeMillis(),
+                            currentLocation.hasAccuracy()
+                                    ? currentLocation.getAccuracy() : 101f)) {
                 centreOnLocation(true);
+            } else {
+                ensureLocationPermission();
+                Toast.makeText(this, gpsUnavailableMessage(), Toast.LENGTH_LONG).show();
             }
         });
         gpsButtonPos = new FrameLayout.LayoutParams(dp(64), dp(64), Gravity.BOTTOM | Gravity.RIGHT);
@@ -1361,7 +1369,11 @@ public final class MainActivity extends Activity implements LocationListener {
         if (requestCode != LOCATION_PERMISSION) return;
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) startLocation();
-        else setStatus("Precise location permission is required for driving GPS guidance.");
+        else {
+            setStatus("Allow Precise Location to show your position and navigate.");
+            Toast.makeText(this, "DriveMate needs Precise Location permission for driving.",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private boolean hasPreciseLocationPermission() {
@@ -1806,9 +1818,14 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void selectDestination(TomTomApi.Destination selected) {
-        if (currentLocation == null
-                || System.currentTimeMillis() - currentLocation.getTime() > 60000) {
-            showError("Waiting for a fresh GPS fix. Enable device location, then try again.");
+        if (currentLocation == null || !MapStartupPolicy.freshForRouting(
+                currentLocation.getLatitude(), currentLocation.getLongitude(),
+                currentLocation.getTime(), System.currentTimeMillis(),
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : 101f)) {
+            // Selecting a destination must never silently use the remembered
+            // startup map centre or an old system cached GPS measurement.
+            ensureLocationPermission();
+            showError(gpsUnavailableMessage());
             return;
         }
         if (route != null || active) stopNavigation(false);
