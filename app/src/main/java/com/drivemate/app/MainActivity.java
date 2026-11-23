@@ -256,6 +256,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView topInstructionText;
     private TextView topTurnTitle;
     private TextView topNextTurnText;
+    private TextView junctionRoadText;
     private TurnArrowView topTurnArrow;
     private LinearLayout recentList;
     private Button homeTile;
@@ -332,6 +333,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private Marker parkedCarPin;
     private Polyline routeLine;
     private Polyline junctionLine;
+    private Polyline junctionHaloLine;
     private int highlightedJunctionIndex = -1;
     private TilesOverlay trafficTiles;
     private TextToSpeech speech;
@@ -968,6 +970,15 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
         thenPos.topMargin = dp(1);
         turnCard.addView(topNextTurnText, thenPos);
+        // Provider-supplied exit road or signpost, never a guessed road name.
+        junctionRoadText = text("", 13, Color.rgb(202, 238, 228), true);
+        junctionRoadText.setMaxLines(2);
+        junctionRoadText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        junctionRoadText.setVisibility(View.GONE);
+        LinearLayout.LayoutParams exitRoadPos =
+                new LinearLayout.LayoutParams(-1, -2);
+        exitRoadPos.topMargin = dp(4);
+        turnCard.addView(junctionRoadText, exitRoadPos);
 
         laneGuidanceText = text("", 15, CYAN, true);
         laneGuidanceText.setGravity(Gravity.CENTER);
@@ -1473,11 +1484,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 night ? CYAN : Color.rgb(0, 96, 130));
         if (laneGuidanceText != null) laneGuidanceText.setTextColor(
                 night ? CYAN : Color.rgb(0, 101, 130));
+        if (junctionRoadText != null) junctionRoadText.setTextColor(
+                night ? Color.rgb(195, 245, 226) : Color.rgb(19, 98, 78));
         if (trafficNoticeText != null) trafficNoticeText.setTextColor(
                 night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
         if (topTurnArrow != null) topTurnArrow.setNightMode(night);
         if (maneuverIcon != null) maneuverIcon.setNightMode(night);
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
+        // Force redraw of the approach halo in its new contrast colour.
+        if (junctionHaloLine != null) junctionHaloLine.setColor(
+                night ? Color.rgb(6, 23, 33) : Color.WHITE);
     }
 
 
@@ -1967,7 +1983,9 @@ public final class MainActivity extends Activity implements LocationListener {
      * zoom hysteresis and bearing changes on the independent UI clock.
      */
     private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
-                                     double nextJunctionOffsetMetres) {
+                                     double nextJunctionOffsetMetres,
+                                     double followingJunctionOffsetMetres,
+                                     boolean complexJunction) {
         if (!active || !followLocation || route == null || gpsLost
                 || progress.offRouteMetres > 110
                 || (fix.hasAccuracy() && fix.getAccuracy() > 75)
@@ -1985,7 +2003,8 @@ public final class MainActivity extends Activity implements LocationListener {
         float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
-                velocity, map.getHeight(), headerHeight, bottomPanelHeight);
+                followingJunctionOffsetMetres, velocity, map.getHeight(),
+                headerHeight, bottomPanelHeight, closeZoom, complexJunction);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
@@ -2713,6 +2732,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     accuracy, Double.POSITIVE_INFINITY);
             topInstructionText.setText("Continue along the highlighted route");
             topNextTurnText.setVisibility(View.GONE);
+            if (junctionRoadText != null) junctionRoadText.setVisibility(View.GONE);
             clearJunctionHighlight();
             return;
         }
@@ -2742,8 +2762,24 @@ public final class MainActivity extends Activity implements LocationListener {
             iconParams.height = iconSide;
             topTurnArrow.setLayoutParams(iconParams);
         }
-        updateJunctionHighlight(next,
-                DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn));
+        // Never show a confident junction shape when road matching or GPS
+        // is uncertain; the ordinary turn text can remain as route context.
+        boolean confidentJunction = !gpsLost && fix.hasAccuracy()
+                && fix.getAccuracy() <= 40 && projected.offRouteMetres <= 45;
+        updateJunctionHighlight(next, confidentJunction
+                && DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn));
+        String providerExit = step.signpostText != null && !step.signpostText.trim().isEmpty()
+                ? step.signpostText.trim()
+                : step.street != null ? step.street.trim() : "";
+        if (junctionRoadText != null) {
+            boolean showExit = (roundabout || fork) && !providerExit.isEmpty()
+                    && confidentJunction;
+            junctionRoadText.setText(showExit
+                    ? (step.signpostText != null && !step.signpostText.trim().isEmpty()
+                            ? "SIGNED EXIT · " : "EXIT ROAD · ") + providerExit
+                    : "");
+            junctionRoadText.setVisibility(showExit ? View.VISIBLE : View.GONE);
+        }
         String nextTurnLabel = NavigationUnits.displayDistance(untilTurn, metricUnits)
                 + " · " + direction;
         instructionText.setText(nextTurnLabel);
@@ -2752,6 +2788,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Next turn in " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
                 + ": " + direction);
 
+        double followingOffset = Double.NaN;
         if (next + 1 < route.instructions.size()) {
             TomTomApi.Instruction after = route.instructions.get(next + 1);
             double afterTurn = Math.max(0, after.routeOffsetMetres - step.routeOffsetMetres);
@@ -2764,6 +2801,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + " later · " + followUp;
             nextTurnText.setText(followingTurn);
             boolean showThen = DrivingDisplayPolicy.showFollowingTurn(untilTurn, afterTurn);
+            if (showThen) followingOffset = after.routeOffsetMetres;
             topNextTurnText.setText(showThen ? followingTurn : "");
             topNextTurnText.setVisibility(showThen ? View.VISIBLE : View.GONE);
             nextTurnText.setVisibility(View.GONE);
@@ -2777,7 +2815,8 @@ public final class MainActivity extends Activity implements LocationListener {
         nextInstruction = untilTurn <= 30 ? direction
                 : "In " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
                 + ", " + direction;
-        updateDrivingCamera(fix, projected, step.routeOffsetMetres);
+        updateDrivingCamera(fix, projected, step.routeOffsetMetres,
+                followingOffset, roundabout || fork);
         if (untilTurn <= 65 && spokenNowIndex != next) {
             spokenNowIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 2)) say(direction);
@@ -2901,11 +2940,11 @@ public final class MainActivity extends Activity implements LocationListener {
         clearJunctionHighlight();
         TomTomApi.Instruction instruction = route.instructions.get(instructionIndex);
         RouteMotionIndex index = new RouteMotionIndex(route.points);
-        double from = Math.max(0, instruction.routeOffsetMetres - 110);
-        double to = Math.min(index.lengthMetres, instruction.routeOffsetMetres + 130);
+        double from = Math.max(0, instruction.routeOffsetMetres - 150);
+        double to = Math.min(index.lengthMetres, instruction.routeOffsetMetres + 190);
         if (to - from < 10) return;
         List<GeoMath.Point> segment = new ArrayList<>();
-        for (double along = from; along < to; along += 12)
+        for (double along = from; along < to; along += 8)
             segment.add(index.pointAt(along));
         segment.add(index.pointAt(to));
         if (segment.size() < 2) return;
@@ -2916,6 +2955,12 @@ public final class MainActivity extends Activity implements LocationListener {
         for (GeoMath.Point point : segment)
             drawing.add(new GeoPoint(point.lat, point.lon));
         junctionLine.setPoints(drawing);
+        junctionHaloLine = new Polyline();
+        junctionHaloLine.setColor(nightDisplay
+                ? Color.rgb(6, 23, 33) : Color.WHITE);
+        junctionHaloLine.setWidth(dp(12));
+        junctionHaloLine.setPoints(drawing);
+        map.getOverlays().add(junctionHaloLine);
         map.getOverlays().add(junctionLine);
         if (vectorMap != null) vectorMap.setJunctionPreview(segment);
         highlightedJunctionIndex = instructionIndex;
@@ -2923,6 +2968,10 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void clearJunctionHighlight() {
+        if (junctionHaloLine != null) {
+            map.getOverlays().remove(junctionHaloLine);
+            junctionHaloLine = null;
+        }
         if (junctionLine != null) {
             map.getOverlays().remove(junctionLine);
             junctionLine = null;
