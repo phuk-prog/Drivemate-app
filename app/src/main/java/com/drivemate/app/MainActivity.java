@@ -2197,6 +2197,12 @@ public final class MainActivity extends Activity implements LocationListener {
                             setStatus("Uncertain GPS · current route retained");
                             return;
                         }
+                        // A route calculated from a GPS point that the driver
+                        // has already left is unsafe to install automatically.
+                        if (GeoMath.distance(gpsPoint(currentLocation), start) > 110) {
+                            setStatus("GPS moved during route update · old route retained");
+                            return;
+                        }
                         GeoMath.Progress old = GeoMath.project(route.points, start);
                         boolean confirmedOffRoute = old.offRouteMetres > 90
                                 && currentLocation.getAccuracy() <= 35;
@@ -2217,16 +2223,23 @@ public final class MainActivity extends Activity implements LocationListener {
                             int saving = oldFresh ? RouteIntelligence.meaningfulSaving(
                                     oldSeconds, calculated.timeSeconds, different) : 0;
                             if (different) {
-                                if (saving > 0 || !oldFresh) {
+                                if (saving > 0) {
                                     if (rerouteMode == 1) {
                                         showPendingRoute(calculated, start, saving);
-                                        setStatus(saving > 0
-                                                ? "A faster route is available · choose Switch or Keep"
-                                                : "Updated route available · choose Switch or Keep");
+                                        setStatus("Faster route available · choose Switch or Keep");
                                         return;
                                     }
+                                    // Automatic mode uses only a *verified*
+                                    // improvement over a recent reference ETA.
+                                } else if (!oldFresh && rerouteMode == 1) {
+                                    // When the old ETA is stale, an alternative
+                                    // is a choice, not an automatically faster
+                                    // route. Never silently switch on that basis.
+                                    showPendingRoute(calculated, start, 0);
+                                    setStatus("Updated route · time saving unverified");
+                                    return;
                                 } else {
-                                    setStatus("Current route retained · no worthwhile saving");
+                                    setStatus("Current route retained · no verified time saving");
                                     return;
                                 }
                             }
