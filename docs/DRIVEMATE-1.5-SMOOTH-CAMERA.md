@@ -5,7 +5,7 @@ The camera no longer waits for each GPS callback to move the map.
 ## Implemented
 
 - **Continuous visual movement:** a UI frame clock runs at approximately
-  20 Hz for MapLibre native GPU maps, or 8 Hz for the legacy raster fallback.
+  30 Hz for MapLibre native GPU maps, or about 9 Hz for the legacy raster fallback.
   It samples a cached route arc-length index in O(log N), rather than rescanning
   route geometry or restarting a 650 ms MapLibre ease animation on each fix.
 - **Short and bounded motion prediction:** when an accurate fix indicates the
