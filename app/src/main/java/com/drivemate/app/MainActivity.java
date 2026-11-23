@@ -2783,14 +2783,14 @@ public final class MainActivity extends Activity implements LocationListener {
                 && fix.getAccuracy() <= 40 && projected.offRouteMetres <= 45;
         updateJunctionHighlight(next, confidentJunction
                 && DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn));
-        String providerExit = step.signpostText != null && !step.signpostText.trim().isEmpty()
-                ? step.signpostText.trim()
+        String providerExit = step.signpost != null && !step.signpost.trim().isEmpty()
+                ? step.signpost.trim()
                 : step.street != null ? step.street.trim() : "";
         if (junctionRoadText != null) {
             boolean showExit = (roundabout || fork) && !providerExit.isEmpty()
                     && confidentJunction;
             junctionRoadText.setText(showExit
-                    ? (step.signpostText != null && !step.signpostText.trim().isEmpty()
+                    ? (step.signpost != null && !step.signpost.trim().isEmpty()
                             ? "SIGNED EXIT · " : "EXIT ROAD · ") + providerExit
                     : "");
             junctionRoadText.setVisibility(showExit ? View.VISIBLE : View.GONE);
