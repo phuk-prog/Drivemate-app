@@ -1364,32 +1364,111 @@ public final class MainActivity extends Activity implements LocationListener {
         else setStatus("Precise location permission is required for driving GPS guidance.");
     }
 
-    private void startLocation() {
-        if (locationManager == null
-                || checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                    != PackageManager.PERMISSION_GRANTED) return;
-        locationManager.removeUpdates(this);
+    private boolean hasPreciseLocationPermission() {
+        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean hasEnabledLocationProvider() {
+        if (locationManager == null) return false;
         try {
+            return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    || locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (Exception error) { return false; }
+    }
+
+    /** Human-readable reason, without falsely claiming mobile data is GPS. */
+    private String gpsUnavailableMessage() {
+        if (!hasPreciseLocationPermission())
+            return "Allow Precise Location for DriveMate in Android app permissions.";
+        if (!hasEnabledLocationProvider())
+            return "Turn on your phone's Location service, then tap the GPS button.";
+        if (currentLocation != null
+                && System.currentTimeMillis() - currentLocation.getTime() > 20000)
+            return "GPS position is out of date. Keep Location on and try again.";
+        return "Waiting for a fresh GPS position. Move near a window or outdoors and retry.";
+    }
+
+    /**
+     * Restore the map camera from the phone's last GPS OR network provider
+     * result without advertising an old fix as current navigation position.
+     */
+    private void restoreLastKnownMapArea() {
+        if (locationManager == null || !hasPreciseLocationPermission()
+                || currentLocation != null || !followLocation) return;
+        Location chosen = null;
+        long now = System.currentTimeMillis();
+        for (String provider : new String[]{
+                LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+            try {
+                Location candidate = locationManager.getLastKnownLocation(provider);
+                if (candidate != null && MapStartupPolicy.usableCachedMapArea(
+                        candidate.getLatitude(), candidate.getLongitude(),
+                        candidate.getTime(), now,
+                        candidate.hasAccuracy() ? candidate.getAccuracy() : 2501f)
+                        && (chosen == null || candidate.getTime() > chosen.getTime()))
+                    chosen = candidate;
+            } catch (SecurityException | IllegalArgumentException ignored) {
+                // The remembered app-private overview remains available.
+            }
+        }
+        if (chosen == null) return;
+        // A genuinely fresh, accurate fix can enter the normal GPS path.
+        if (MapStartupPolicy.freshForRouting(chosen.getLatitude(), chosen.getLongitude(),
+                chosen.getTime(), now, chosen.getAccuracy())) {
+            onLocationChanged(chosen);
+            return;
+        }
+        if (chosen.getTime() <= getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getLong("last_map_at", 0L)) return;
+        GeoMath.Point preview = new GeoMath.Point(
+                chosen.getLatitude(), chosen.getLongitude());
+        double zoom = chosen.hasAccuracy() && chosen.getAccuracy() > 1000
+                ? 11.0 : 13.5;
+        map.getController().setZoom(zoom);
+        map.getController().setCenter(new GeoPoint(preview.lat, preview.lon));
+        if (vectorMap != null) vectorMap.setCamera(preview, zoom, 0);
+        // No blue GPS marker is created: this is historical positioning only.
+        setStatus("Showing last known area · waiting for live GPS");
+    }
+
+    private void startLocation() {
+        if (locationManager == null || !hasPreciseLocationPermission()) {
+            setStatus("Precise Location permission is required for navigation.");
+            return;
+        }
+        // onCreate and onResume both ask to start. Do not repeatedly tear down
+        // GPS registration before the phone has obtained its first fix.
+        if (locationSubscribed) return;
+        try {
+            if (!hasEnabledLocationProvider()) {
+                setStatus("Phone Location is off · enable it to navigate");
+                return;
+            }
+            boolean requested = false;
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
                         1000L, 1f, this);
+                requested = true;
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                        2500L, 5f, this);
+                        2000L, 3f, this);
+                requested = true;
             }
-            Location last = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER);
-            if (last != null && System.currentTimeMillis() - last.getTime() < 60000) {
-                onLocationChanged(last);
-            }
-        } catch (SecurityException ignored) {
-            setStatus("Location permission denied.");
+            locationSubscribed = requested;
+            if (requested) restoreLastKnownMapArea();
+        } catch (SecurityException error) {
+            locationSubscribed = false;
+            setStatus("Location permission denied. Enable Precise Location.");
         }
     }
 
     @Override public void onLocationChanged(Location fix) {
-        if (fix == null || (fix.hasAccuracy() && fix.getAccuracy() > 100)
-                || System.currentTimeMillis() - fix.getTime() > 15000) return;
+        if (fix == null || !MapStartupPolicy.freshForRouting(
+                fix.getLatitude(), fix.getLongitude(), fix.getTime(),
+                System.currentTimeMillis(),
+                fix.hasAccuracy() ? fix.getAccuracy() : 101f)) return;
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -1400,6 +1479,18 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
+        if (SystemClock.elapsedRealtime() - lastMapAreaSavedAt > 60000) {
+            // Save only a coarse ~1 km area in app-private storage. Never use
+            // this historical map centre as the origin of a TomTom route.
+            lastMapAreaSavedAt = SystemClock.elapsedRealtime();
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putFloat("last_map_lat",
+                            (float) (Math.round(fix.getLatitude() * 100.0) / 100.0))
+                    .putFloat("last_map_lon",
+                            (float) (Math.round(fix.getLongitude() * 100.0) / 100.0))
+                    .putLong("last_map_at", System.currentTimeMillis())
+                    .apply();
+        }
         GeoMath.Point smoothed = vehicleFilter.apply(gpsPoint(fix), fix.getTime(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fix.hasSpeed() ? fix.getSpeed() : 0f);
@@ -2118,6 +2209,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
+        locationSubscribed = false;
         if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
         super.onPause();
