@@ -40,6 +40,16 @@ public class SmoothFollowCameraTest {
         assertEquals(coarse.lat, halfway.vehicle.lat, 0.00001);
     }
 
+    @Test public void doesNotPredictCarPastUnconfirmedNextJunction() {
+        SmoothFollowCamera motion = new SmoothFollowCamera(index);
+        motion.onGps(index.pointAt(100),100,0,5,25,12,
+                target(100,18,90,12),false,1000);
+        motion.frame(1000);
+        SmoothFollowCamera.Frame frame = motion.frame(1900);
+        GeoMath.Point turnSafeLimit = index.pointAt(108.1);
+        assertTrue(frame.vehicle.lon < turnSafeLimit.lon);
+    }
+
     @Test public void avoidsRunawayDeadReckoningOnGpsDropout() {
         SmoothFollowCamera motion = new SmoothFollowCamera(index);
         motion.onGps(index.pointAt(100),100,1,5,25,500,
