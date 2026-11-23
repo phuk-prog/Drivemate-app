@@ -144,7 +144,10 @@ public final class MainActivity extends Activity implements LocationListener {
                             if (userPin != null) {
                                 userPin.setPosition(new GeoPoint(
                                         frame.vehicle.lat, frame.vehicle.lon));
-                                userPin.setRotation((float) frame.bearing);
+                                // A flat screen-facing arrow must show travel
+                                // direction *relative to* the moving map camera.
+                                userPin.setRotation(CameraHeadingPolicy.rasterMarkerRotation(
+                                        frame.travelBearing, frame.bearing));
                             }
                             map.getController().setCenter(new GeoPoint(
                                     frame.center.lat, frame.center.lon));
@@ -1512,6 +1515,7 @@ public final class MainActivity extends Activity implements LocationListener {
             userPin = new Marker(map);
             userPin.setTitle("Your live GPS position");
             userPin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER);
+            userPin.setFlat(true);
             userPin.setIcon(makeCarIcon());
             map.getOverlays().add(userPin);
         }
@@ -1524,7 +1528,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if ((!active || smoothFollow == null) && fix.hasBearing()
                 && fix.hasSpeed() && fix.getSpeed() > 1.5f)
-            userPin.setRotation(fix.getBearing());
+            userPin.setRotation(-fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
