@@ -286,6 +286,22 @@ public final class MainActivity extends Activity implements LocationListener {
     private Location currentLocation;
     /** Last fix that passed FixQualityPolicy; the gate compares every new fix to it. */
     private FixQualityPolicy.Sample lastAcceptedFix;
+    /** Display-only estimate of the vehicle position during short GPS gaps. */
+    private final DeadReckoner deadReckoner = new DeadReckoner();
+    private final Runnable deadReckonTick = new Runnable() {
+        @Override public void run() {
+            if (foreground && userPin != null) {
+                GeoMath.Point estimate = deadReckoner.estimate(System.currentTimeMillis());
+                // While guidance runs, SmoothFollowCamera owns the marker position.
+                if (estimate != null && (!active || smoothFollow == null)) {
+                    userPin.setPosition(new GeoPoint(estimate.lat, estimate.lon));
+                    if (vectorMap != null && useLocalMap) vectorMap.setVehicle(estimate);
+                    map.postInvalidateOnAnimation();
+                }
+            }
+            gpsHandler.postDelayed(this, 500);
+        }
+    };
     /** Satellites used in the current GPS fix, or -1 until the first GNSS report. */
     private int satellitesUsed = -1;
     private final GnssStatus.Callback gnssCallback = new GnssStatus.Callback() {
@@ -1529,6 +1545,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 requested = true;
             }
             locationSubscribed = requested;
+            gpsHandler.removeCallbacks(deadReckonTick);
+            if (requested) gpsHandler.post(deadReckonTick);
             if (requested) restoreLastKnownMapArea();
         } catch (SecurityException error) {
             locationSubscribed = false;
@@ -1549,6 +1567,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 LocationManager.GPS_PROVIDER.equals(fix.getProvider()));
         if (!FixQualityPolicy.accept(lastAcceptedFix, sample)) return;
         lastAcceptedFix = sample;
+        deadReckoner.onFix(new GeoMath.Point(fix.getLatitude(), fix.getLongitude()),
+                fix.getTime(), fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearing() ? fix.getBearing() : 0d, fix.hasBearing());
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -2301,6 +2322,7 @@ public final class MainActivity extends Activity implements LocationListener {
         foreground = false;
         stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
+        gpsHandler.removeCallbacks(deadReckonTick);
         if (locationManager != null) {
             locationManager.removeUpdates(this);
             locationManager.unregisterGnssStatusCallback(gnssCallback);
