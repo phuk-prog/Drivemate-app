@@ -67,13 +67,24 @@ public final class TomTomApi {
         public final double lengthMetres;
         public final int timeSeconds;
         public final int trafficDelaySeconds;
+        public final long fetchedAtMs;
+        public final List<RouteIntelligence.LaneSection> laneSections;
+        public final List<RouteIntelligence.SpeedSection> speedSections;
+        public final List<RouteIntelligence.TrafficSection> trafficSections;
         Route(List<GeoMath.Point> points, List<Instruction> instructions,
-              double lengthMetres, int timeSeconds, int trafficDelaySeconds) {
+              double lengthMetres, int timeSeconds, int trafficDelaySeconds,
+              List<RouteIntelligence.LaneSection> laneSections,
+              List<RouteIntelligence.SpeedSection> speedSections,
+              List<RouteIntelligence.TrafficSection> trafficSections) {
             this.points = points;
             this.instructions = instructions;
             this.lengthMetres = lengthMetres;
             this.timeSeconds = timeSeconds;
             this.trafficDelaySeconds = trafficDelaySeconds;
+            this.fetchedAtMs = System.currentTimeMillis();
+            this.laneSections = laneSections;
+            this.speedSections = speedSections;
+            this.trafficSections = trafficSections;
         }
     }
 
@@ -110,7 +121,8 @@ public final class TomTomApi {
         String url = "https://api.tomtom.com/routing/1/calculateRoute/" + pair + "/json"
                 + "?key=" + encode(key)
                 + "&travelMode=car&routeType=fastest&traffic=true"
-                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
+                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all"
+                + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic";
         JSONObject response = requestJson(url);
         JSONArray routes = response.optJSONArray("routes");
         if (routes == null || routes.length() == 0) {
@@ -119,6 +131,11 @@ public final class TomTomApi {
         JSONObject route = routes.getJSONObject(0);
         JSONObject summary = route.getJSONObject("summary");
         List<GeoMath.Point> points = new ArrayList<>();
+        // TomTom section point indices refer to the original flattened
+        // polyline. Track every index even where duplicate vertices are
+        // removed from the drawing/guidance geometry.
+        List<Double> originalPointOffsets = new ArrayList<>();
+        double geometryMetres = 0;
         JSONArray legs = route.getJSONArray("legs");
         for (int l = 0; l < legs.length(); l++) {
             JSONArray coords = legs.getJSONObject(l).getJSONArray("points");
@@ -126,10 +143,16 @@ public final class TomTomApi {
                 JSONObject p = coords.getJSONObject(i);
                 GeoMath.Point point = new GeoMath.Point(p.getDouble("latitude"),
                         p.getDouble("longitude"));
-                if (points.isEmpty()
-                        || GeoMath.distance(points.get(points.size() - 1), point) > 0.1) {
+                if (points.isEmpty()) {
                     points.add(point);
+                } else {
+                    double distance = GeoMath.distance(points.get(points.size() - 1), point);
+                    if (distance > 0.1) {
+                        geometryMetres += distance;
+                        points.add(point);
+                    }
                 }
+                originalPointOffsets.add(geometryMetres);
             }
         }
         if (points.size() < 2) throw new IOException("TomTom route geometry is empty.");
@@ -155,9 +178,65 @@ public final class TomTomApi {
         }
         steps.sort(Comparator.comparingDouble(item -> item.routeOffsetMetres));
         if (steps.isEmpty()) throw new IOException("Route has no voice guidance instructions.");
+
+        List<RouteIntelligence.LaneSection> laneSections = new ArrayList<>();
+        List<RouteIntelligence.SpeedSection> speedSections = new ArrayList<>();
+        List<RouteIntelligence.TrafficSection> trafficSections = new ArrayList<>();
+        JSONArray sections = route.optJSONArray("sections");
+        if (sections != null) {
+            for (int i = 0; i < sections.length(); i++) {
+                JSONObject section = sections.optJSONObject(i);
+                if (section == null) continue;
+                int startIndex = section.optInt("startPointIndex", -1);
+                int endIndex = section.optInt("endPointIndex", -1);
+                if (startIndex < 0 || endIndex <= startIndex
+                        || endIndex >= originalPointOffsets.size()) continue;
+                double from = originalPointOffsets.get(startIndex);
+                double to = originalPointOffsets.get(endIndex);
+                if (to <= from) continue;
+                switch (section.optString("sectionType", "")) {
+                    case "LANES":
+                        JSONArray sourceLanes = section.optJSONArray("lanes");
+                        if (sourceLanes == null) break;
+                        List<RouteIntelligence.Lane> lanes = new ArrayList<>();
+                        for (int j = 0; j < sourceLanes.length(); j++) {
+                            JSONObject lane = sourceLanes.optJSONObject(j);
+                            if (lane == null) continue;
+                            String follow = lane.optString("follow", "");
+                            JSONArray directions = lane.optJSONArray("directions");
+                            // Only display one unambiguous direction per lane.
+                            String label = !follow.isEmpty() ? follow
+                                    : directions != null && directions.length() == 1
+                                            ? directions.optString(0, "") : "";
+                            lanes.add(new RouteIntelligence.Lane(label, !follow.isEmpty()));
+                        }
+                        RouteIntelligence.LaneSection candidate =
+                                new RouteIntelligence.LaneSection(from, to, lanes);
+                        if (candidate.trusted()) laneSections.add(candidate);
+                        break;
+                    case "SPEED_LIMIT":
+                        int limit = section.optInt("maxSpeedLimitInKmh", -1);
+                        if (limit >= 5 && limit <= 140)
+                            speedSections.add(new RouteIntelligence.SpeedSection(from, to, limit));
+                        break;
+                    case "TRAFFIC":
+                        String category = section.optString("simpleCategory", "");
+                        int delay = section.optInt("delayInSeconds", 0);
+                        // Ignore empty/no-impact traffic sections. The route
+                        // summary retains overall traffic information.
+                        if (delay > 0 || "ROAD_CLOSURE".equals(category)
+                                || "ROAD_WORK".equals(category))
+                            trafficSections.add(new RouteIntelligence.TrafficSection(
+                                    from, to, delay, category));
+                        break;
+                    default: break;
+                }
+            }
+        }
         return new Route(points, steps, summary.getDouble("lengthInMeters"),
                 summary.getInt("travelTimeInSeconds"),
-                summary.optInt("trafficDelayInSeconds", 0));
+                summary.optInt("trafficDelayInSeconds", 0),
+                laneSections, speedSections, trafficSections);
     }
 
     private static String coordinate(double value) {
