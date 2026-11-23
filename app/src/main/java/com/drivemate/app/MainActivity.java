@@ -115,6 +115,77 @@ public final class MainActivity extends Activity implements LocationListener {
             gpsHandler.postDelayed(this, 5000);
         }
     };
+    /**
+     * Continuous display clock. Navigation logic, GPS and TomTom requests
+     * retain their original cadence; only the visible map animates here.
+     * GPU view: 20fps; legacy raster: ~8fps to avoid expensive tile redraws.
+     */
+    private final Runnable smoothTicker = new Runnable() {
+        @Override public void run() {
+            if (!active || !followLocation || smoothFollow == null || isFinishing()) {
+                smoothLoopRunning = false;
+                return;
+            }
+            SmoothFollowCamera.Frame frame = smoothFollow.frame(SystemClock.elapsedRealtime());
+            if (frame != null) {
+                if (showingVector() && vectorMap != null) {
+                    vectorMap.followFrame(frame);
+                } else {
+                    if (map != null) {
+                        if (userPin != null) {
+                            userPin.setPosition(new GeoPoint(
+                                    frame.vehicle.lat, frame.vehicle.lon));
+                            userPin.setRotation((float) frame.bearing);
+                        }
+                        map.getController().setCenter(
+                                new GeoPoint(frame.center.lat, frame.center.lon));
+                        if (smoothTick % 3 == 0
+                                && Math.abs(map.getZoomLevelDouble() - frame.zoom) >= 0.12)
+                            map.getController().setZoom(frame.zoom);
+                        float delta = (float) MapFollowPolicy.shortestHeadingDifference(
+                                -frame.bearing, map.getMapOrientation());
+                        if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
+                            map.setMapOrientation(map.getMapOrientation() + delta);
+                        map.postInvalidateOnAnimation();
+                    }
+                    // Candidate vector map gets occasional updates while
+                    // hidden so road-visibility fallback still functions.
+                    if (vectorMap != null && useLocalMap && !autoFallback
+                            && smoothTick % 5 == 0) vectorMap.followFrame(frame);
+                }
+            }
+            smoothTick++;
+            gpsHandler.postDelayed(this, showingVector() ? 50 : 120);
+        }
+    };
+
+    private void startSmoothLoop() {
+        if (smoothLoopRunning || !active || !followLocation || smoothFollow == null) return;
+        smoothLoopRunning = true;
+        smoothTick = 0;
+        gpsHandler.post(smoothTicker);
+    }
+
+    private void stopSmoothLoop() {
+        gpsHandler.removeCallbacks(smoothTicker);
+        smoothLoopRunning = false;
+    }
+
+    private void disengageFollowForGesture() {
+        if (!active || !followLocation) return;
+        followLocation = false;
+        stopSmoothLoop();
+        if (followButton != null) {
+            followButton.setText("◎");
+            followButton.setContentDescription("Resume map following my location");
+        }
+        if (!mapGestureWasNotified) {
+            mapGestureWasNotified = true;
+            Toast.makeText(this, "Map follow paused · tap ◎ to recenter",
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private MapView map;
     private DriveTileServer driveTiles;
     private VectorDriveMap vectorMap;
@@ -202,6 +273,11 @@ public final class MainActivity extends Activity implements LocationListener {
     private long offRouteSince;
     private long lastCameraUpdate;
     private GeoMath.Point lastCameraCenter;
+    private GeoMath.Point displayGps;
+    private SmoothFollowCamera smoothFollow;
+    private boolean smoothLoopRunning;
+    private int smoothTick;
+    private boolean mapGestureWasNotified;
     private int requestGeneration;
     private int spokenDistanceIndex = -1;
     private int spokenCloseIndex = -1;
@@ -272,6 +348,18 @@ public final class MainActivity extends Activity implements LocationListener {
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
         map = new MapView(this);
         map.setMultiTouchControls(true);
+        final float[] touchAnchor = new float[2];
+        map.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
+                touchAnchor[0] = event.getX();
+                touchAnchor[1] = event.getY();
+            } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_MOVE
+                    && Math.hypot(event.getX() - touchAnchor[0],
+                            event.getY() - touchAnchor[1]) > dp(16)) {
+                disengageFollowForGesture();
+            }
+            return false;
+        });
         map.setMinZoomLevel(2.0);
         map.getController().setZoom(15.5);
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
