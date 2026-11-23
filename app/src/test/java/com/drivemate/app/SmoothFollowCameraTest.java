@@ -27,6 +27,19 @@ public class SmoothFollowCameraTest {
         assertTrue(middle.center.lon >= first.center.lon);
     }
 
+    @Test public void moderateGpsAccuracyCanMoveSmoothlyWithoutSnappingRoadCenter() {
+        SmoothFollowCamera motion = new SmoothFollowCamera(index);
+        GeoMath.Point road = index.pointAt(100);
+        // An urban fix displaced about 18 metres north of the route.
+        GeoMath.Point coarse = new GeoMath.Point(road.lat + 0.00016, road.lon);
+        motion.onGps(coarse,100,18,50,12,380,
+                target(100,16,90,380),false,1000);
+        SmoothFollowCamera.Frame begin = motion.frame(1000);
+        SmoothFollowCamera.Frame halfway = motion.frame(1550);
+        assertTrue(halfway.vehicle.lon > begin.vehicle.lon);
+        assertEquals(coarse.lat, halfway.vehicle.lat, 0.00001);
+    }
+
     @Test public void avoidsRunawayDeadReckoningOnGpsDropout() {
         SmoothFollowCamera motion = new SmoothFollowCamera(index);
         motion.onGps(index.pointAt(100),100,1,5,25,500,
