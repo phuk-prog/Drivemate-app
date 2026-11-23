@@ -1,0 +1,33 @@
+name: Home screen screenshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [home-screenshot-baseline]
+
+permissions:
+  contents: read
+
+jobs:
+  screenshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Render home screen
+        run: gradle --no-daemon :app:testDebugUnitTest --tests com.drivemate.app.HomeScreenScreenshotTest
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: home-screen
+          path: app/build/screenshots/home.png
+          if-no-files-found: error
