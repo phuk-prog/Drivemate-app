@@ -1,6 +1,9 @@
 package com.drivemate.app;
 
 import android.app.Activity;
+import android.graphics.RectF;
+import android.os.SystemClock;
+import android.util.Log;
 import android.os.Bundle;
 import android.view.View;
 
@@ -54,15 +57,29 @@ public final class VectorDriveMap {
     private GeoMath.Point pendingCamera;
     private GeoMath.Point lastRenderedCamera;
     private double pendingZoom = 14.5, pendingBearing;
-    private Runnable firstTileCallback;
+    private static final String LOG_TAG = "DriveMateVector";
+    private static final long MONITOR_INTERVAL_MS = 1800L;
+    public interface RoadStatusListener {
+        void onRoadStatus(RoadDisplayHealth.State status, int visibleRoadFeatures);
+    }
+    private final RoadDisplayHealth roadHealth = new RoadDisplayHealth();
+    private final RoadStatusListener roadListener;
+    private RoadDisplayHealth.State previouslyReported = RoadDisplayHealth.State.NOT_APPLICABLE;
+    private final Runnable roadMonitor = new Runnable() {
+        @Override public void run() {
+            if (disposed) return;
+            if (view.getVisibility() == View.VISIBLE) inspectRoadDisplay();
+            view.postDelayed(this, MONITOR_INTERVAL_MS);
+        }
+    };
 
     public VectorDriveMap(Activity activity, Bundle state, DriveTileServer tiles,
-                          String key, boolean showTraffic, Runnable firstTileCallback) {
+                          String key, boolean showTraffic, RoadStatusListener roadListener) {
         this.activity = activity;
         this.tiles = tiles;
         this.tomtomKey = key == null ? "" : key;
         this.trafficEnabled = showTraffic;
-        this.firstTileCallback = firstTileCallback;
+        this.roadListener = roadListener;
         MapLibre.getInstance(activity.getApplicationContext());
         view = new MapView(activity);
         view.onCreate(state);
@@ -73,12 +90,9 @@ public final class VectorDriveMap {
             map.setMaxZoomPreference(19.0);
             loadStyle();
         });
-        tiles.setOnFirstTile(() -> activity.runOnUiThread(() -> {
-            if (!disposed && this.firstTileCallback != null) {
-                this.firstTileCallback.run();
-                this.firstTileCallback = null;
-            }
-        }));
+        // A successfully downloaded tile can be empty or fail to render.
+        // Evaluate *rendered road features*, never network callbacks.
+        view.postDelayed(roadMonitor, MONITOR_INTERVAL_MS);
     }
 
     public View view() { return view; }
@@ -92,7 +106,53 @@ public final class VectorDriveMap {
     }
 
     public void setVisible(boolean visible) {
+        boolean wasVisible = view.getVisibility() == View.VISIBLE;
         view.setVisibility(visible ? View.VISIBLE : View.INVISIBLE);
+        if (visible && !wasVisible) {
+            roadHealth.reset();
+            previouslyReported = RoadDisplayHealth.State.NOT_APPLICABLE;
+        }
+    }
+
+    public boolean hasRenderedRoads() {
+        return roadHealth.lastState() == RoadDisplayHealth.State.READY;
+    }
+
+    /** Checks the actual MapLibre street layers in the on-screen viewport. */
+    private void inspectRoadDisplay() {
+        if (disposed) return;
+        GeoMath.Point target = pendingCamera;
+        if (target == null && map != null && map.getCameraPosition().target != null) {
+            LatLng at = map.getCameraPosition().target;
+            target = new GeoMath.Point(at.getLatitude(), at.getLongitude());
+        }
+        if (target == null) return;
+        double zoom = pendingCamera == null && map != null
+                ? map.getCameraPosition().zoom : pendingZoom;
+        int visible = 0;
+        if (ready() && view.getWidth() > 80 && view.getHeight() > 80) {
+            try {
+                // Exclude vehicle, route, labels, buildings and background.
+                // Only actual streets painted by the Shortbread source count.
+                RectF middle = new RectF(view.getWidth() * 0.08f,
+                        view.getHeight() * 0.08f, view.getWidth() * 0.92f,
+                        view.getHeight() * 0.92f);
+                visible = map.queryRenderedFeatures(middle, "uk-roads").size();
+            } catch (RuntimeException error) {
+                Log.w(LOG_TAG, "MapLibre rendered road query failed", error);
+            }
+        }
+        RoadDisplayHealth.State outcome = roadHealth.check(
+                SystemClock.elapsedRealtime(), target.lat, target.lon, zoom, ready(), visible);
+        if (outcome != previouslyReported) {
+            previouslyReported = outcome;
+            if (outcome == RoadDisplayHealth.State.READY
+                    || outcome == RoadDisplayHealth.State.FAILED) {
+                Log.i(LOG_TAG, "UK roads display state=" + outcome
+                        + ", rendered streets=" + visible + ", zoom=" + zoom);
+                if (roadListener != null) roadListener.onRoadStatus(outcome, visible);
+            }
+        }
     }
 
     private static String readAsset(Activity activity, String name) throws Exception {
@@ -132,8 +192,10 @@ public final class VectorDriveMap {
                 if (pendingCamera != null) setCamera(pendingCamera,
                         pendingZoom, pendingBearing);
             });
-        } catch (Exception ignored) {
-            // Caller still has the unchanged TomTom/osmdroid map as fallback.
+        } catch (Exception error) {
+            Log.e(LOG_TAG, "Unable to load DriveMate MapLibre style", error);
+            // The health check will trigger a visible, timed fallback when
+            // no UK roads are rendered. Never silently treat a style as ready.
         }
     }
 
@@ -275,6 +337,7 @@ public final class VectorDriveMap {
     public void onSaveInstanceState(Bundle state) { view.onSaveInstanceState(state); }
     public void onDestroy() {
         disposed = true;
+        view.removeCallbacks(roadMonitor);
         view.onDestroy();
     }
 }
