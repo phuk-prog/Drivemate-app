@@ -11,6 +11,10 @@ public final class GuidanceLogic {
         String m = maneuver == null ? "" : maneuver.toUpperCase(Locale.US);
         String j = junction == null ? "" : junction.toUpperCase(Locale.US);
         if ("ROUNDABOUT".equals(j) || m.contains("ROUNDABOUT")) return "↻";
+        // TomTom's verified BIFURCATION means keep left/right at a fork,
+        // not a sharp turn. Do not use a turn icon for this junction type.
+        if ("BIFURCATION".equals(j))
+            return angle < 0 ? "↖" : angle > 0 ? "↗" : "↑";
         if (m.contains("UTURN") || m.contains("U_TURN")) return "⤺";
         if (m.contains("ARRIVE") || m.contains("DESTINATION")) return "⚑";
         if (m.contains("LEFT") || (m.contains("TURN") && angle < -20)) return "↰";
