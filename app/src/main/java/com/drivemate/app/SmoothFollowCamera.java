@@ -80,15 +80,8 @@ public final class SmoothFollowCamera {
         if (!initialized) {
             measuredProgress = Math.max(0, Math.min(path.lengthMetres, routeProgress));
             lastAnimatedProgress = measuredProgress;
-            centerAlong = Math.max(0, Math.min(path.lengthMetres,
-                    GeoMath.project(java.util.Arrays.asList(
-                            // The frame centre is projected using the caller's
-                            // original path only at GPS cadence. The fast path
-                            // uses an indexed nearby search below.
-                            path.pointAt(0), path.pointAt(path.lengthMetres)),
-                            desired.center).alongMetres));
-            // Exact route-centre location is established using the cheap
-            // O(logN) proximity search rather than assuming a straight route.
+            // Find the target centre once at GPS cadence. Animation frames
+            // only use the immutable indexed route.
             centerAlong = nearbyProgress(desired.center, measuredProgress);
             zoom = zoomTarget = clamp(desired.zoom, 14.2, 19.0);
             bearing = bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
