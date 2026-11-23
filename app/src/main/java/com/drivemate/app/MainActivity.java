@@ -2119,6 +2119,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         + calculated.timeSeconds * 1000L)));
         startButton.setVisibility(View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
+        if (previewParkingButton != null) previewParkingButton.setVisibility(View.VISIBLE);
         saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save");
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
@@ -2136,6 +2137,8 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        arrivalPolicy.reset();
+        if (previewParkingButton != null) previewParkingButton.setVisibility(View.GONE);
         smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
         keyboardOpen = false;
         destinationInput.clearFocus();
@@ -2179,6 +2182,8 @@ public final class MainActivity extends Activity implements LocationListener {
         if (route != null || active) stopNavigation(false);
         setHomeVisible(false);
         destination = selected;
+        arrivalPolicy.reset();
+        displayEntranceMarker(selected);
         places.addRecent(selected);
         followLocation = false;
         updateFollowButton();
@@ -2374,6 +2379,7 @@ public final class MainActivity extends Activity implements LocationListener {
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
         observedSpeed = 0;
+        arrivalPolicy.reset();
         spokenDistanceIndex = -1;
         spokenCloseIndex = -1;
         spokenNowIndex = -1;
@@ -2411,6 +2417,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (destinationPin != null) {
             map.getOverlays().remove(destinationPin);
             map.getOverlays().add(destinationPin);
+        }
+        if (entrancePin != null) {
+            map.getOverlays().remove(entrancePin);
+            map.getOverlays().add(entrancePin);
         }
         if (userPin != null) {
             map.getOverlays().remove(userPin);
@@ -2470,10 +2480,15 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         double leftMetres = Math.max(0, route.lengthMetres - along);
         double distanceToDestination = GeoMath.distance(current, destination.point);
-        if (distanceToDestination < 30 && accuracy < 40 && leftMetres < 120) {
+        ArrivalPolicy.State arrival = arrivalPolicy.observe(
+                distanceToDestination, leftMetres, projected.offRouteMetres,
+                accuracy, fix.hasSpeed() ? fix.getSpeed() : Float.POSITIVE_INFINITY,
+                fix.getTime(), System.currentTimeMillis());
+        if (arrival == ArrivalPolicy.State.ARRIVED) {
             stopNavigation(true);
             return;
         }
+        showArrivalApproach(arrival);
 
         if (now - lastRouteRequest > ROUTE_REFRESH_MS && leftMetres > 1500 && !routing) {
             lastRerouteAttempt = now;
@@ -2728,11 +2743,17 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void stopNavigation(boolean arrived) {
+        boolean offerParkedCar = arrived && currentLocation != null
+                && ArrivalPolicy.canSaveParking(
+                        currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
+                        currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
+                        currentLocation.getTime(), System.currentTimeMillis());
         stopSmoothLoop();
         smoothFollow = null;
         ++requestGeneration;
         routing = false;
         active = false;
+        arrivalPolicy.reset();
         route = null;
         destination = null;
         offRouteSince = 0;
@@ -2750,6 +2771,13 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().remove(destinationPin);
             destinationPin = null;
         }
+        if (entrancePin != null) {
+            map.getOverlays().remove(entrancePin);
+            entrancePin = null;
+        }
+        if (vectorMap != null) vectorMap.setEntrance(null);
+        if (arrivalHintText != null && arrivalHintText.getTag() instanceof View)
+            ((View) arrivalHintText.getTag()).setVisibility(View.GONE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         map.setMapOrientation(0);
         if (vectorMap != null) {
@@ -2761,6 +2789,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(true);
         startButton.setVisibility(View.GONE);
         saveButton.setVisibility(View.GONE);
+        if (previewParkingButton != null) previewParkingButton.setVisibility(View.GONE);
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
         routeSummary.setVisibility(View.GONE);
@@ -2786,6 +2815,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (speech != null) speech.stop();
         }
         map.invalidate();
+        if (offerParkedCar && !isFinishing()) offerSaveParkedCar();
     }
 
     private void setStatus(String message) {
