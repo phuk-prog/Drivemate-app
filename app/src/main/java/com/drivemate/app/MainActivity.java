@@ -1456,69 +1456,38 @@ public final class MainActivity extends Activity implements LocationListener {
      * map, with the next manoeuvre and exit road above it. The camera uses
      * road geometry rather than a noisy stopped-vehicle compass bearing.
      */
+    /**
+     * GPS-cadence planning only: heavy route geometry and junction look-ahead
+     * never run on every rendered frame. SmoothFollowCamera owns interpolation,
+     * zoom hysteresis and bearing changes on the independent UI clock.
+     */
     private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
                                      double nextJunctionOffsetMetres) {
         if (!active || !followLocation || route == null || gpsLost
-                || (fix.hasAccuracy() && fix.getAccuracy() > 55)
-                || progress.offRouteMetres > 110) {
-            return;
-        }
+                || progress.offRouteMetres > 110
+                || (fix.hasAccuracy() && fix.getAccuracy() > 75)
+                || map.getHeight() < dp(350)) return;
         long now = SystemClock.elapsedRealtime();
-        // GPS arrives about once a second. Do not queue another animated pan:
-        // by the time osmdroid finishes it, the vehicle has already moved.
-        if (lastCameraUpdate > 0 && now - lastCameraUpdate < 600) return;
-        if (map.getHeight() < dp(350)) return;
+        if (lastCameraUpdate > 0 && now - lastCameraUpdate < 450) return;
+        if (smoothFollow == null)
+            smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
 
-        // Use measured overlays rather than the old 145dp search/header
-        // assumption: the driving ETA and turn card now occupy the top.
         int headerHeight = topMapOverlay != null && topMapOverlay.getHeight() > 0
                 ? topMapOverlay.getHeight() + dp(5) : dp(260);
         int bottomPanelHeight = navigationPanel.getHeight() > 0
                 ? navigationPanel.getHeight() + dp(18) : dp(95);
-        NavigationCamera.Frame camera = NavigationCamera.calculate(
-                route.points, gpsPoint(fix), progress.alongMetres,
-                nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
-                map.getHeight(), headerHeight, bottomPanelHeight);
-
-        boolean vector = showingVector();
-        double targetZoom = Math.min(19.0, camera.zoom + (closeZoom ? 0.45 : 0));
-        double currentZoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
-        double wantedOrientation = northUp ? 0
-                : (vector ? camera.roadBearingDegrees : -camera.roadBearingDegrees);
-        double currentOrientation = vector ? vectorMap.currentBearing() : map.getMapOrientation();
-        double headingChange = MapFollowPolicy.shortestHeadingDifference(
-                wantedOrientation, currentOrientation);
-        double centerMovement = lastCameraCenter == null ? Double.POSITIVE_INFINITY
-                : GeoMath.distance(lastCameraCenter, camera.center);
-        float speed = fix.hasSpeed() ? fix.getSpeed() : 0f;
-        if (!MapFollowPolicy.shouldMove(lastCameraUpdate, now, centerMovement,
-                speed, targetZoom - currentZoom, headingChange)) return;
-
-        double boundedZoom = currentZoom + Math.max(-0.5,
-                Math.min(0.5, targetZoom - currentZoom));
-        if (vector) {
-            double bearing = northUp ? 0 : currentOrientation +
-                    (speed >= 1.8f ? Math.max(-20, Math.min(20, headingChange)) : 0);
-            // Moving the hidden raster map too would request the same roads
-            // twice and undo much of the GPU renderer's responsiveness gain.
-            vectorMap.setCamera(camera.center, boundedZoom, bearing);
-        } else {
-            if (Math.abs(targetZoom - currentZoom) > 0.30)
-                map.getController().setZoom(boundedZoom);
-            if (northUp) {
-                if (Math.abs(headingChange) >= 1) map.setMapOrientation(0);
-            } else if (speed >= 1.8f && Math.abs(headingChange) >= 8) {
-                float adjusted = (float) (currentOrientation
-                        + Math.max(-20, Math.min(20, headingChange)));
-                map.setMapOrientation(adjusted);
-            }
-            map.getController().setCenter(new GeoPoint(camera.center.lat, camera.center.lon));
-            if (useLocalMap && !autoFallback && vectorMap != null)
-                vectorMap.setCamera(camera.center, boundedZoom,
-                        northUp ? 0 : camera.roadBearingDegrees);
-        }
-        lastCameraCenter = camera.center;
+        double along = stabilizedAlong < 0 ? progress.alongMetres : stabilizedAlong;
+        float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
+        NavigationCamera.Frame target = NavigationCamera.calculate(
+                route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
+                velocity, map.getHeight(), headerHeight, bottomPanelHeight);
+        float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
+        smoothFollow.onGps(displayGps != null ? displayGps : gpsPoint(fix),
+                along, progress.offRouteMetres, accuracy, velocity,
+                Math.max(0, nextJunctionOffsetMetres - along),
+                target, northUp, now);
         lastCameraUpdate = now;
+        startSmoothLoop();
     }
 
     private void searchDestination() {
