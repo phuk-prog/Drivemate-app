@@ -26,6 +26,18 @@ public class ArrivalPolicyTest {
         assertEquals(ArrivalPolicy.State.EN_ROUTE, a.observe(
                 14, 22, 4, 5, 0, 20000, 30000));
     }
+    @Test public void approachHintStillWorksWithoutGpsSpeed() {
+        ArrivalPolicy a = new ArrivalPolicy();
+        assertEquals(ArrivalPolicy.State.APPROACHING, a.observe(
+                180, 220, 15, 25, Float.POSITIVE_INFINITY, 10000, 10100));
+        assertEquals(ArrivalPolicy.State.NEARBY, a.observe(
+                35, 55, 5, 15, Float.POSITIVE_INFINITY, 11000, 11100));
+        assertEquals(ArrivalPolicy.State.NEARBY, a.observe(
+                18, 34, 5, 15, Float.POSITIVE_INFINITY, 12000, 12100));
+        assertEquals(ArrivalPolicy.State.NEARBY, a.observe(
+                18, 34, 5, 15, Float.POSITIVE_INFINITY, 13000, 13100));
+    }
+
     @Test public void resetAndDistanceGuards() {
         ArrivalPolicy a = new ArrivalPolicy();
         a.observe(15, 30, 5, 5, 0, 10000, 10100);
