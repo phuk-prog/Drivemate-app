@@ -125,6 +125,31 @@ public class SmoothFollowCameraTest {
         assertTrue(after.bearing>345 || after.bearing<15);
     }
 
+    @Test public void stationaryPreciseFixDrawsCarOnRouteNotBesideIt() {
+        SmoothFollowCamera motion = new SmoothFollowCamera(index);
+        GeoMath.Point road = index.pointAt(100);
+        // Stopped at lights, a precise fix about 10 m beside the route line.
+        GeoMath.Point beside = new GeoMath.Point(road.lat + 0.00009, road.lon);
+        motion.onGps(beside, 100, 10, 5, 0, 300,
+                target(100, 16, 90, 300), false, 1000);
+        motion.frame(1000);
+        motion.onGps(beside, 100, 10, 5, 0, 300,
+                target(100, 16, 90, 300), false, 2000);
+        SmoothFollowCamera.Frame frame = motion.frame(2100);
+        assertEquals(road.lat, frame.vehicle.lat, 0.00001);
+    }
+
+    @Test public void stationaryImpreciseFixIsNotSnappedToRoute() {
+        SmoothFollowCamera motion = new SmoothFollowCamera(index);
+        GeoMath.Point road = index.pointAt(100);
+        GeoMath.Point beside = new GeoMath.Point(road.lat + 0.00009, road.lon);
+        // 40 m accuracy is too uncertain to claim the car is on the route.
+        motion.onGps(beside, 100, 10, 40, 0, 300,
+                target(100, 16, 90, 300), false, 1000);
+        SmoothFollowCamera.Frame frame = motion.frame(1100);
+        assertEquals(beside.lat, frame.vehicle.lat, 0.00001);
+    }
+
     @Test public void stationaryGpsDoesNotSpinCamera() {
         SmoothFollowCamera motion = new SmoothFollowCamera(index);
         motion.onGps(index.pointAt(100),100,0,6,0,200,
