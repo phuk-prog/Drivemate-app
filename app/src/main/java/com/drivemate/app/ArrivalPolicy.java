@@ -20,7 +20,7 @@ public final class ArrivalPolicy {
                          float accuracy, float speedMps, long fixAt, long now) {
         if (!Double.isFinite(pinDistance) || !Double.isFinite(remainingRoute)
                 || !Double.isFinite(offRoute) || !Float.isFinite(accuracy)
-                || !Float.isFinite(speedMps) || pinDistance < 0
+                || pinDistance < 0
                 || remainingRoute < 0 || fixAt <= 0 || now < fixAt
                 || now - fixAt > 5000) {
             consecutive = 0;
