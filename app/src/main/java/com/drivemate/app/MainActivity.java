@@ -120,7 +120,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private VectorDriveMap vectorMap;
     private Bundle vectorSavedState;
     private boolean useLocalMap = true;
-    private boolean vectorTileReady;
+    private boolean vectorRoadsReady;
     private boolean autoFallback;
     private View speedBadgeView;
     private boolean keyboardOpen;
@@ -261,31 +261,43 @@ public final class MainActivity extends Activity implements LocationListener {
         map.setMinZoomLevel(2.0);
         map.getController().setZoom(15.5);
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
-        frame.addView(map, new FrameLayout.LayoutParams(-1, -1));
+        // Keep both map engines inside the SAME background-only host:
+        // the visible TomTom raster map covers MapLibre until actual UK roads
+        // (not merely an HTTP tile) are drawn. Control overlays remain on top.
+        FrameLayout mapHost = new FrameLayout(this);
+        frame.addView(mapHost, new FrameLayout.LayoutParams(-1, -1));
+        mapHost.addView(map, new FrameLayout.LayoutParams(-1, -1));
         if (driveTiles != null) {
             try {
                 vectorMap = new VectorDriveMap(this, vectorSavedState, driveTiles,
-                        apiKey, trafficEnabled, () -> {
-                            vectorTileReady = true;
-                            // If the user picked local mode, bring the vector map forward
-                            // once a real UK map tile has been successfully loaded.
-                            if (useLocalMap) updateMapVisibility();
+                        apiKey, trafficEnabled, (status, roads) -> {
+                            if (status == RoadDisplayHealth.State.READY) {
+                                vectorRoadsReady = true;
+                                if (useLocalMap && !autoFallback) {
+                                    updateMapVisibility();
+                                    if (!active) setStatus("DriveMate map ready · UK streets visible");
+                                }
+                            } else if (status == RoadDisplayHealth.State.FAILED
+                                    && useLocalMap && !autoFallback) {
+                                vectorRoadsReady = false;
+                                if (!apiKey.isEmpty()) {
+                                    autoFallback = true;
+                                    updateMapVisibility();
+                                    if (route != null && !active) showRoute(route, true);
+                                    else if (currentLocation != null) centreOnLocation(true);
+                                    setStatus("DriveMate streets not rendering · TomTom map active");
+                                } else {
+                                    setStatus("Map roads unavailable · check connection or TomTom key");
+                                }
+                            }
                         });
-                frame.addView(vectorMap.view(), new FrameLayout.LayoutParams(-1, -1));
+                // Place MapLibre below the existing TomTom map while waiting
+                // for first verifiably painted UK street features.
+                mapHost.addView(vectorMap.view(), 0,
+                        new FrameLayout.LayoutParams(-1, -1));
                 updateMapVisibility();
-                // If the PMTiles host cannot supply map details, automatically
-                // fall back to the existing TomTom raster view after 15 seconds.
-                frame.postDelayed(() -> {
-                    if (useLocalMap && !vectorTileReady && !apiKey.isEmpty()
-                            && !isFinishing()) {
-                        autoFallback = true;
-                        updateMapVisibility();
-                        if (route != null && !active) showRoute(route, true);
-                        else if (currentLocation != null) centreOnLocation(true);
-                        setStatus("DriveMate map unavailable · showing TomTom map instead");
-                    }
-                }, 15000);
             } catch (Throwable error) {
+                android.util.Log.e("DriveMateMap", "Vector map initialization failed", error);
                 vectorMap = null;
                 useLocalMap = false;
                 if (driveTiles != null) {
@@ -318,7 +330,7 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        TextView subtitle = text("UK NAV  ·  v1.4.0", 10, Color.rgb(180, 222, 235), true);
+        TextView subtitle = text("UK NAV  ·  v1.4.1", 10, Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -587,16 +599,20 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private boolean showingVector() {
-        return useLocalMap && !autoFallback && vectorMap != null;
+        return useLocalMap && !autoFallback && vectorMap != null
+                && vectorRoadsReady;
     }
 
     private void updateMapVisibility() {
         boolean vector = showingVector();
-        if (vectorMap != null) vectorMap.setVisible(vector);
-        if (map != null) {
+        // Keep the vector engine running *behind* the raster fallback until
+        // its own rendered-road query proves the UK streets are visible.
+        boolean vectorLoading = useLocalMap && !autoFallback && vectorMap != null;
+        if (vectorMap != null)
+            vectorMap.setVisible(vectorLoading || apiKey.isEmpty());
+        if (map != null)
             map.setVisibility(!vector && !apiKey.isEmpty()
                     ? View.VISIBLE : View.INVISIBLE);
-        }
     }
 
     private Button quickTile(String symbol, String label) {
@@ -708,7 +724,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 northUp ? "Map orientation · north up" : "Map orientation · direction up",
                 closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
-                useLocalMap ? "Map · DriveMate local vector" : "Map · TomTom online raster",
+                autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
+                        : useLocalMap ? "Map · DriveMate local vector"
+                        : "Map · TomTom online raster",
                 "Nearby map cache & Wi-Fi prefetch",
                 "Set or change Home",
                 "Set or change Work",
@@ -767,8 +785,17 @@ public final class MainActivity extends Activity implements LocationListener {
                                         Toast.LENGTH_LONG).show();
                                 break;
                             }
-                            useLocalMap = !useLocalMap;
-                            autoFallback = false;
+                            if (autoFallback && useLocalMap) {
+                                // A single tap retries DriveMate Map rather than
+                                // silently selecting the same TomTom fallback.
+                                autoFallback = false;
+                                vectorRoadsReady = false;
+                                setStatus("Retrying DriveMate streets…");
+                            } else {
+                                useLocalMap = !useLocalMap;
+                                autoFallback = false;
+                                vectorRoadsReady = vectorMap.hasRenderedRoads();
+                            }
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("drivemate_vector_map", useLocalMap).apply();
                             updateMapVisibility();
@@ -805,7 +832,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     }).setNegativeButton("Cancel", null).show();
                             break;
                         case 13:
-                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.0")
+                            new AlertDialog.Builder(this).setTitle("DriveMate v1.4.1")
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
                                             + "Online TomTom routing, traffic and spoken directions. " +
@@ -1128,9 +1155,9 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(userPin);
         }
         userPin.setPosition(point);
-        if (vectorMap != null) {
+        if (vectorMap != null && useLocalMap) {
             vectorMap.setVehicle(smoothed);
-            vectorMap.prefetch(gpsPoint(fix));
+            if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
         }
         if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(fix.getBearing());
@@ -1193,6 +1220,11 @@ public final class MainActivity extends Activity implements LocationListener {
             if (Math.abs(map.getZoomLevelDouble() - zoom) > 0.1)
                 map.getController().setZoom(zoom);
             map.getController().setCenter(new GeoPoint(position.lat, position.lon));
+            if (useLocalMap && !autoFallback && vectorMap != null) {
+                // The candidate map needs the same real UK camera position
+                // in order to request and *render* street tiles for verification.
+                vectorMap.setCamera(position, zoom, 0);
+            }
         }
         lastCameraCenter = position;
     }
@@ -1256,6 +1288,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 map.setMapOrientation(adjusted);
             }
             map.getController().setCenter(new GeoPoint(camera.center.lat, camera.center.lon));
+            if (useLocalMap && !autoFallback && vectorMap != null)
+                vectorMap.setCamera(camera.center, boundedZoom,
+                        northUp ? 0 : camera.roadBearingDegrees);
         }
         lastCameraCenter = camera.center;
         lastCameraUpdate = now;
