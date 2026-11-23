@@ -28,10 +28,18 @@ public final class TomTomApi {
         public final String title;
         public final String address;
         public final GeoMath.Point point;
+        /** Main POI entrance only when explicitly returned by TomTom Search. */
+        public final GeoMath.Point mainEntrance;
         public Destination(String title, String address, GeoMath.Point point) {
+            this(title, address, point, null);
+        }
+        public Destination(String title, String address, GeoMath.Point point,
+                           GeoMath.Point mainEntrance) {
             this.title = title;
             this.address = address;
             this.point = point;
+            this.mainEntrance = ArrivalPolicy.trustedEntrance(mainEntrance, point)
+                    ? mainEntrance : null;
         }
         public String toString() {
             return address.isEmpty() || address.equals(title) ? title : title + " — " + address;
@@ -96,20 +104,71 @@ public final class TomTomApi {
             url += "&lat=" + coordinate(near.lat) + "&lon=" + coordinate(near.lon);
         }
         JSONObject response = requestJson(url);
-        JSONArray hits = response.optJSONArray("results");
+        return parsePlaces(response, query, false);
+    }
+
+    /** Search for explicitly categorised parking POIs near the chosen destination. */
+    public static List<Destination> parkingNearby(String key, GeoMath.Point near)
+            throws IOException, JSONException {
+        if (near == null) throw new IOException("Destination required for parking search.");
+        String url = "https://api.tomtom.com/search/2/categorySearch/parking.json"
+                + "?key=" + encode(key) + "&lat=" + coordinate(near.lat)
+                + "&lon=" + coordinate(near.lon)
+                + "&radius=1400&limit=10&language=en-GB";
+        return parsePlaces(requestJson(url), "Parking", true);
+    }
+
+    /** Package-private, allows testing of provider fields without a real API key. */
+    static List<Destination> parsePlaces(JSONObject response, String fallback,
+                                          boolean parkingOnly) throws JSONException {
         List<Destination> results = new ArrayList<>();
+        JSONArray hits = response.optJSONArray("results");
         if (hits == null) return results;
         for (int i = 0; i < hits.length(); i++) {
-            JSONObject result = hits.getJSONObject(i);
+            JSONObject result = hits.optJSONObject(i);
+            if (result == null) continue;
             JSONObject p = result.optJSONObject("position");
             if (p == null) continue;
+            double lat = p.optDouble("lat", Double.NaN);
+            double lon = p.optDouble("lon", Double.NaN);
+            if (!Double.isFinite(lat) || !Double.isFinite(lon)
+                    || Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
             JSONObject poi = result.optJSONObject("poi");
             JSONObject address = result.optJSONObject("address");
+            if (parkingOnly) {
+                if (poi == null) continue;
+                JSONArray categories = poi.optJSONArray("categories");
+                boolean categoryConfirmed = false;
+                if (categories != null)
+                    for (int j = 0; j < categories.length(); j++)
+                        categoryConfirmed |= categories.optString(j, "")
+                                .toLowerCase(Locale.UK).contains("parking");
+                if (!categoryConfirmed) continue;
+            }
+            GeoMath.Point point = new GeoMath.Point(lat, lon);
+            GeoMath.Point mainEntrance = null;
+            JSONArray entries = result.optJSONArray("entryPoints");
+            if (entries == null) entries = result.optJSONArray("entrypoints");
+            if (entries != null) {
+                for (int j = 0; j < entries.length(); j++) {
+                    JSONObject entry = entries.optJSONObject(j);
+                    if (entry == null || !"main".equalsIgnoreCase(
+                            entry.optString("type", ""))) continue;
+                    JSONObject entrancePoint = entry.optJSONObject("position");
+                    if (entrancePoint == null) continue;
+                    GeoMath.Point candidate = new GeoMath.Point(
+                            entrancePoint.optDouble("lat", Double.NaN),
+                            entrancePoint.optDouble("lon", Double.NaN));
+                    if (ArrivalPolicy.trustedEntrance(candidate, point)) {
+                        mainEntrance = candidate;
+                        break;
+                    }
+                }
+            }
             String name = poi != null ? poi.optString("name", "") : "";
             String street = address != null ? address.optString("freeformAddress", "") : "";
-            if (name.isEmpty()) name = street.isEmpty() ? query : street;
-            results.add(new Destination(name, street,
-                    new GeoMath.Point(p.getDouble("lat"), p.getDouble("lon"))));
+            if (name.isEmpty()) name = street.isEmpty() ? fallback : street;
+            results.add(new Destination(name, street, point, mainEntrance));
         }
         return results;
     }
