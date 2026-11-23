@@ -72,4 +72,30 @@ public class FixQualityPolicyTest {
         FixQualityPolicy.Sample prev = gps(53, -2, 0, 5);
         assertTrue(FixQualityPolicy.accept(prev, gps(53.1, -2, 60_000, 5)));
     }
+
+    private static FixQualityPolicy.Sample fused(double lat, double lon, long t, float acc) {
+        return new FixQualityPolicy.Sample(lat, lon, t, acc, FixQualityPolicy.SOURCE_FUSED);
+    }
+
+    @Test public void fusedFixAcceptedOverFreshGps() {
+        FixQualityPolicy.Sample prev = gps(53, -2, 0, 5);
+        assertTrue(FixQualityPolicy.accept(prev, fused(53.00001, -2, 1000, 4)));
+    }
+
+    @Test public void rawGpsIgnoredWhileFusedIsFresh() {
+        FixQualityPolicy.Sample prev = fused(53, -2, 0, 4);
+        assertFalse(FixQualityPolicy.accept(prev, gps(53.00001, -2, 1000, 5)));
+        assertFalse(FixQualityPolicy.accept(prev, net(53.00001, -2, 1000, 20)));
+    }
+
+    @Test public void rawGpsTakesOverWhenFusedGoesQuiet() {
+        FixQualityPolicy.Sample prev = fused(53, -2, 0, 4);
+        assertTrue(FixQualityPolicy.accept(prev,
+                gps(53.00001, -2, FixQualityPolicy.GPS_FRESH_MS + 1000, 5)));
+    }
+
+    @Test public void booleanShorthandMapsToGpsAndNetworkSources() {
+        assertEquals(FixQualityPolicy.SOURCE_GPS, gps(53, -2, 0, 5).source);
+        assertEquals(FixQualityPolicy.SOURCE_NETWORK, net(53, -2, 0, 5).source);
+    }
 }

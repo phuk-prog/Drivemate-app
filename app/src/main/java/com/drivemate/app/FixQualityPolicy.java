@@ -7,7 +7,9 @@ package com.drivemate.app;
  * Rules, in order:
  * 1. Invalid coordinates, non-finite or negative accuracy are rejected.
  * 2. Fixes must move forward in time; stale or duplicate fixes are rejected.
- * 3. Network (Wi-Fi/cell) fixes are rejected while a recent GPS fix exists.
+ * 3. Sources are ranked fused > GPS > network. A fix from a lower-ranked
+ *    source is rejected while a fix from a higher-ranked source is recent,
+ *    so the best source in use drives the display without interleaving.
  * 4. Fixes better than {@link #GOOD_ACCURACY_METRES} are accepted.
  * 5. Worse fixes are accepted only as a fallback when no accepted fix has
  *    arrived for {@link #FALLBACK_AFTER_MS}, and only up to
@@ -20,7 +22,12 @@ public final class FixQualityPolicy {
     public static final float GOOD_ACCURACY_METRES = 50f;
     public static final float FALLBACK_ACCURACY_METRES = 100f;
     public static final long FALLBACK_AFTER_MS = 10_000L;
+    /** How long a higher-ranked source keeps priority after its last fix. */
     public static final long GPS_FRESH_MS = 8_000L;
+
+    public static final int SOURCE_NETWORK = 0;
+    public static final int SOURCE_GPS = 1;
+    public static final int SOURCE_FUSED = 2;
     public static final long REACQUIRE_AFTER_MS = 30_000L;
     /** About 216 km/h: above anything legal on UK roads, below a bad-fix teleport. */
     public static final double MAX_PLAUSIBLE_SPEED_MPS = 60.0;
@@ -33,14 +40,20 @@ public final class FixQualityPolicy {
         public final double lon;
         public final long timeMs;
         public final float accuracyMetres;
-        public final boolean gps;
+        /** One of SOURCE_NETWORK, SOURCE_GPS, SOURCE_FUSED. */
+        public final int source;
 
-        public Sample(double lat, double lon, long timeMs, float accuracyMetres, boolean gps) {
+        public Sample(double lat, double lon, long timeMs, float accuracyMetres, int source) {
             this.lat = lat;
             this.lon = lon;
             this.timeMs = timeMs;
             this.accuracyMetres = accuracyMetres;
-            this.gps = gps;
+            this.source = source;
+        }
+
+        /** Shorthand for GPS (true) or network (false) fixes. */
+        public Sample(double lat, double lon, long timeMs, float accuracyMetres, boolean gps) {
+            this(lat, lon, timeMs, accuracyMetres, gps ? SOURCE_GPS : SOURCE_NETWORK);
         }
     }
 
@@ -61,7 +74,7 @@ public final class FixQualityPolicy {
         long dt = candidate.timeMs - previous.timeMs;
         if (dt <= 0) return false;
 
-        if (!candidate.gps && previous.gps && candidate.timeMs - previous.timeMs < GPS_FRESH_MS) {
+        if (candidate.source < previous.source && dt < GPS_FRESH_MS) {
             return false;
         }
 
