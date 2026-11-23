@@ -116,46 +116,67 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     };
     /**
-     * Continuous display clock. Navigation logic, GPS and TomTom requests
-     * retain their original cadence; only the visible map animates here.
-     * GPU view: 20fps; legacy raster: ~8fps to avoid expensive tile redraws.
+     * The Android display vsync clock drives visual interpolation, independently
+     * of the ~1Hz GPS fixes. GPU camera updates are capped near 30fps;
+     * the legacy raster engine remains near 9fps to avoid tile redraw stalls.
+     * Choreographer avoids the timer drift of repeated Handler.postDelayed.
      */
-    private final Runnable smoothTicker = new Runnable() {
-        @Override public void run() {
+    private long lastVisualTickMs;
+    private long motionStatsStartMs;
+    private int motionFrames;
+    private final android.view.Choreographer.FrameCallback smoothFrameClock =
+            new android.view.Choreographer.FrameCallback() {
+        @Override public void doFrame(long frameTimeNanos) {
             if (!active || !followLocation || smoothFollow == null || isFinishing()) {
                 smoothLoopRunning = false;
                 return;
             }
-            SmoothFollowCamera.Frame frame = smoothFollow.frame(SystemClock.elapsedRealtime());
-            if (frame != null) {
-                if (showingVector() && vectorMap != null) {
-                    vectorMap.followFrame(frame);
-                } else {
-                    if (map != null) {
-                        if (userPin != null) {
-                            userPin.setPosition(new GeoPoint(
-                                    frame.vehicle.lat, frame.vehicle.lon));
-                            userPin.setRotation((float) frame.bearing);
+            long now = SystemClock.elapsedRealtime();
+            long interval = showingVector() ? 32 : 110;
+            if (lastVisualTickMs == 0 || now - lastVisualTickMs >= interval) {
+                lastVisualTickMs = now;
+                SmoothFollowCamera.Frame frame = smoothFollow.frame(now);
+                if (frame != null) {
+                    if (showingVector() && vectorMap != null) {
+                        vectorMap.followFrame(frame);
+                    } else {
+                        if (map != null) {
+                            if (userPin != null) {
+                                userPin.setPosition(new GeoPoint(
+                                        frame.vehicle.lat, frame.vehicle.lon));
+                                userPin.setRotation((float) frame.bearing);
+                            }
+                            map.getController().setCenter(new GeoPoint(
+                                    frame.center.lat, frame.center.lon));
+                            if (smoothTick % 3 == 0
+                                    && Math.abs(map.getZoomLevelDouble() - frame.zoom) >= 0.12)
+                                map.getController().setZoom(frame.zoom);
+                            float delta = (float) MapFollowPolicy.shortestHeadingDifference(
+                                    -frame.bearing, map.getMapOrientation());
+                            if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
+                                map.setMapOrientation(map.getMapOrientation() + delta);
+                            map.postInvalidateOnAnimation();
                         }
-                        map.getController().setCenter(
-                                new GeoPoint(frame.center.lat, frame.center.lon));
-                        if (smoothTick % 3 == 0
-                                && Math.abs(map.getZoomLevelDouble() - frame.zoom) >= 0.12)
-                            map.getController().setZoom(frame.zoom);
-                        float delta = (float) MapFollowPolicy.shortestHeadingDifference(
-                                -frame.bearing, map.getMapOrientation());
-                        if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
-                            map.setMapOrientation(map.getMapOrientation() + delta);
-                        map.postInvalidateOnAnimation();
+                        if (vectorMap != null && useLocalMap && !autoFallback
+                                && smoothTick % 5 == 0) vectorMap.followFrame(frame);
                     }
-                    // Candidate vector map gets occasional updates while
-                    // hidden so road-visibility fallback still functions.
-                    if (vectorMap != null && useLocalMap && !autoFallback
-                            && smoothTick % 5 == 0) vectorMap.followFrame(frame);
+                    motionFrames++;
+                }
+                smoothTick++;
+                if (motionStatsStartMs == 0) motionStatsStartMs = now;
+                if (now - motionStatsStartMs >= 10000) {
+                    int fps = (int) Math.round(motionFrames * 1000.0
+                            / Math.max(1, now - motionStatsStartMs));
+                    // Performance metrics never contain GPS coordinates or
+                    // destination information.
+                    android.util.Log.i("DriveMateCamera",
+                            "Display camera updates/sec=" + fps
+                                    + ", engine=" + (showingVector() ? "gpu" : "raster"));
+                    motionFrames = 0;
+                    motionStatsStartMs = now;
                 }
             }
-            smoothTick++;
-            gpsHandler.postDelayed(this, showingVector() ? 50 : 120);
+            android.view.Choreographer.getInstance().postFrameCallback(this);
         }
     };
 
@@ -163,11 +184,14 @@ public final class MainActivity extends Activity implements LocationListener {
         if (smoothLoopRunning || !active || !followLocation || smoothFollow == null) return;
         smoothLoopRunning = true;
         smoothTick = 0;
-        gpsHandler.post(smoothTicker);
+        lastVisualTickMs = 0;
+        motionFrames = 0;
+        motionStatsStartMs = 0;
+        android.view.Choreographer.getInstance().postFrameCallback(smoothFrameClock);
     }
 
     private void stopSmoothLoop() {
-        gpsHandler.removeCallbacks(smoothTicker);
+        android.view.Choreographer.getInstance().removeFrameCallback(smoothFrameClock);
         smoothLoopRunning = false;
     }
 
