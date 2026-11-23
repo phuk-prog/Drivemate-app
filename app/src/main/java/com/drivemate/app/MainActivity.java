@@ -257,6 +257,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView topTurnTitle;
     private TextView topNextTurnText;
     private TurnArrowView topTurnArrow;
+    private JunctionManeuverView junctionDiagram;
     private LinearLayout recentList;
     private Button homeTile;
     private Button workTile;
@@ -317,6 +318,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private final List<TextView> tripMetricCaptions = new ArrayList<>();
     private float guidanceVolume = 0.85f;
     private boolean closeZoom;
+    private boolean highDetailOnline = true;
     private int previousInstructionIndex;
     private double stabilizedAlong = -1;
     private double observedSpeed;
@@ -332,6 +334,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private Marker parkedCarPin;
     private Polyline routeLine;
     private Polyline junctionLine;
+    private Polyline junctionHaloLine;
     private int highlightedJunctionIndex = -1;
     private TilesOverlay trafficTiles;
     private TextToSpeech speech;
@@ -394,7 +397,8 @@ public final class MainActivity extends Activity implements LocationListener {
         themePreference = Math.max(0, Math.min(2, settings.getInt("map_theme", 0)));
         hazardWarningEnabled = settings.getBoolean("hazard_voice_alerts", true);
         speedWarningEnabled = settings.getBoolean("speed_voice_alerts", true);
-        closeZoom = settings.getBoolean("close_zoom", false);
+        closeZoom = settings.getBoolean("close_zoom", true);
+        highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
         trafficEnabled = settings.getBoolean("traffic", false);
         useLocalMap = settings.getBoolean("drivemate_vector_map", true);
@@ -493,6 +497,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 }
                             }
                         });
+                vectorMap.setHighDetailEnabled(highDetailOnline);
                 vectorMap.setOnUserGesture(this::disengageFollowForGesture);
                 vectorMap.setCamera(startupMapView.center, startupMapView.zoom, 0);
                 // Place MapLibre below the existing TomTom map while waiting
@@ -969,6 +974,16 @@ public final class MainActivity extends Activity implements LocationListener {
         thenPos.topMargin = dp(1);
         turnCard.addView(topNextTurnText, thenPos);
 
+        // Only shown on the final approach to a verified complex junction.
+        // The shape is traced from TomTom route geometry, never inferred
+        // from roundabout exit numbers or guessed lane information.
+        junctionDiagram = new JunctionManeuverView(this);
+        junctionDiagram.setContentDescription("Calculated route path at the upcoming junction");
+        junctionDiagram.setVisibility(View.GONE);
+        LinearLayout.LayoutParams junctionPos = new LinearLayout.LayoutParams(-1, dp(84));
+        junctionPos.topMargin = dp(5);
+        turnCard.addView(junctionDiagram, junctionPos);
+
         laneGuidanceText = text("", 15, CYAN, true);
         laneGuidanceText.setGravity(Gravity.CENTER);
         laneGuidanceText.setContentDescription("Verified route lane recommendations");
@@ -1174,7 +1189,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 trafficEnabled ? "Hide live traffic overlay" : "Show live traffic overlay",
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 "Camera · " + cameraModeName(),
-                closeZoom ? "Zoom · junction detail" : "Zoom · automatic",
+                closeZoom ? "Junction detail zoom · On" : "Junction detail zoom · Off",
                 autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
                         : useLocalMap ? "Map · DriveMate local vector"
                         : "Map · TomTom online raster",
@@ -1187,7 +1202,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Verified hazard alerts (when available) · " + (hazardWarningEnabled ? "On" : "Off"),
                 "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
                 "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
-                "Overspeed alert above mapped limit · " + speedToleranceMph + " mph"
+                "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
+                "Online close-up map detail · " + (highDetailOnline ? "On" : "Off")
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1300,6 +1316,17 @@ public final class MainActivity extends Activity implements LocationListener {
                             break;
                         case 17: selectRerouteMode(); break;
                         case 18: selectSpeedTolerance(); break;
+                        case 19:
+                            highDetailOnline = !highDetailOnline;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("high_detail_online", highDetailOnline).apply();
+                            if (vectorMap != null)
+                                vectorMap.setHighDetailEnabled(highDetailOnline);
+                            Toast.makeText(this, highDetailOnline
+                                    ? "High-detail TomTom tiles enabled at close zoom (internet required)"
+                                    : "Close-up map uses cached local vector streets",
+                                    Toast.LENGTH_LONG).show();
+                            break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1477,6 +1504,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
         if (topTurnArrow != null) topTurnArrow.setNightMode(night);
         if (maneuverIcon != null) maneuverIcon.setNightMode(night);
+        if (junctionDiagram != null) junctionDiagram.setNightMode(night);
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
     }
 
@@ -1985,7 +2013,8 @@ public final class MainActivity extends Activity implements LocationListener {
         float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
-                velocity, map.getHeight(), headerHeight, bottomPanelHeight);
+                velocity, map.getHeight(), headerHeight, bottomPanelHeight,
+                closeZoom);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
