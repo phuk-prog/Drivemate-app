@@ -41,6 +41,7 @@ public final class SmoothFollowCamera {
     private double lastAnimatedProgress;
     private double centerAlong;
     private double metresPerSecond;
+    private double nextUnconfirmedTurn = Double.POSITIVE_INFINITY;
     private double zoom = Double.NaN;
     private double zoomTarget = Double.NaN;
     private double bearing = Double.NaN;
@@ -72,6 +73,7 @@ public final class SmoothFollowCamera {
         if (filteredGps == null || desired == null) return;
         this.northUp = northUp;
         lastFix = nowMs;
+        nextUnconfirmedTurn = Math.max(0, junctionAheadMetres);
         double safeSpeed = Math.max(0, Math.min(45, speedMetresPerSecond));
         // Coarse but usable GPS (e.g. ±50m) can still advance the camera
         // along the verified route; only high-confidence fixes snap the car.
@@ -191,7 +193,8 @@ public final class SmoothFollowCamera {
         // A stale GPS fix cannot propel the car across an unconfirmed junction.
         boolean extrapolating = gpsConfident && metresPerSecond >= 1.5 && age <= 1.15;
         double anticipated = extrapolating
-                ? Math.min(metresPerSecond * age, 35) : 0;
+                ? Math.min(Math.min(metresPerSecond * age, 35),
+                        Math.max(0, nextUnconfirmedTurn - 4)) : 0;
         double visualAlong = clamp(measuredProgress + anticipated, 0, path.lengthMetres);
         // Keep the displayed progress monotonic even when a GPS correction
         // arrives slightly behind the previous predicted position.
