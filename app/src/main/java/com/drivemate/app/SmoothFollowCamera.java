@@ -85,7 +85,9 @@ public final class SmoothFollowCamera {
             lastAnimatedProgress = measuredProgress;
             // Find the target centre once at GPS cadence. Animation frames
             // only use the immutable indexed route.
-            centerAlong = nearbyProgress(desired.center, measuredProgress);
+            centerAlong = Double.isFinite(desired.cameraCenterAlongMetres)
+                    ? clamp(desired.cameraCenterAlongMetres, 0, path.lengthMetres)
+                    : nearbyProgress(desired.center, measuredProgress);
             zoom = zoomTarget = clamp(desired.zoom, 14.2, 19.0);
             bearing = bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
             center = desired.center;
@@ -117,7 +119,9 @@ public final class SmoothFollowCamera {
         measuredProgress = Math.max(lastAnimatedProgress - 2, measured);
         lastAcceptedFix = nowMs;
         metresPerSecond = safeSpeed;
-        centerAlong = nearbyProgress(desired.center, measuredProgress);
+        centerAlong = Double.isFinite(desired.cameraCenterAlongMetres)
+                    ? clamp(desired.cameraCenterAlongMetres, 0, path.lengthMetres)
+                    : nearbyProgress(desired.center, measuredProgress);
         bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
 
         if (Double.isFinite(previouslyUpcoming)
