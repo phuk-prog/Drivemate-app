@@ -1,3 +1,12 @@
+## DriveMate v1.6.1 — version label matches signed APK
+
+DriveMate's header and About dialog now use the installed Android package's
+version name instead of hard-coding `v1.5.1`. Previously the signed 1.6.0
+APK was correctly built from `versionCode 100600` but could still display
+`v1.5.1` within the app. This fix advances to `versionCode 100601` so
+owners can update in place with the existing stable signing certificate.
+Navigation and routing behaviour are unchanged from v1.6.0.
+
 ## DriveMate v1.6.0 — forward-looking junction camera
 
 The MapLibre driving view now pitches into a forward-looking perspective,
