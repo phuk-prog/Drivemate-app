@@ -98,6 +98,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
+                    if (topTurnTitle != null) topTurnTitle.setText("GPS LOST · WAIT FOR SIGNAL");
                     saySystemWarning("GPS signal lost. Waiting for location.");
                 }
             }
@@ -203,15 +204,24 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active || !followLocation) return;
         followLocation = false;
         stopSmoothLoop();
-        if (followButton != null) {
-            followButton.setText("◎");
-            followButton.setContentDescription("Resume map following my location");
-        }
+        updateFollowButton();
         if (!mapGestureWasNotified) {
             mapGestureWasNotified = true;
             Toast.makeText(this, "Map follow paused · tap ◎ to recenter",
                     Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void updateFollowButton() {
+        if (followButton == null) return;
+        boolean paused = active && !followLocation;
+        followButton.setText(paused ? "↪" : "◎");
+        followButton.setContentDescription(paused
+                ? "Map following paused. Tap to recenter and resume navigation."
+                : "Centre map on my GPS position");
+        followButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                paused ? CYAN : DARK));
+        followButton.setTextColor(paused ? DARK : Color.WHITE);
     }
 
     private MapView map;
@@ -656,7 +666,10 @@ public final class MainActivity extends Activity implements LocationListener {
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
             if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
-            else say(nextInstruction);
+            else if (voiceMode == DrivingVoicePolicy.SILENT)
+                Toast.makeText(this, "Enable voice guidance to repeat a turn",
+                        Toast.LENGTH_SHORT).show();
+            else speak(nextInstruction); // Explicit repeat works in Alerts only mode.
         });
         navActions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         refreshButton = chip("↻");
@@ -761,8 +774,7 @@ public final class MainActivity extends Activity implements LocationListener {
         followButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(DARK));
         followButton.setOnClickListener(v -> {
             followLocation = true;
-            followButton.setText("◎");
-            followButton.setContentDescription("Centre map on my GPS position");
+            updateFollowButton();
             if (currentLocation != null && active && route != null) {
                 smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
                 lastCameraUpdate = 0;
@@ -944,6 +956,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (followButton != null) {
             followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
+            updateFollowButton();
         }
         if (speedBadgePos != null && gpsButtonPos != null) {
             // During navigation the compact control row is only ~60dp tall.
@@ -1178,7 +1191,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 Math.min(DrivingVoicePolicy.SILENT, selected));
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putInt("voice_mode_v2", voiceMode).apply();
-        if (voiceMode == DrivingVoicePolicy.SILENT && speech != null) speech.stop();
+        if ((voiceMode == DrivingVoicePolicy.SILENT
+                || voiceMode == DrivingVoicePolicy.ALERTS_ONLY) && speech != null)
+            speech.stop();
         updateVoiceButton();
         Toast.makeText(this, "Voice: " + voiceModeName(), Toast.LENGTH_SHORT).show();
     }
@@ -1963,7 +1978,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 .hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
         setHomeVisible(false);
         followLocation = true;
-        followButton.setText("◎");
+        updateFollowButton();
         topTurnTitle.setText("NEXT TURN");
         maneuverIcon.setVisibility(View.VISIBLE);
         nextTurnText.setVisibility(View.GONE);
@@ -2001,7 +2016,7 @@ public final class MainActivity extends Activity implements LocationListener {
         destination = selected;
         places.addRecent(selected);
         followLocation = false;
-        followButton.setText("◎");
+        updateFollowButton();
         destinationInput.setText(selected.title, false);
         destinationInput.dismissDropDown();
         if (destinationPin == null) {
@@ -2229,10 +2244,13 @@ public final class MainActivity extends Activity implements LocationListener {
         maneuverIcon.setVisibility(View.VISIBLE);
         topTurnArrow.update(glyph, step.exitNumber);
         boolean roundabout = "↻".equals(glyph);
-        topTurnTitle.setText(roundabout && step.exitNumber > 0
-                ? "ROUNDABOUT · " + GuidanceLogic.ordinal(step.exitNumber) + " EXIT"
-                : "NEXT TURN");
-        int iconSide = dp(roundabout ? 70 : 54);
+        boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
+        topTurnTitle.setText(fix.hasAccuracy() && fix.getAccuracy() > 55
+                ? "GPS UNCERTAIN · CHECK ROAD SIGNS"
+                : roundabout && step.exitNumber > 0
+                        ? "ROUNDABOUT · " + GuidanceLogic.ordinal(step.exitNumber) + " EXIT"
+                        : fork ? "ROAD FORK · FOLLOW ARROW" : "NEXT TURN");
+        int iconSide = dp(roundabout || fork ? 70 : 54);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
             android.view.ViewGroup.LayoutParams iconParams = topTurnArrow.getLayoutParams();
             iconParams.width = iconSide;
@@ -2240,7 +2258,7 @@ public final class MainActivity extends Activity implements LocationListener {
             topTurnArrow.setLayoutParams(iconParams);
         }
         updateJunctionHighlight(next,
-                DrivingDisplayPolicy.junctionPreview(roundabout, untilTurn));
+                DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn));
         String nextTurnLabel = NavigationUnits.displayDistance(untilTurn, metricUnits)
                 + " · " + direction;
         instructionText.setText(nextTurnLabel);
@@ -2289,7 +2307,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     /**
      * Highlight only the actual TomTom route geometry through a verified
-     * roundabout. The segment is never inferred from the exit number.
+     * roundabout or bifurcation. Geometry is never inferred from exit counts.
      */
     private void updateJunctionHighlight(int instructionIndex, boolean visible) {
         if (!visible || route == null || route.points.size() < 2) {
@@ -2377,7 +2395,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stabilizedAlong = -1;
         observedSpeed = 0;
         followLocation = true;
-        followButton.setText("◎");
+        updateFollowButton();
         distanceText.setText("Distance: —");
         etaText.setText("ETA: —");
         if (arrived) {
