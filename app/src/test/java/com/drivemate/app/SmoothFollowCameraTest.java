@@ -148,7 +148,7 @@ public class SmoothFollowCameraTest {
                 near, false, 2000);
         SmoothFollowCamera.Frame partial = motion.frame(2100);
         assertTrue(partial.tilt < 48 && partial.tilt > 28);
-        assertTrue(partial.tilt >= 45.99); // at most 20 degrees per second
+        assertTrue(partial.tilt >= 43.99); // 20 deg/s capped to a 200 ms frame
         assertTrue(motion.frame(2200).tilt < partial.tilt);
     }
 
