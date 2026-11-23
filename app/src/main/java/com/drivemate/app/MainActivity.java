@@ -127,6 +127,19 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean homeMode = true;
     private LinearLayout homePanel;
     private LinearLayout navigationPanel;
+    private LinearLayout topMapOverlay;
+    private LinearLayout searchBar;
+    private LinearLayout drivingTopPanel;
+    private LinearLayout previewTurnRow;
+    private LinearLayout previewDetailsRow;
+    private LinearLayout bottomActionRow;
+    private LinearLayout.LayoutParams bottomActionsParams;
+    private TextView tripEtaValue;
+    private TextView tripMinutesValue;
+    private TextView tripDistanceValue;
+    private TextView topInstructionText;
+    private TextView topNextTurnText;
+    private TurnArrowView topTurnArrow;
     private LinearLayout recentList;
     private Button homeTile;
     private Button workTile;
@@ -344,7 +357,8 @@ public final class MainActivity extends Activity implements LocationListener {
         header.addView(settings, new LinearLayout.LayoutParams(dp(49), dp(49)));
         top.addView(header, new LinearLayout.LayoutParams(-1, dp(68)));
 
-        LinearLayout search = new LinearLayout(this);
+        searchBar = new LinearLayout(this);
+        LinearLayout search = searchBar;
         search.setGravity(Gravity.CENTER_VERTICAL);
         search.setPadding(dp(10), dp(5), dp(8), dp(5));
         search.setBackground(rounded(Color.rgb(246, 251, 253), 16));
@@ -411,6 +425,13 @@ public final class MainActivity extends Activity implements LocationListener {
         searchPos.setMargins(dp(10), dp(11), dp(10), dp(7));
         top.addView(search, searchPos);
 
+        drivingTopPanel = createDrivingTopPanel();
+        LinearLayout.LayoutParams guidanceTopPos = new LinearLayout.LayoutParams(-1, -2);
+        guidanceTopPos.setMargins(dp(10), dp(6), dp(10), dp(6));
+        top.addView(drivingTopPanel, guidanceTopPos);
+        drivingTopPanel.setVisibility(View.GONE);
+        topMapOverlay = top;
+
         FrameLayout.LayoutParams topPos = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP);
         frame.addView(top, topPos);
 
@@ -422,7 +443,8 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.setElevation(dp(10));
         banner = text("Ready to navigate", 12, CYAN, true);
         navigationPanel.addView(banner);
-        LinearLayout turnRow = new LinearLayout(this);
+        previewTurnRow = new LinearLayout(this);
+        LinearLayout turnRow = previewTurnRow;
         turnRow.setOrientation(LinearLayout.HORIZONTAL);
         turnRow.setGravity(Gravity.CENTER_VERTICAL);
         maneuverIcon = new TurnArrowView(this);
@@ -445,7 +467,8 @@ public final class MainActivity extends Activity implements LocationListener {
         routeSummary = text("", 13, Color.rgb(194, 226, 238), false);
         routeSummary.setVisibility(View.GONE);
         navigationPanel.addView(routeSummary);
-        LinearLayout details = new LinearLayout(this);
+        previewDetailsRow = new LinearLayout(this);
+        LinearLayout details = previewDetailsRow;
         details.setGravity(Gravity.CENTER_VERTICAL);
         distanceText = text("Distance: —", 13, Color.WHITE, false);
         details.addView(distanceText, new LinearLayout.LayoutParams(0, -2, 1));
@@ -458,7 +481,8 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.addView(details, detailsPos);
         gpsAccuracyText = text("", 11, Color.rgb(190, 219, 230), false);
         navigationPanel.addView(gpsAccuracyText);
-        LinearLayout navActions = new LinearLayout(this);
+        bottomActionRow = new LinearLayout(this);
+        LinearLayout navActions = bottomActionRow;
         navActions.setGravity(Gravity.CENTER);
         startButton = chip("▶ Start");
         startButton.setVisibility(View.GONE);
@@ -480,18 +504,18 @@ public final class MainActivity extends Activity implements LocationListener {
         refreshButton.setVisibility(View.GONE);
         refreshButton.setOnClickListener(v -> planRoute(false));
         navActions.addView(refreshButton, new LinearLayout.LayoutParams(0, dp(45), 1));
-        LinearLayout.LayoutParams navActionsPos = new LinearLayout.LayoutParams(-1, -2);
-        navActionsPos.topMargin = dp(10);
-        navigationPanel.addView(navActions, navActionsPos);
+        bottomActionsParams = new LinearLayout.LayoutParams(-1, -2);
+        bottomActionsParams.topMargin = dp(10);
+        navigationPanel.addView(navActions, bottomActionsParams);
         stopButton = chip("End navigation");
         stopButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
                 Color.rgb(42, 80, 100)));
         stopButton.setTextColor(Color.WHITE);
         stopButton.setVisibility(View.GONE);
         stopButton.setOnClickListener(v -> stopNavigation(false));
-        LinearLayout.LayoutParams stopPos = new LinearLayout.LayoutParams(-1, dp(42));
-        stopPos.topMargin = dp(8);
-        navigationPanel.addView(stopButton, stopPos);
+        // On a route the three compact controls occupy one row at the bottom.
+        // The map is no longer covered by a large instruction/control sheet.
+        navActions.addView(stopButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         FrameLayout.LayoutParams navPanelPos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         navPanelPos.setMargins(dp(8), 0, dp(8), dp(9));
         frame.addView(navigationPanel, navPanelPos);
@@ -613,6 +637,100 @@ public final class MainActivity extends Activity implements LocationListener {
         if (map != null)
             map.setVisibility(!vector && !apiKey.isEmpty()
                     ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    /**
+     * High-priority driving information stays at the top of the actual road map,
+     * below the DriveMate brand bar. Search and the large bottom guidance pane
+     * are reserved for Home / route preview, not live driving.
+     */
+    private LinearLayout createDrivingTopPanel() {
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setElevation(dp(7));
+
+        LinearLayout metrics = new LinearLayout(this);
+        metrics.setGravity(Gravity.CENTER_VERTICAL);
+        metrics.setPadding(dp(7), dp(5), dp(7), dp(5));
+        metrics.setBackground(rounded(DARK, 14));
+        tripEtaValue = addDrivingMetric(metrics, "ETA");
+        tripMinutesValue = addDrivingMetric(metrics, "MIN LEFT");
+        tripDistanceValue = addDrivingMetric(metrics, "DISTANCE LEFT");
+        container.addView(metrics, new LinearLayout.LayoutParams(-1, dp(67)));
+
+        LinearLayout turnCard = new LinearLayout(this);
+        turnCard.setOrientation(LinearLayout.VERTICAL);
+        turnCard.setPadding(dp(12), dp(9), dp(12), dp(10));
+        turnCard.setBackground(rounded(Color.rgb(14, 47, 66), 14));
+        LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
+        turnCardPos.topMargin = dp(6);
+        container.addView(turnCard, turnCardPos);
+
+        TextView turnTitle = text("NEXT TURN", 10, CYAN, true);
+        turnTitle.setLetterSpacing(0.12f);
+        turnCard.addView(turnTitle);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.HORIZONTAL);
+        content.setGravity(Gravity.CENTER_VERTICAL);
+        topTurnArrow = new TurnArrowView(this);
+        LinearLayout.LayoutParams arrow = new LinearLayout.LayoutParams(dp(54), dp(55));
+        arrow.rightMargin = dp(11);
+        content.addView(topTurnArrow, arrow);
+        topInstructionText = text("Preparing next instruction…", 18, Color.WHITE, true);
+        topInstructionText.setMaxLines(2);
+        topInstructionText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        content.addView(topInstructionText, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams contentPos = new LinearLayout.LayoutParams(-1, -2);
+        contentPos.topMargin = dp(2);
+        turnCard.addView(content, contentPos);
+
+        topNextTurnText = text("", 12, Color.rgb(201, 231, 239), false);
+        topNextTurnText.setSingleLine(true);
+        topNextTurnText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
+        thenPos.topMargin = dp(1);
+        turnCard.addView(topNextTurnText, thenPos);
+        return container;
+    }
+
+    private TextView addDrivingMetric(LinearLayout row, String label) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER);
+        TextView caption = text(label, 10, Color.rgb(189, 220, 230), true);
+        caption.setGravity(Gravity.CENTER);
+        cell.addView(caption);
+        TextView number = text("—", 21, Color.WHITE, true);
+        number.setGravity(Gravity.CENTER);
+        number.setSingleLine(true);
+        number.setAutoSizeTextTypeUniformWithConfiguration(
+                13, 21, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
+        cell.addView(number);
+        row.addView(cell, new LinearLayout.LayoutParams(0, -1, 1));
+        return number;
+    }
+
+    private void applyNavigationChrome() {
+        boolean navigating = active;
+        if (drivingTopPanel != null)
+            drivingTopPanel.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if (searchBar != null)
+            searchBar.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (banner != null) banner.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (previewTurnRow != null)
+            previewTurnRow.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (previewDetailsRow != null)
+            previewDetailsRow.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (gpsAccuracyText != null)
+            gpsAccuracyText.setVisibility(navigating ? View.GONE : View.VISIBLE);
+        if (bottomActionsParams != null)
+            bottomActionsParams.topMargin = dp(navigating ? 0 : 10);
+        if (navigationPanel != null) {
+            navigationPanel.setPadding(dp(12), dp(navigating ? 6 : 12),
+                    dp(12), dp(navigating ? 6 : 12));
+            navigationPanel.requestLayout();
+        }
     }
 
     private Button quickTile(String symbol, String label) {
