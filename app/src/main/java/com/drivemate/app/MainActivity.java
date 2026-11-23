@@ -393,6 +393,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 }
                             }
                         });
+                vectorMap.setOnUserGesture(this::disengageFollowForGesture);
                 // Place MapLibre below the existing TomTom map while waiting
                 // for first verifiably painted UK street features.
                 mapHost.addView(vectorMap.view(), 0,
@@ -688,9 +689,12 @@ public final class MainActivity extends Activity implements LocationListener {
         followButton.setOnClickListener(v -> {
             followLocation = true;
             followButton.setText("◎");
+            followButton.setContentDescription("Centre map on my GPS position");
             if (currentLocation != null && active && route != null) {
+                smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
                 lastCameraUpdate = 0;
                 updateGuidance(currentLocation);
+                startSmoothLoop();
             } else if (currentLocation != null) {
                 centreOnLocation(true);
             }
@@ -1360,6 +1364,7 @@ public final class MainActivity extends Activity implements LocationListener {
         GeoMath.Point smoothed = vehicleFilter.apply(gpsPoint(fix), fix.getTime(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fix.hasSpeed() ? fix.getSpeed() : 0f);
+        displayGps = smoothed;
         GeoPoint point = new GeoPoint(smoothed.lat, smoothed.lon);
         if (userPin == null) {
             userPin = new Marker(map);
@@ -1368,12 +1373,15 @@ public final class MainActivity extends Activity implements LocationListener {
             userPin.setIcon(makeCarIcon());
             map.getOverlays().add(userPin);
         }
-        userPin.setPosition(point);
+        // The independent frame clock owns the moving marker while driving.
+        // Never teleport it back to each noisy 1Hz GPS fix.
+        if (!active || smoothFollow == null) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
-            vectorMap.setVehicle(smoothed);
+            if (!active || smoothFollow == null) vectorMap.setVehicle(smoothed);
             if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
         }
-        if (fix.hasBearing() && fix.hasSpeed() && fix.getSpeed() > 1.5f)
+        if ((!active || smoothFollow == null) && fix.hasBearing()
+                && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
@@ -1400,7 +1408,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
-        if (!showingVector()) map.postInvalidateOnAnimation();
+        if (!active && !showingVector()) map.postInvalidateOnAnimation();
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -1669,6 +1677,7 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
         keyboardOpen = false;
         destinationInput.clearFocus();
         ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE))
@@ -1694,6 +1703,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stabilizedAlong = -1;
         observedSpeed = 0;
         updateGuidance(currentLocation);
+        startSmoothLoop();
     }
 
     private void selectDestination(TomTomApi.Destination selected) {
@@ -1765,6 +1775,14 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
                     route = calculated;
+                    if (active) {
+                        // New route means a new geometry arc-length index.
+                        // Never blend the camera through an unrelated route.
+                        smoothFollow = new SmoothFollowCamera(
+                                new RouteMotionIndex(calculated.points));
+                        lastCameraUpdate = 0;
+                        lastCameraCenter = null;
+                    }
                     offRouteSince = 0;
                     previousInstructionIndex = 0;
                     stabilizedAlong = -1;
@@ -1968,6 +1986,8 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void stopNavigation(boolean arrived) {
+        stopSmoothLoop();
+        smoothFollow = null;
         ++requestGeneration;
         routing = false;
         active = false;
@@ -2081,9 +2101,11 @@ public final class MainActivity extends Activity implements LocationListener {
         startLocation();
         gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.postDelayed(gpsWatchdog, 5000);
+        if (active) startSmoothLoop();
     }
 
     @Override public void onPause() {
+        stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
         if (locationManager != null) locationManager.removeUpdates(this);
         if (map != null) map.onPause();
