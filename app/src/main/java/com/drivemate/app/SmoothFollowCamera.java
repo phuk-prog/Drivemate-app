@@ -50,6 +50,9 @@ public final class SmoothFollowCamera {
     private GeoMath.Point vehicleFix;
     private boolean gpsConfident;
     private boolean roadSnap;
+    private boolean offsetFollowing;
+    private double lateralLatitude;
+    private double lateralLongitude;
     private boolean northUp;
     private boolean initialized;
 
@@ -78,6 +81,7 @@ public final class SmoothFollowCamera {
         // fix. Never use snapped position for actual routing decisions.
         roadSnap = trustworthy && accuracyMetres <= 25 && offRouteMetres <= 23
                 && safeSpeed >= 1.5;
+        offsetFollowing = trustworthy && offRouteMetres <= 50 && safeSpeed >= 1.5;
         vehicleFix = trustworthy ? filteredGps
                 : (vehicle == null ? filteredGps : vehicle);
         if (!initialized) {
@@ -91,7 +95,10 @@ public final class SmoothFollowCamera {
             zoom = zoomTarget = clamp(desired.zoom, 14.2, 19.0);
             bearing = bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
             center = desired.center;
-            vehicle = roadSnap ? path.pointAt(measuredProgress) : filteredGps;
+            GeoMath.Point road = path.pointAt(measuredProgress);
+            lateralLatitude = roadSnap ? 0 : filteredGps.lat - road.lat;
+            lateralLongitude = roadSnap ? 0 : filteredGps.lon - road.lon;
+            vehicle = roadSnap ? road : filteredGps;
             metresPerSecond = safeSpeed;
             previouslyUpcoming = junctionAheadMetres;
             lastZoomTargetChange = nowMs;
@@ -105,6 +112,7 @@ public final class SmoothFollowCamera {
             // Freeze dead reckoning until an accurate fix arrives.
             metresPerSecond = 0;
             roadSnap = false;
+            offsetFollowing = false;
             return;
         }
         double dt = lastAcceptedFix < 0 ? 1.0
@@ -119,6 +127,9 @@ public final class SmoothFollowCamera {
         measuredProgress = Math.max(lastAnimatedProgress - 2, measured);
         lastAcceptedFix = nowMs;
         metresPerSecond = safeSpeed;
+        GeoMath.Point road = path.pointAt(measuredProgress);
+        lateralLatitude = roadSnap ? 0 : filteredGps.lat - road.lat;
+        lateralLongitude = roadSnap ? 0 : filteredGps.lon - road.lon;
         centerAlong = Double.isFinite(desired.cameraCenterAlongMetres)
                     ? clamp(desired.cameraCenterAlongMetres, 0, path.lengthMetres)
                     : nearbyProgress(desired.center, measuredProgress);
@@ -186,8 +197,15 @@ public final class SmoothFollowCamera {
         // arrives slightly behind the previous predicted position.
         visualAlong = Math.max(lastAnimatedProgress, visualAlong);
         lastAnimatedProgress = visualAlong;
-        GeoMath.Point wantedVehicle = roadSnap
-                ? path.pointAt(visualAlong) : vehicleFix;
+        GeoMath.Point wantedVehicle = vehicleFix;
+        if (offsetFollowing) {
+            // Preserve the measured lateral offset rather than falsely
+            // snapping moderate-accuracy GPS to the centreline. The road
+            // supplies only the short forward movement between real fixes.
+            GeoMath.Point road = path.pointAt(visualAlong);
+            wantedVehicle = new GeoMath.Point(
+                    road.lat + lateralLatitude, road.lon + lateralLongitude);
+        }
         if (wantedVehicle == null) wantedVehicle = vehicle;
         // Faster tracking at road speed, gentle smoothing when nearly stopped.
         double vehicleTau = metresPerSecond < 1.5 ? 0.60 : 0.22;
