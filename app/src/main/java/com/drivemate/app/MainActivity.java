@@ -99,6 +99,10 @@ public final class MainActivity extends Activity implements LocationListener {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
                     if (topTurnTitle != null) topTurnTitle.setText("GPS LOST · WAIT FOR SIGNAL");
+                    if (speedText != null) speedText.setText("GPS —");
+                    if (speedLimitText != null) speedLimitText.setText("Limit —");
+                    if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
+                    if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
                     saySystemWarning("GPS signal lost. Waiting for location.");
                 }
             }
@@ -2552,7 +2556,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         speedText.setTextColor(speeding ? Color.rgb(255, 197, 85) : Color.WHITE);
         long now = SystemClock.elapsedRealtime();
-        if (speeding && speedWarningEnabled && distanceToTurn > 120
+        if (speeding && speedWarningEnabled && distanceToTurn > 300
                 && (lastSpeedWarningAt == 0 || now - lastSpeedWarningAt > 120000)) {
             lastSpeedWarningAt = now;
             sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",
