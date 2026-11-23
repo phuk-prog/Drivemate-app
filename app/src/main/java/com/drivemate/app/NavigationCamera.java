@@ -62,7 +62,7 @@ public final class NavigationCamera {
         // At speed the safe look-ahead expands, even for a very close turn.
         double horizon = clamp(Math.max(
                 junctionAhead + Math.max(55, speed * 4.0),
-                Math.max(180, speed * 19 + 120)), 180, 1350);
+                Math.max(180, speed * 9 + 80)), 180, 1350);
 
         // Stronger forward perspective on long approaches; ease toward a
         // clearer overhead junction diagram as the manoeuvre gets close.
