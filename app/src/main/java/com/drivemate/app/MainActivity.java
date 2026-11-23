@@ -761,9 +761,12 @@ public final class MainActivity extends Activity implements LocationListener {
             followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
         }
         if (speedBadgePos != null && gpsButtonPos != null) {
-            speedBadgePos.bottomMargin = dp(show ? 320 : 225);
-            gpsButtonPos.bottomMargin = dp(show ? 327 : 230);
+            // During navigation the compact control row is only ~60dp tall.
+            // Keep GPS speed and recenter reachable without hiding the road.
+            speedBadgePos.bottomMargin = dp(show ? 320 : active ? 100 : 225);
+            gpsButtonPos.bottomMargin = dp(show ? 327 : active ? 105 : 230);
         }
+        applyNavigationChrome();
         if (show && !keyboardOpen) refreshHomePanel();
     }
 
@@ -1365,9 +1368,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (lastCameraUpdate > 0 && now - lastCameraUpdate < 600) return;
         if (map.getHeight() < dp(350)) return;
 
-        int headerHeight = dp(145);
+        // Use measured overlays rather than the old 145dp search/header
+        // assumption: the driving ETA and turn card now occupy the top.
+        int headerHeight = topMapOverlay != null && topMapOverlay.getHeight() > 0
+                ? topMapOverlay.getHeight() + dp(5) : dp(260);
         int bottomPanelHeight = navigationPanel.getHeight() > 0
-                ? navigationPanel.getHeight() + dp(18) : dp(245);
+                ? navigationPanel.getHeight() + dp(18) : dp(95);
         NavigationCamera.Frame camera = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), progress.alongMetres,
                 nextJunctionOffsetMetres, fix.hasSpeed() ? fix.getSpeed() : 0,
@@ -1569,6 +1575,10 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         active = true;
+        keyboardOpen = false;
+        destinationInput.clearFocus();
+        ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE))
+                .hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
         setHomeVisible(false);
         followLocation = true;
         followButton.setText("◎");
@@ -1785,15 +1795,29 @@ public final class MainActivity extends Activity implements LocationListener {
         distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
         long seconds = GuidanceLogic.remainingSeconds(leftMetres, route.lengthMetres,
                 route.timeSeconds, observedSpeed);
+        String etaClock = new SimpleDateFormat("HH:mm", Locale.UK)
+                .format(new Date(System.currentTimeMillis() + seconds * 1000L));
         journeyTimeText.setText("Time: " + NavigationUnits.duration(seconds));
-        etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
-                .format(new Date(System.currentTimeMillis() + seconds * 1000L)));
+        etaText.setText("ETA: " + etaClock);
+        // These three values live at the TOP of the driving map.
+        tripEtaValue.setText(etaClock);
+        tripEtaValue.setContentDescription("Estimated arrival " + etaClock);
+        tripMinutesValue.setText(TripHeaderFormat.minutesLeft(seconds));
+        tripMinutesValue.setContentDescription(
+                TripHeaderFormat.minutesLeft(seconds) + " remaining");
+        tripDistanceValue.setText(TripHeaderFormat.distanceLeft(leftMetres, metricUnits));
+        tripDistanceValue.setContentDescription(
+                TripHeaderFormat.distanceLeft(leftMetres, metricUnits) + " remaining");
 
         double[] offsets = new double[route.instructions.size()];
         for (int i = 0; i < route.instructions.size(); i++)
             offsets[i] = route.instructions.get(i).routeOffsetMetres;
         int next = GuidanceLogic.nextInstructionIndex(offsets, along, previousInstructionIndex);
-        if (next < 0) return;
+        if (next < 0) {
+            topInstructionText.setText("Continue along the highlighted route");
+            topNextTurnText.setText("Follow road signs");
+            return;
+        }
         previousInstructionIndex = next;
         TomTomApi.Instruction step = route.instructions.get(next);
         double untilTurn = Math.max(0, step.routeOffsetMetres - along);
@@ -1803,23 +1827,32 @@ public final class MainActivity extends Activity implements LocationListener {
                 step.turnAngleDegrees);
         maneuverIcon.update(glyph, step.exitNumber);
         maneuverIcon.setVisibility(View.VISIBLE);
-        instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)
-                + " · " + direction);
+        topTurnArrow.update(glyph, step.exitNumber);
+        String nextTurnLabel = NavigationUnits.displayDistance(untilTurn, metricUnits)
+                + " · " + direction;
+        instructionText.setText(nextTurnLabel);
+        topInstructionText.setText(nextTurnLabel);
+        topInstructionText.setContentDescription(
+                "Next turn in " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
+                + ": " + direction);
 
         if (next + 1 < route.instructions.size()) {
             TomTomApi.Instruction after = route.instructions.get(next + 1);
             double afterTurn = Math.max(0, after.routeOffsetMetres - step.routeOffsetMetres);
             String followUp = GuidanceLogic.actionLine(after.message, after.junctionType,
                     after.exitNumber);
-            nextTurnText.setText("Then "
+            String followingTurn = "Then "
                     + GuidanceLogic.symbol(after.maneuver, after.junctionType,
                             after.turnAngleDegrees) + " "
                     + NavigationUnits.displayDistance(afterTurn, metricUnits)
-                    + " later · " + followUp);
-            nextTurnText.setVisibility(View.VISIBLE);
+                    + " later · " + followUp;
+            nextTurnText.setText(followingTurn);
+            topNextTurnText.setText(followingTurn);
+            nextTurnText.setVisibility(View.GONE);
         } else {
             nextTurnText.setText("Continue towards your destination");
-            nextTurnText.setVisibility(View.VISIBLE);
+            topNextTurnText.setText("Continue towards your destination");
+            nextTurnText.setVisibility(View.GONE);
         }
 
         nextInstruction = untilTurn <= 30 ? direction
