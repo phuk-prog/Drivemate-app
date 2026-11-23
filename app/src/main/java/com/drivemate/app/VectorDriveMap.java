@@ -217,7 +217,8 @@ public final class VectorDriveMap {
                     ? "drivemate_vector_style_night.json"
                     : "drivemate_vector_style.json")
                     .replace("__TILE_URL__", tiles.tilesUrl())
-                    .replace("__TOMTOM_KEY__", android.net.Uri.encode(tomtomKey));
+                    .replace("__TOMTOM_KEY__", android.net.Uri.encode(tomtomKey))
+                    .replace("__TOMTOM_DETAIL_STYLE__", nightMode ? "night" : "main");
             // Parse first so invalid style substitutions don't leave a half-loaded map.
             new JSONObject(json);
             styleReady = false;
