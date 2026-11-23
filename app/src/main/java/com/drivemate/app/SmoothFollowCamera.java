@@ -70,7 +70,9 @@ public final class SmoothFollowCamera {
         this.northUp = northUp;
         lastFix = nowMs;
         double safeSpeed = Math.max(0, Math.min(45, speedMetresPerSecond));
-        boolean trustworthy = accuracyMetres <= 40 && offRouteMetres <= 55;
+        // Coarse but usable GPS (e.g. ±50m) can still advance the camera
+        // along the verified route; only high-confidence fixes snap the car.
+        boolean trustworthy = accuracyMetres <= 60 && offRouteMetres <= 75;
         gpsConfident = trustworthy;
         // Only snap the displayed car to TomTom geometry on a high-confidence
         // fix. Never use snapped position for actual routing decisions.
