@@ -23,6 +23,8 @@ public final class TurnArrowView extends View {
         if ("↻".equals(symbol)) arrow = Arrow.ROUNDABOUT;
         else if ("⤺".equals(symbol)) arrow = Arrow.UTURN;
         else if ("⚑".equals(symbol)) arrow = Arrow.ARRIVE;
+        else if ("↖".equals(symbol)) arrow = Arrow.SLIGHT_LEFT;
+        else if ("↗".equals(symbol)) arrow = Arrow.SLIGHT_RIGHT;
         else if ("↰".equals(symbol)) arrow = Arrow.LEFT;
         else if ("↱".equals(symbol)) arrow = Arrow.RIGHT;
         else arrow = Arrow.STRAIGHT;
