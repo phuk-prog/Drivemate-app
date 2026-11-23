@@ -31,6 +31,7 @@ import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 import android.widget.ImageView;
 import android.widget.ScrollView;
+import android.location.GnssStatus;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -283,6 +284,19 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private LocationManager locationManager;
     private Location currentLocation;
+    /** Last fix that passed FixQualityPolicy; the gate compares every new fix to it. */
+    private FixQualityPolicy.Sample lastAcceptedFix;
+    /** Satellites used in the current GPS fix, or -1 until the first GNSS report. */
+    private int satellitesUsed = -1;
+    private final GnssStatus.Callback gnssCallback = new GnssStatus.Callback() {
+        @Override public void onSatelliteStatusChanged(GnssStatus status) {
+            int used = 0;
+            for (int i = 0; i < status.getSatelliteCount(); i++) {
+                if (status.usedInFix(i)) used++;
+            }
+            satellitesUsed = used;
+        }
+    };
     private Marker userPin;
     private Marker destinationPin;
     private Polyline routeLine;
@@ -1501,6 +1515,8 @@ public final class MainActivity extends Activity implements LocationListener {
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
                         1000L, 1f, this);
+                locationManager.registerGnssStatusCallback(gnssCallback,
+                        new Handler(Looper.getMainLooper()));
                 requested = true;
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
@@ -1521,6 +1537,14 @@ public final class MainActivity extends Activity implements LocationListener {
                 fix.getLatitude(), fix.getLongitude(), fix.getTime(),
                 System.currentTimeMillis(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 101f)) return;
+        // Drop noisy, out-of-order, teleporting or network-only fixes before they
+        // reach the map, guidance or the off-route logic.
+        FixQualityPolicy.Sample sample = new FixQualityPolicy.Sample(
+                fix.getLatitude(), fix.getLongitude(), fix.getTime(),
+                fix.hasAccuracy() ? fix.getAccuracy() : 99f,
+                LocationManager.GPS_PROVIDER.equals(fix.getProvider()));
+        if (!FixQualityPolicy.accept(lastAcceptedFix, sample)) return;
+        lastAcceptedFix = sample;
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -1570,7 +1594,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
-            setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
+            setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m"
+                    + satelliteSuffix());
         }
         if (!active && followLocation) {
             // Fast idle GPS recenter, but ignore small stationary jitter.
@@ -1588,10 +1613,16 @@ public final class MainActivity extends Activity implements LocationListener {
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
                     + (fix.hasAccuracy() ? "±" + Math.round(fix.getAccuracy()) + " m" : "unknown")
+                    + satelliteSuffix()
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
         if (!active && !showingVector()) map.postInvalidateOnAnimation();
+    }
+
+    /** " · N satellites" once GNSS has reported; empty before that. */
+    private String satelliteSuffix() {
+        return satellitesUsed >= 0 ? " · " + satellitesUsed + " satellites" : "";
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -2266,7 +2297,10 @@ public final class MainActivity extends Activity implements LocationListener {
         foreground = false;
         stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
-        if (locationManager != null) locationManager.removeUpdates(this);
+        if (locationManager != null) {
+            locationManager.removeUpdates(this);
+            locationManager.unregisterGnssStatusCallback(gnssCallback);
+        }
         locationSubscribed = false;
         if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
