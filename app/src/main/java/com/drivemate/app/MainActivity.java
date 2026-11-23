@@ -31,6 +31,7 @@ import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 import android.widget.ImageView;
 import android.widget.ScrollView;
+import android.location.GnssStatus;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -283,6 +284,35 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private LocationManager locationManager;
     private Location currentLocation;
+    /** Last fix that passed FixQualityPolicy; the gate compares every new fix to it. */
+    private FixQualityPolicy.Sample lastAcceptedFix;
+    /** Display-only estimate of the vehicle position during short GPS gaps. */
+    private final DeadReckoner deadReckoner = new DeadReckoner();
+    private final Runnable deadReckonTick = new Runnable() {
+        @Override public void run() {
+            if (foreground && userPin != null) {
+                GeoMath.Point estimate = deadReckoner.estimate(System.currentTimeMillis());
+                // While guidance runs, SmoothFollowCamera owns the marker position.
+                if (estimate != null && (!active || smoothFollow == null)) {
+                    userPin.setPosition(new GeoPoint(estimate.lat, estimate.lon));
+                    if (vectorMap != null && useLocalMap) vectorMap.setVehicle(estimate);
+                    map.postInvalidateOnAnimation();
+                }
+            }
+            gpsHandler.postDelayed(this, 500);
+        }
+    };
+    /** Satellites used in the current GPS fix, or -1 until the first GNSS report. */
+    private int satellitesUsed = -1;
+    private final GnssStatus.Callback gnssCallback = new GnssStatus.Callback() {
+        @Override public void onSatelliteStatusChanged(GnssStatus status) {
+            int used = 0;
+            for (int i = 0; i < status.getSatelliteCount(); i++) {
+                if (status.usedInFix(i)) used++;
+            }
+            satellitesUsed = used;
+        }
+    };
     private Marker userPin;
     private Marker destinationPin;
     private Polyline routeLine;
@@ -1499,16 +1529,24 @@ public final class MainActivity extends Activity implements LocationListener {
             }
             boolean requested = false;
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                // Ask for the fastest rate the GNSS hardware supports (0 ms, 0 m).
+                // Android delivers at the receiver's own maximum, typically 1 Hz
+                // on most phones and higher on some. This is the main battery cost.
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
-                        1000L, 1f, this);
+                        0L, 0f, this);
+                locationManager.registerGnssStatusCallback(gnssCallback,
+                        new Handler(Looper.getMainLooper()));
                 requested = true;
             }
             if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                // Maximum rate here too; the fix gate decides which fixes are used.
                 locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                        2000L, 3f, this);
+                        0L, 0f, this);
                 requested = true;
             }
             locationSubscribed = requested;
+            gpsHandler.removeCallbacks(deadReckonTick);
+            if (requested) gpsHandler.post(deadReckonTick);
             if (requested) restoreLastKnownMapArea();
         } catch (SecurityException error) {
             locationSubscribed = false;
@@ -1521,6 +1559,17 @@ public final class MainActivity extends Activity implements LocationListener {
                 fix.getLatitude(), fix.getLongitude(), fix.getTime(),
                 System.currentTimeMillis(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 101f)) return;
+        // Drop noisy, out-of-order, teleporting or network-only fixes before they
+        // reach the map, guidance or the off-route logic.
+        FixQualityPolicy.Sample sample = new FixQualityPolicy.Sample(
+                fix.getLatitude(), fix.getLongitude(), fix.getTime(),
+                fix.hasAccuracy() ? fix.getAccuracy() : 99f,
+                LocationManager.GPS_PROVIDER.equals(fix.getProvider()));
+        if (!FixQualityPolicy.accept(lastAcceptedFix, sample)) return;
+        lastAcceptedFix = sample;
+        deadReckoner.onFix(new GeoMath.Point(fix.getLatitude(), fix.getLongitude()),
+                fix.getTime(), fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearing() ? fix.getBearing() : 0d, fix.hasBearing());
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -1570,7 +1619,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
-            setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m");
+            setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m"
+                    + satelliteSuffix());
         }
         if (!active && followLocation) {
             // Fast idle GPS recenter, but ignore small stationary jitter.
@@ -1588,10 +1638,16 @@ public final class MainActivity extends Activity implements LocationListener {
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
                     + (fix.hasAccuracy() ? "±" + Math.round(fix.getAccuracy()) + " m" : "unknown")
+                    + satelliteSuffix()
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
         if (!active && !showingVector()) map.postInvalidateOnAnimation();
+    }
+
+    /** " · N satellites" once GNSS has reported; empty before that. */
+    private String satelliteSuffix() {
+        return satellitesUsed >= 0 ? " · " + satellitesUsed + " satellites" : "";
     }
 
     private BitmapDrawable makeCarIcon() {
@@ -2266,7 +2322,11 @@ public final class MainActivity extends Activity implements LocationListener {
         foreground = false;
         stopSmoothLoop();
         gpsHandler.removeCallbacks(gpsWatchdog);
-        if (locationManager != null) locationManager.removeUpdates(this);
+        gpsHandler.removeCallbacks(deadReckonTick);
+        if (locationManager != null) {
+            locationManager.removeUpdates(this);
+            locationManager.unregisterGnssStatusCallback(gnssCallback);
+        }
         locationSubscribed = false;
         if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
