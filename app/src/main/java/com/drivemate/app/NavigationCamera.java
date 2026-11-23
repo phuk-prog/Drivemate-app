@@ -3,9 +3,11 @@ package com.drivemate.app;
 import java.util.List;
 
 /**
- * Small pure-Java navigation-camera planner. The driving map rotates so the
- * next road runs up the display, with the driver below the usable map centre.
- * Android overlays are accounted for in the available viewport height.
+ * Route-aware navigation camera planner. The driver and the upcoming junction
+ * must both remain in the usable viewport between the top guidance overlay
+ * and the bottom controls. Coordinates come from the original TomTom route.
+ *
+ * The perspective is applied by MapLibre; the osmdroid fallback stays 2D.
  */
 public final class NavigationCamera {
     private NavigationCamera() {}
@@ -13,21 +15,32 @@ public final class NavigationCamera {
     public static final class Frame {
         public final GeoMath.Point center;
         public final double zoom;
+        /** Direction of the road at the driver's current location. */
         public final double roadBearingDegrees;
         public final double junctionMetres;
         /** Exact arc length of the camera centre on the original route. */
         public final double cameraCenterAlongMetres;
+        /** MapLibre pitch: 0 = overhead, 60 = strongly tilted. */
+        public final double tiltDegrees;
+
         public Frame(GeoMath.Point center, double zoom, double roadBearingDegrees,
                      double junctionMetres) {
-            this(center, zoom, roadBearingDegrees, junctionMetres, Double.NaN);
+            this(center, zoom, roadBearingDegrees, junctionMetres, Double.NaN, 0);
         }
         public Frame(GeoMath.Point center, double zoom, double roadBearingDegrees,
                      double junctionMetres, double cameraCenterAlongMetres) {
+            this(center, zoom, roadBearingDegrees, junctionMetres,
+                    cameraCenterAlongMetres, 0);
+        }
+        public Frame(GeoMath.Point center, double zoom, double roadBearingDegrees,
+                     double junctionMetres, double cameraCenterAlongMetres,
+                     double tiltDegrees) {
             this.center = center;
             this.zoom = zoom;
             this.roadBearingDegrees = roadBearingDegrees;
             this.junctionMetres = junctionMetres;
             this.cameraCenterAlongMetres = cameraCenterAlongMetres;
+            this.tiltDegrees = tiltDegrees;
         }
     }
 
@@ -42,38 +55,56 @@ public final class NavigationCamera {
         double routeLength = GeoMath.length(path);
         double progress = clamp(routeProgressMetres, 0, routeLength);
         double junctionAhead = Math.max(0, nextJunctionOffsetMetres - progress);
-        // At walking/stopped speed show junction detail; at motorway speed look
-        // further ahead to allow time for safe decisions.
-        // Look farther up the road BEFORE motorway speeds make a junction
-        // urgent; at slow speed retain useful street-level details.
-        double speedHorizon = Math.max(190,
-                Math.max(0, speedMetresPerSecond) * 16 + 110);
-        double horizon = clamp(Math.max(junctionAhead + 100, speedHorizon), 190, 1100);
+        double speed = Math.max(0, speedMetresPerSecond);
         double viewHeight = Math.max(220, screenHeightPx - headerHeightPx - panelHeightPx);
-        double metresPerPixel = horizon / (viewHeight * 0.75);
+
+        // Fit the *whole* approach, including a little road past the turn.
+        // At speed the safe look-ahead expands, even for a very close turn.
+        double horizon = clamp(Math.max(
+                junctionAhead + Math.max(55, speed * 4.0),
+                Math.max(180, speed * 19 + 120)), 180, 1350);
+
+        // Stronger forward perspective on long approaches; ease toward a
+        // clearer overhead junction diagram as the manoeuvre gets close.
+        double tilt = clamp(28 + junctionAhead * 0.033
+                + Math.min(5, speed * 0.16), 28, 48);
+
+        // Pitch foreshortens the near/far road. Reserve extra world-space
+        // height so tilting does not crop the approaching junction.
+        double effectiveHorizon = horizon
+                * (1 + 0.32 * Math.sin(Math.toRadians(tilt)));
+        double metresPerPixel = effectiveHorizon / (viewHeight * 0.76);
         double latFactor = Math.max(0.1, Math.cos(Math.toRadians(gps.lat)));
         double zoom = clamp(Math.log(156543.03392 * latFactor / metresPerPixel)
                 / Math.log(2), 14.2, 19.0);
 
-        // Centre the map on a road point ahead of the driver, then account
-        // for the usable area between the header and navigation panel.
-        double leadMetres = clamp(junctionAhead * 0.53
-                + Math.max(40, Math.max(0, speedMetresPerSecond) * 1.5),
-                65, horizon * 0.52);
+        // Keep the car in the lower usable viewport and the turn higher up.
+        // Include overlay displacement but never look so far past a nearby
+        // turn that it disappears underneath the bottom navigation controls.
+        double lead = clamp(junctionAhead * 0.50
+                + Math.max(28, speed * 1.5), 36, horizon * 0.52);
         double visibleCenterY = headerHeightPx + viewHeight * 0.5;
         double screenCenterY = screenHeightPx * 0.5;
-        double mapCenterAlong = clamp(progress + leadMetres
-                + (visibleCenterY - screenCenterY) * metresPerPixel, 0, routeLength);
-        GeoMath.Point center = GeoMath.pointAtDistance(path, mapCenterAlong);
+        double centerAlong = progress + lead
+                + (visibleCenterY - screenCenterY) * metresPerPixel;
+        centerAlong = Math.min(centerAlong,
+                nextJunctionOffsetMetres + Math.max(25, horizon * 0.13));
+        centerAlong = clamp(centerAlong, progress, routeLength);
+        GeoMath.Point center = GeoMath.pointAtDistance(path, centerAlong);
 
-        GeoMath.Point a = GeoMath.pointAtDistance(path, progress + 10);
-        GeoMath.Point b = GeoMath.pointAtDistance(path, progress + 70);
+        // Heading must describe the approach road, not the exit road.
+        // Do not rotate the car into a turn before it has reached it.
+        double beforeTurn = Math.max(8, junctionAhead);
+        GeoMath.Point a = GeoMath.pointAtDistance(path,
+                progress + Math.min(5, beforeTurn * 0.12));
+        GeoMath.Point b = GeoMath.pointAtDistance(path,
+                progress + clamp(beforeTurn - 5, 12, 36));
         if (GeoMath.distance(a, b) < 2) {
-            a = GeoMath.pointAtDistance(path, Math.max(0, progress - 60));
+            a = GeoMath.pointAtDistance(path, Math.max(0, progress - 25));
             b = GeoMath.pointAtDistance(path, progress);
         }
         double bearing = GeoMath.bearingDegrees(a, b);
-        return new Frame(center, zoom, bearing, junctionAhead, mapCenterAlong);
+        return new Frame(center, zoom, bearing, junctionAhead, centerAlong, tilt);
     }
 
     static double clamp(double value, double min, double max) {
