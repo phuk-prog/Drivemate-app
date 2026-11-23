@@ -34,6 +34,21 @@ public final class NavigationCameraTest {
                 east, east.get(0), 0, 100, 1, 1200, 180, 260);
         assertEquals(90.0, frame.roadBearingDegrees, 1);
     }
+    @Test public void providesExactRouteCenterOffsetAcrossBends() {
+        List<GeoMath.Point> bend = Arrays.asList(
+                new GeoMath.Point(53.0, -2.0),
+                new GeoMath.Point(53.001, -2.0),
+                new GeoMath.Point(53.001, -1.999),
+                new GeoMath.Point(53.0, -1.999));
+        NavigationCamera.Frame frame = NavigationCamera.calculate(
+                bend, bend.get(1), 120, 210, 8, 1300, 260, 110);
+        RouteMotionIndex indexed = new RouteMotionIndex(bend);
+        GeoMath.Point expected = indexed.pointAt(frame.cameraCenterAlongMetres);
+        assertEquals(expected.lat, frame.center.lat, 0.0000001);
+        assertEquals(expected.lon, frame.center.lon, 0.0000001);
+        assertTrue(frame.cameraCenterAlongMetres >= 120);
+    }
+
     @Test public void speedExpandsTheLookAheadAndReducesZoom() {
         GeoMath.Point gps = north.get(0);
         NavigationCamera.Frame stopped = NavigationCamera.calculate(
