@@ -8,8 +8,16 @@ android {
         applicationId 'com.drivemate.android'
         minSdk 26
         targetSdk 34
-        versionCode 100601
-        versionName '1.6.1'
+        versionCode 100701
+        versionName '1.7.1-rc1'
+    }
+    // The map/zoom test variant installs alongside stable DriveMate.
+    // The signed release variant retains the established update-compatible ID.
+    buildTypes {
+        debug {
+            applicationIdSuffix '.mapzoom'
+            versionNameSuffix '-mapzoom-test'
+        }
     }
     // PMTiles archives already compress their own tile/index data. Keep the
     // bundled overview uncompressed in APK so MapLibre can seek by byte range.
@@ -25,4 +33,5 @@ dependencies {
     implementation 'org.osmdroid:osmdroid-android:6.1.20'
     implementation 'org.maplibre.gl:android-sdk-opengl:13.7.1'
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

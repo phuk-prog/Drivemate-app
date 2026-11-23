@@ -1,0 +1,52 @@
+name: DriveMate all 11 combined validation (debug only)
+on:
+  push:
+    branches:
+      - dev/all-approved-stage3-arrival-20261123
+permissions:
+  contents: read
+jobs:
+  validate-all:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify road styles and map regression fixtures
+        run: |
+          python3 tools/verify_drive_map_roads.py
+          python3 tools/check_drive_map_pixels.py --self-test
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base=Path('app/src/main/assets')
+          day=json.loads((base/'drivemate_vector_style.json').read_text())
+          night=json.loads((base/'drivemate_vector_style_night.json').read_text())
+          assert {x['id'] for x in day['layers']} == {x['id'] for x in night['layers']}
+          assert day['sources']==night['sources']
+          print('Day/night vector road layers and sources agree')
+          PY
+      - name: Fetch checksum-verified world map
+        run: python3 tools/fetch_pinned_map.py
+      - name: Compile and run all JVM regression tests, then assemble DEBUG only
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify test app cannot overwrite stable or prior previews
+        run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)
+          test -x "$AAPT"
+          "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | grep -F "package: name='com.drivemate.android.all11'"
+          "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | grep -F "application-label:'DriveMate All 11 Test'"
+      - name: Upload combined all-11 debug preview ONLY
+        uses: actions/upload-artifact@v4
+        with:
+          name: DriveMate-All11-development-DEBUG-not-release
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
