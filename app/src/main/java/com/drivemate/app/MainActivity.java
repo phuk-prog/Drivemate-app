@@ -1782,6 +1782,13 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
+        // The faster-route chip must disappear on its own as soon as the
+        // offered geometry starts too far behind the moving car or goes stale.
+        if (pendingRoute != null && (pendingRouteOrigin == null
+                || System.currentTimeMillis() - pendingRouteAtMs > 45000
+                || GeoMath.distance(gpsPoint(fix), pendingRouteOrigin) > 110)) {
+            clearPendingRoute();
+        }
         if (SystemClock.elapsedRealtime() - lastMapAreaSavedAt > 60000) {
             // Save only a coarse ~1 km area in app-private storage. Never use
             // this historical map centre as the origin of a TomTom route.
