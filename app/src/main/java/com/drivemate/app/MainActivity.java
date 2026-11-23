@@ -258,6 +258,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView topNextTurnText;
     private TurnArrowView topTurnArrow;
     private JunctionManeuverView junctionDiagram;
+    private TextView verifiedJunctionRoad;
     private LinearLayout recentList;
     private Button homeTile;
     private Button workTile;
@@ -973,6 +974,12 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
         thenPos.topMargin = dp(1);
         turnCard.addView(topNextTurnText, thenPos);
+        verifiedJunctionRoad = text("", 12, CYAN, true);
+        verifiedJunctionRoad.setSingleLine(true);
+        verifiedJunctionRoad.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        verifiedJunctionRoad.setVisibility(View.GONE);
+        verifiedJunctionRoad.setContentDescription("TomTom mapped junction signpost or exit road");
+        turnCard.addView(verifiedJunctionRoad);
 
         // Only shown on the final approach to a verified complex junction.
         // The shape is traced from TomTom route geometry, never inferred
@@ -1505,6 +1512,8 @@ public final class MainActivity extends Activity implements LocationListener {
         if (topTurnArrow != null) topTurnArrow.setNightMode(night);
         if (maneuverIcon != null) maneuverIcon.setNightMode(night);
         if (junctionDiagram != null) junctionDiagram.setNightMode(night);
+        if (verifiedJunctionRoad != null) verifiedJunctionRoad.setTextColor(
+                night ? CYAN : Color.rgb(0, 100, 131));
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
     }
 
@@ -2759,6 +2768,15 @@ public final class MainActivity extends Activity implements LocationListener {
         topTurnArrow.update(glyph, step.exitNumber);
         boolean roundabout = "↻".equals(glyph);
         boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
+        if (verifiedJunctionRoad != null) {
+            String sign = step.signpostText == null ? "" : step.signpostText.trim();
+            String road = step.street == null ? "" : step.street.trim();
+            String guidance = !sign.isEmpty() ? "TOMTOM SIGN · " + sign
+                    : !road.isEmpty() ? "EXIT ROAD · " + road : "";
+            verifiedJunctionRoad.setText(guidance);
+            verifiedJunctionRoad.setVisibility((roundabout || fork) && !guidance.isEmpty()
+                    ? View.VISIBLE : View.GONE);
+        }
         topTurnTitle.setText(fix.hasAccuracy() && fix.getAccuracy() > 55
                 ? "GPS UNCERTAIN · CHECK ROAD SIGNS"
                 : roundabout && step.exitNumber > 0
@@ -2974,6 +2992,7 @@ public final class MainActivity extends Activity implements LocationListener {
             junctionHaloLine = null;
         }
         if (junctionDiagram != null) junctionDiagram.setRoute(null, false, 0);
+        if (verifiedJunctionRoad != null) verifiedJunctionRoad.setVisibility(View.GONE);
         if (highlightedJunctionIndex >= 0 && vectorMap != null)
             vectorMap.setJunctionPreview(null);
         highlightedJunctionIndex = -1;
