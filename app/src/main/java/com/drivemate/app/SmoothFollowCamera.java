@@ -260,13 +260,18 @@ public final class SmoothFollowCamera {
         // vehicle arrow cannot point down the exit before making the turn.
         double toTurn = Math.max(0, nextUnconfirmedTurn
                 - Math.max(0, visualAlong - measuredProgress));
-        double ahead = clamp(toTurn - 5, 7, 22);
-        GeoMath.Point headingStart = path.pointAt(Math.max(0, visualAlong - 3));
+        double ahead = Math.max(0, Math.min(22, toTurn - 3));
+        GeoMath.Point headingStart = path.pointAt(Math.max(0, visualAlong - 8));
         GeoMath.Point headingEnd = path.pointAt(
                 Math.min(path.lengthMetres, visualAlong + ahead));
+        if (GeoMath.distance(headingStart, headingEnd) <= 1) {
+            // Use the road already travelled, not an unconfirmed exit.
+            headingStart = path.pointAt(Math.max(0, visualAlong - 22));
+            headingEnd = path.pointAt(visualAlong);
+        }
         double travelBearing = GeoMath.distance(headingStart, headingEnd) > 1
                 ? GeoMath.bearingDegrees(headingStart, headingEnd)
-                : path.bearingAt(visualAlong, 12);
+                : path.bearingAt(Math.max(0, visualAlong - 8), 6);
         return new Frame(center, vehicle, zoom, bearing, tilt, travelBearing,
                 extrapolating);
     }
