@@ -2769,7 +2769,7 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean roundabout = "↻".equals(glyph);
         boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
         if (verifiedJunctionRoad != null) {
-            String sign = step.signpostText == null ? "" : step.signpostText.trim();
+            String sign = step.signpost == null ? "" : step.signpost.trim();
             String road = step.street == null ? "" : step.street.trim();
             String guidance = !sign.isEmpty() ? "TOMTOM SIGN · " + sign
                     : !road.isEmpty() ? "EXIT ROAD · " + road : "";
