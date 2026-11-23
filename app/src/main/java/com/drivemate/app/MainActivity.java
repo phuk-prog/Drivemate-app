@@ -272,6 +272,19 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView distanceText;
     private TextView etaText;
     private TextView speedText;
+    private TextView speedLimitText;
+    private TextView laneGuidanceText;
+    private TextView trafficNoticeText;
+    private LinearLayout rerouteSuggestionRow;
+    private TextView rerouteSuggestionText;
+    private TomTomApi.Route pendingRoute;
+    private long pendingRouteAtMs;
+    private int pendingSavingSeconds;
+    private int rerouteMode = 1; // 0 automatic, 1 ask first
+    private int speedToleranceMph = 5;
+    private long lastSpeedWarningAt;
+    private long lastTrafficWarningAt;
+    private double lastTrafficWarningStart = -1;
     private Button stopButton;
     private Button startButton;
     private Button saveButton;
@@ -358,6 +371,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 : DrivingVoicePolicy.fromLegacy(settings.getInt("speech_mode", 1),
                         settings.getBoolean("voice", true));
         guidanceVolume = Math.max(0.1f, Math.min(1f, settings.getFloat("speech_volume", 0.85f)));
+        rerouteMode = Math.max(0, Math.min(1, settings.getInt("reroute_mode", 1)));
+        speedToleranceMph = Math.max(0, Math.min(15, settings.getInt("speed_tolerance_mph", 5)));
         cameraMode = settings.contains("camera_mode")
                 ? Math.max(0, Math.min(2, settings.getInt("camera_mode", 0)))
                 : settings.getBoolean("north_up", false)
@@ -647,6 +662,27 @@ public final class MainActivity extends Activity implements LocationListener {
         // leaving the road and the next manoeuvre unobstructed above.
         navigationPanel.addView(tripMetricsRow, new LinearLayout.LayoutParams(-1, dp(57)));
         tripMetricsRow.setVisibility(View.GONE);
+        rerouteSuggestionRow = new LinearLayout(this);
+        rerouteSuggestionRow.setGravity(Gravity.CENTER_VERTICAL);
+        rerouteSuggestionRow.setBackground(rounded(Color.rgb(31, 75, 93), 12));
+        rerouteSuggestionRow.setPadding(dp(5), dp(3), dp(5), dp(3));
+        rerouteSuggestionText = text("Faster route", 12, Color.WHITE, true);
+        rerouteSuggestionRow.addView(rerouteSuggestionText,
+                new LinearLayout.LayoutParams(0, -2, 1));
+        Button acceptRouteButton = chip("Switch");
+        acceptRouteButton.setContentDescription("Accept suggested alternate route");
+        acceptRouteButton.setOnClickListener(v -> acceptPendingRoute());
+        rerouteSuggestionRow.addView(acceptRouteButton,
+                new LinearLayout.LayoutParams(dp(71), dp(40)));
+        Button keepRouteButton = chip("Keep");
+        keepRouteButton.setContentDescription("Keep current route");
+        keepRouteButton.setOnClickListener(v -> clearPendingRoute());
+        LinearLayout.LayoutParams keepPos = new LinearLayout.LayoutParams(dp(59), dp(40));
+        keepPos.leftMargin = dp(4);
+        rerouteSuggestionRow.addView(keepRouteButton, keepPos);
+        rerouteSuggestionRow.setVisibility(View.GONE);
+        navigationPanel.addView(rerouteSuggestionRow,
+                new LinearLayout.LayoutParams(-1, -2));
         gpsAccuracyText = text("", 11, Color.rgb(190, 219, 230), false);
         navigationPanel.addView(gpsAccuracyText);
         bottomActionRow = new LinearLayout(this);
@@ -762,7 +798,11 @@ public final class MainActivity extends Activity implements LocationListener {
         speedText = text(metricUnits ? "0 km/h" : "0 mph", 16, Color.WHITE, true);
         speedText.setGravity(Gravity.CENTER);
         speedBadge.addView(speedText);
-        speedBadgePos = new FrameLayout.LayoutParams(dp(86), dp(86), Gravity.BOTTOM | Gravity.LEFT);
+        speedLimitText = text("Limit —", 12, Color.WHITE, true);
+        speedLimitText.setGravity(Gravity.CENTER);
+        speedLimitText.setContentDescription("Posted speed limit unknown");
+        speedBadge.addView(speedLimitText);
+        speedBadgePos = new FrameLayout.LayoutParams(dp(92), dp(102), Gravity.BOTTOM | Gravity.LEFT);
         speedBadgePos.leftMargin = dp(12);
         frame.addView(speedBadge, speedBadgePos);
         speedBadgeView = speedBadge;
@@ -882,6 +922,23 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
         thenPos.topMargin = dp(1);
         turnCard.addView(topNextTurnText, thenPos);
+
+        laneGuidanceText = text("", 15, CYAN, true);
+        laneGuidanceText.setGravity(Gravity.CENTER);
+        laneGuidanceText.setContentDescription("Verified route lane recommendations");
+        laneGuidanceText.setVisibility(View.GONE);
+        LinearLayout.LayoutParams lanePos = new LinearLayout.LayoutParams(-1, -2);
+        lanePos.topMargin = dp(5);
+        turnCard.addView(laneGuidanceText, lanePos);
+
+        trafficNoticeText = text("", 12, Color.rgb(245, 200, 116), true);
+        trafficNoticeText.setSingleLine(true);
+        trafficNoticeText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        trafficNoticeText.setVisibility(View.GONE);
+        trafficNoticeText.setOnClickListener(v -> showTrafficTimeline());
+        LinearLayout.LayoutParams trafficPos = new LinearLayout.LayoutParams(-1, dp(25));
+        trafficPos.topMargin = dp(3);
+        container.addView(trafficNoticeText, trafficPos);
         return container;
     }
 
