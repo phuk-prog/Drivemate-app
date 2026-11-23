@@ -59,6 +59,9 @@ public final class VectorDriveMap {
     private boolean styleReady;
     private boolean trafficEnabled;
     private boolean nightMode;
+    // True z16–19 online road/label detail above the local PMTiles z14 ceiling.
+    // The local vector map remains beneath these tiles if they fail to load.
+    private boolean highDetailEnabled = true;
     private String tomtomKey;
     private boolean disposed;
     private GeoMath.Point pendingGps;
@@ -122,6 +125,15 @@ public final class VectorDriveMap {
     public void setOnUserGesture(Runnable callback) { onUserGesture = callback; }
     public boolean ready() { return styleReady && map != null; }
     public boolean nightMode() { return nightMode; }
+
+    public void setHighDetailEnabled(boolean enabled) {
+        highDetailEnabled = enabled;
+        if (!ready()) return;
+        org.maplibre.android.style.layers.Layer layer = map.getStyle() == null ? null
+                : map.getStyle().getLayer("dm-tomtom-high-detail");
+        if (layer != null) layer.setProperties(PropertyFactory.visibility(
+                enabled && !tomtomKey.isEmpty() ? "visible" : "none"));
+    }
 
     public void setNightMode(boolean enabled) {
         if (nightMode == enabled) return;
@@ -216,6 +228,7 @@ public final class VectorDriveMap {
                     ? "drivemate_vector_style_night.json"
                     : "drivemate_vector_style.json")
                     .replace("__TILE_URL__", tiles.tilesUrl())
+                    .replace("__TOMTOM_STYLE__", nightMode ? "night" : "main")
                     .replace("__TOMTOM_KEY__", android.net.Uri.encode(tomtomKey));
             // Parse first so invalid style substitutions don't leave a half-loaded map.
             new JSONObject(json);
@@ -230,6 +243,7 @@ public final class VectorDriveMap {
                 if (disposed) return;
                 installOverlays(style);
                 styleReady = true;
+                setHighDetailEnabled(highDetailEnabled);
                 setTraffic(trafficEnabled);
                 if (pendingGps != null) setVehicle(pendingGps);
                 if (pendingDest != null) setDestination(pendingDest);
