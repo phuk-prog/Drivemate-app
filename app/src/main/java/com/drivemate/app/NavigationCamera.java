@@ -139,11 +139,15 @@ public final class NavigationCamera {
 
         // Heading must describe the approach road, not the exit road.
         // Do not rotate the car into a turn before it has reached it.
-        double beforeTurn = Math.max(8, junctionAhead);
+        // Sample strictly on the approach road. The old minimum 12-metre
+        // forward sample could cross an exit when a turn was only 2–10m away.
+        double beforeTurn = Math.max(0, junctionAhead);
+        double forward = Math.max(0, Math.min(36, beforeTurn - 2));
+        double behind = Math.min(18, Math.max(6, beforeTurn * 0.25));
         GeoMath.Point a = GeoMath.pointAtDistance(path,
-                progress + Math.min(5, beforeTurn * 0.12));
+                Math.max(0, progress - behind));
         GeoMath.Point b = GeoMath.pointAtDistance(path,
-                progress + clamp(beforeTurn - 5, 12, 36));
+                Math.min(routeLength, progress + forward));
         if (GeoMath.distance(a, b) < 2) {
             a = GeoMath.pointAtDistance(path, Math.max(0, progress - 25));
             b = GeoMath.pointAtDistance(path, progress);
