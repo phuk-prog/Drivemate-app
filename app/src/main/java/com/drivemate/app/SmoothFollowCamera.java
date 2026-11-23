@@ -19,13 +19,18 @@ public final class SmoothFollowCamera {
         public final GeoMath.Point vehicle;
         public final double zoom;
         public final double bearing;
+        public final double tilt;
+        /** Actual approach-road direction, distinct from smoothed camera bearing. */
+        public final double travelBearing;
         public final boolean predicted;
         Frame(GeoMath.Point center, GeoMath.Point vehicle, double zoom,
-              double bearing, boolean predicted) {
+              double bearing, double tilt, double travelBearing, boolean predicted) {
             this.center = center;
             this.vehicle = vehicle;
             this.zoom = zoom;
             this.bearing = bearing;
+            this.tilt = tilt;
+            this.travelBearing = travelBearing;
             this.predicted = predicted;
         }
     }
@@ -46,6 +51,8 @@ public final class SmoothFollowCamera {
     private double zoomTarget = Double.NaN;
     private double bearing = Double.NaN;
     private double bearingTarget;
+    private double tilt = Double.NaN;
+    private double tiltTarget;
     private GeoMath.Point center;
     private GeoMath.Point vehicle;
     private GeoMath.Point vehicleFix;
@@ -96,6 +103,7 @@ public final class SmoothFollowCamera {
                     : nearbyProgress(desired.center, measuredProgress);
             zoom = zoomTarget = clamp(desired.zoom, 14.2, 19.0);
             bearing = bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
+            tilt = tiltTarget = clamp(desired.tiltDegrees, 0, 55);
             center = desired.center;
             GeoMath.Point road = path.pointAt(measuredProgress);
             lateralLatitude = roadSnap ? 0 : filteredGps.lat - road.lat;
@@ -136,6 +144,7 @@ public final class SmoothFollowCamera {
                     ? clamp(desired.cameraCenterAlongMetres, 0, path.lengthMetres)
                     : nearbyProgress(desired.center, measuredProgress);
         bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
+        tiltTarget = clamp(desired.tiltDegrees, 0, 55);
 
         if (Double.isFinite(previouslyUpcoming)
                 && junctionAheadMetres > previouslyUpcoming + 135) {
@@ -233,6 +242,12 @@ public final class SmoothFollowCamera {
             if (Math.abs(zoomDelta) > 0.03) zoom += step;
         }
 
+        // Smooth perspective separately from position, bearing and zoom.
+        // A 20-degree/second cap prevents abrupt pitching near a junction.
+        double tiltStep = clamp((tiltTarget - tilt) * alpha(dt, 0.8),
+                -20 * dt, 20 * dt);
+        if (Math.abs(tiltTarget - tilt) > 0.1) tilt += tiltStep;
+
         if (northUp) bearingTarget = 0;
         if (northUp || metresPerSecond > 1.3) {
             double yaw = shortestAngle(bearingTarget, bearing);
@@ -241,7 +256,19 @@ public final class SmoothFollowCamera {
                     -rotationSpeed * dt, rotationSpeed * dt);
             if (Math.abs(yaw) > 0.35) bearing = normalize(bearing + step);
         }
-        return new Frame(center, vehicle, zoom, bearing, extrapolating);
+        // Sample only the route *before* the unconfirmed junction so the
+        // vehicle arrow cannot point down the exit before making the turn.
+        double toTurn = Math.max(0, nextUnconfirmedTurn
+                - Math.max(0, visualAlong - measuredProgress));
+        double ahead = clamp(toTurn - 5, 7, 22);
+        GeoMath.Point headingStart = path.pointAt(Math.max(0, visualAlong - 3));
+        GeoMath.Point headingEnd = path.pointAt(
+                Math.min(path.lengthMetres, visualAlong + ahead));
+        double travelBearing = GeoMath.distance(headingStart, headingEnd) > 1
+                ? GeoMath.bearingDegrees(headingStart, headingEnd)
+                : path.bearingAt(visualAlong, 12);
+        return new Frame(center, vehicle, zoom, bearing, tilt, travelBearing,
+                extrapolating);
     }
 
     public boolean initialized() { return initialized; }
