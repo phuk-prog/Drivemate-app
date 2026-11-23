@@ -283,6 +283,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private Button findParkingButton;
     private Button previewParkingButton;
     private Button parkedCarButton;
+    private Button saveParkingHereButton;
     private final ArrivalPolicy arrivalPolicy = new ArrivalPolicy();
     private LinearLayout rerouteSuggestionRow;
     private TextView rerouteSuggestionText;
@@ -807,6 +808,26 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams parkedPos = new LinearLayout.LayoutParams(-1, dp(43));
         parkedPos.topMargin = dp(6);
         homePanel.addView(parkedCarButton, parkedPos);
+        saveParkingHereButton = chip("Save where I parked");
+        saveParkingHereButton.setContentDescription(
+                "Save current precise stationary GPS location to this phone only");
+        saveParkingHereButton.setOnClickListener(v -> {
+            if (currentLocation == null || !ArrivalPolicy.canSaveParking(
+                    currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
+                    currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
+                    currentLocation.getTime(), System.currentTimeMillis())) {
+                showError("Park safely and wait for precise stationary GPS before saving.");
+                return;
+            }
+            new AlertDialog.Builder(this).setTitle("Save parked-car location?")
+                    .setMessage("Only the current GPS estimate is saved on this phone. "
+                            + "It can be cleared from the home screen.")
+                    .setPositiveButton("Save", (d, w) -> saveParkedCarNow())
+                    .setNegativeButton("Cancel", null).show();
+        });
+        LinearLayout.LayoutParams saveParkedPos = new LinearLayout.LayoutParams(-1, dp(43));
+        saveParkedPos.topMargin = dp(5);
+        homePanel.addView(saveParkingHereButton, saveParkedPos);
         FrameLayout.LayoutParams homePos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         homePos.setMargins(dp(4), 0, dp(4), 0);
         frame.addView(homePanel, homePos);
