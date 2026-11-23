@@ -1,4 +1,4 @@
 <resources>
     <!-- Debug-only label and package suffix keep the stable app untouched. -->
-    <string name="app_name">DriveMate All 11 Test</string>
+    <string name="app_name">DriveMate Map & Zoom Test</string>
 </resources>
