@@ -279,6 +279,11 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView speedLimitText;
     private TextView laneGuidanceText;
     private TextView trafficNoticeText;
+    private TextView arrivalHintText;
+    private Button findParkingButton;
+    private Button previewParkingButton;
+    private Button parkedCarButton;
+    private final ArrivalPolicy arrivalPolicy = new ArrivalPolicy();
     private LinearLayout rerouteSuggestionRow;
     private TextView rerouteSuggestionText;
     private TomTomApi.Route pendingRoute;
@@ -322,6 +327,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private Location currentLocation;
     private Marker userPin;
     private Marker destinationPin;
+    private Marker entrancePin;
+    private Marker parkedCarPin;
     private Polyline routeLine;
     private Polyline junctionLine;
     private int highlightedJunctionIndex = -1;
@@ -702,6 +709,12 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setVisibility(View.GONE);
         saveButton.setOnClickListener(v -> saveCurrentDestination());
         navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        previewParkingButton = chip("🅿 Nearby");
+        previewParkingButton.setContentDescription("Find verified parking near destination");
+        previewParkingButton.setVisibility(View.GONE);
+        previewParkingButton.setOnClickListener(v -> findNearbyParking());
+        navActions.addView(previewParkingButton,
+                new LinearLayout.LayoutParams(0, dp(45), 1));
         repeatButton = chip("🔊");
         repeatButton.setContentDescription("Repeat next spoken turn");
         repeatButton.setVisibility(View.GONE);
@@ -787,6 +800,13 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams recentPos = new LinearLayout.LayoutParams(-1, dp(147));
         recentPos.topMargin = dp(3);
         homePanel.addView(recentScroll, recentPos);
+        parkedCarButton = chip("🅿 Find my parked car");
+        parkedCarButton.setContentDescription("Show my saved parked-car location");
+        parkedCarButton.setOnClickListener(v -> showParkedCar());
+        parkedCarButton.setVisibility(View.GONE);
+        LinearLayout.LayoutParams parkedPos = new LinearLayout.LayoutParams(-1, dp(43));
+        parkedPos.topMargin = dp(6);
+        homePanel.addView(parkedCarButton, parkedPos);
         FrameLayout.LayoutParams homePos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         homePos.setMargins(dp(4), 0, dp(4), 0);
         frame.addView(homePanel, homePos);
@@ -944,6 +964,22 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams trafficPos = new LinearLayout.LayoutParams(-1, dp(25));
         trafficPos.topMargin = dp(3);
         container.addView(trafficNoticeText, trafficPos);
+
+        LinearLayout arrivalRow = new LinearLayout(this);
+        arrivalRow.setGravity(Gravity.CENTER_VERTICAL);
+        arrivalRow.setBackground(rounded(DARK, 12));
+        arrivalRow.setPadding(dp(9), dp(4), dp(7), dp(4));
+        arrivalHintText = text("", 12, Color.WHITE, true);
+        arrivalHintText.setMaxLines(2);
+        arrivalRow.addView(arrivalHintText, new LinearLayout.LayoutParams(0, -2, 1));
+        findParkingButton = chip("🅿 Parking");
+        findParkingButton.setContentDescription("Find verified parking near destination while stopped");
+        findParkingButton.setOnClickListener(v -> findNearbyParking());
+        arrivalRow.addView(findParkingButton, new LinearLayout.LayoutParams(dp(98), dp(38)));
+        arrivalRow.setTag("arrival");
+        arrivalRow.setVisibility(View.GONE);
+        container.addView(arrivalRow, new LinearLayout.LayoutParams(-1, dp(48)));
+        arrivalHintText.setTag(arrivalRow);
         return container;
     }
 
@@ -974,6 +1010,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (tripMetricsRow != null)
             tripMetricsRow.setVisibility(navigating ? View.VISIBLE : View.GONE);
         if (voiceButton != null) voiceButton.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if (!navigating) {
+            if (arrivalHintText != null && arrivalHintText.getTag() instanceof View)
+                ((View) arrivalHintText.getTag()).setVisibility(View.GONE);
+        }
         if (!navigating) {
             if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
             if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
@@ -1038,6 +1078,9 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void refreshHomePanel() {
         if (places == null || recentList == null) return;
+        if (parkedCarButton != null)
+            parkedCarButton.setVisibility(places.parkedCar() != null
+                    ? View.VISIBLE : View.GONE);
         TomTomApi.Destination home = places.home();
         TomTomApi.Destination work = places.work();
         homeTile.setContentDescription(home == null ? "Set Home" : "Navigate Home to " + home);
