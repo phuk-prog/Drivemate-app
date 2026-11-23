@@ -25,7 +25,8 @@ public final class RouteIntelligence {
                 case "STRAIGHT": return "↑";
                 case "SLIGHT_RIGHT": return "↗";
                 case "RIGHT": case "SHARP_RIGHT": return "↱";
-                case "UTURN": case "U_TURN": return "⤺";
+                case "UTURN": case "U_TURN": case "LEFT_U_TURN": return "⤺";
+                case "RIGHT_U_TURN": return "⤻";
                 default: return "?";
             }
         }
@@ -96,7 +97,7 @@ public final class RouteIntelligence {
         LaneSection result = null;
         double nearest = Double.POSITIVE_INFINITY;
         for (LaneSection s : sections) {
-            if (!s.trusted() || s.end < progress - 12 || s.start > progress + horizon)
+            if (!s.trusted() || s.end <= progress + 2 || s.start > progress + horizon)
                 continue;
             double distance = Math.max(0, s.start - progress);
             if (distance < nearest) { nearest = distance; result = s; }
