@@ -57,4 +57,37 @@ public final class NavigationCameraTest {
                 north, gps, 0, 80, 30, 1300, 180, 260);
         assertTrue(stopped.zoom > fast.zoom);
     }
+
+    @Test public void tiltedApproachZoomsCloserAndBecomesMoreOverheadAtTurn() {
+        GeoMath.Point driver = north.get(0);
+        NavigationCamera.Frame far = NavigationCamera.calculate(
+                north, driver, 0, 550, 5, 1536, 480, 120);
+        NavigationCamera.Frame near = NavigationCamera.calculate(
+                north, driver, 450, 550, 5, 1536, 480, 120);
+        assertTrue(near.zoom > far.zoom);
+        assertTrue(near.tiltDegrees < far.tiltDegrees);
+        assertTrue(near.tiltDegrees >= 28);
+        assertTrue(far.tiltDegrees <= 48);
+    }
+
+    @Test public void largeGuidanceCardStillKeepsVehicleAndJunctionAhead() {
+        NavigationCamera.Frame frame = NavigationCamera.calculate(
+                north, north.get(0), 150, 670, 2, 1400, 475, 140);
+        assertTrue(frame.cameraCenterAlongMetres > 150);
+        assertTrue(frame.cameraCenterAlongMetres < 670 + 130);
+        assertTrue(frame.zoom >= 14.2 && frame.zoom <= 19.0);
+    }
+
+    @Test public void approachHeadingDoesNotPrematurelyTurnOntoExit() {
+        List<GeoMath.Point> rightAngle = Arrays.asList(
+                new GeoMath.Point(53.0, -2.0),
+                new GeoMath.Point(53.001, -2.0),
+                new GeoMath.Point(53.001, -1.998));
+        double offset = GeoMath.distance(rightAngle.get(0), rightAngle.get(1));
+        NavigationCamera.Frame frame = NavigationCamera.calculate(
+                rightAngle, rightAngle.get(0), offset - 40, offset, 4,
+                1300, 360, 130);
+        assertTrue(frame.roadBearingDegrees < 8 ||
+                frame.roadBearingDegrees > 352);
+    }
 }
