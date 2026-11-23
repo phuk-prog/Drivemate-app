@@ -56,6 +56,10 @@ public final class VectorDriveMap {
     private List<GeoMath.Point> pendingRoute;
     private GeoMath.Point pendingCamera;
     private GeoMath.Point lastRenderedCamera;
+    private GeoMath.Point lastRenderedVehicle;
+    private double lastRenderedZoom = Double.NaN;
+    private double lastRenderedBearing = Double.NaN;
+    private Runnable onUserGesture;
     private double pendingZoom = 14.5, pendingBearing;
     private static final String LOG_TAG = "DriveMateVector";
     private static final long MONITOR_INTERVAL_MS = 1800L;
@@ -88,6 +92,10 @@ public final class VectorDriveMap {
             map = mapLibreMap;
             map.setMinZoomPreference(2.0);
             map.setMaxZoomPreference(19.0);
+            map.addOnCameraMoveStartedListener(reason -> {
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE
+                        && onUserGesture != null) onUserGesture.run();
+            });
             loadStyle();
         });
         // A successfully downloaded tile can be empty or fail to render.
@@ -96,6 +104,7 @@ public final class VectorDriveMap {
     }
 
     public View view() { return view; }
+    public void setOnUserGesture(Runnable callback) { onUserGesture = callback; }
     public boolean ready() { return styleReady && map != null; }
     /** Current GPU map-camera state for seamless vector/legacy switching. */
     public double currentZoom() {
@@ -183,6 +192,10 @@ public final class VectorDriveMap {
             // Parse first so invalid style substitutions don't leave a half-loaded map.
             new JSONObject(json);
             styleReady = false;
+            lastRenderedVehicle = null;
+            lastRenderedCamera = null;
+            lastRenderedZoom = Double.NaN;
+            lastRenderedBearing = Double.NaN;
             map.setStyle(new Style.Builder().fromJson(json), style -> {
                 if (disposed) return;
                 installOverlays(style);
@@ -250,10 +263,12 @@ public final class VectorDriveMap {
 
     public void setVehicle(GeoMath.Point point) {
         pendingGps = point;
-        if (ready() && vehicleSource != null) {
-            vehicleSource.setGeoJson(Feature.fromGeometry(
-                    Point.fromLngLat(point.lon, point.lat)));
-        }
+        if (point == null || !ready() || vehicleSource == null) return;
+        if (lastRenderedVehicle != null && GeoMath.distance(lastRenderedVehicle, point) < 0.45)
+            return; // Avoid rebuilding the GeoJSON source for subpixel movement.
+        vehicleSource.setGeoJson(Feature.fromGeometry(
+                Point.fromLngLat(point.lon, point.lat)));
+        lastRenderedVehicle = point;
     }
 
     public void setDestination(GeoMath.Point point) {
@@ -290,6 +305,39 @@ public final class VectorDriveMap {
         if (follow) map.easeCamera(update, 650, false);
         else map.moveCamera(update);
         lastRenderedCamera = center;
+        lastRenderedZoom = zoom;
+        lastRenderedBearing = bearing;
+    }
+
+    /**
+     * Frame-driven navigation camera: a direct GPU camera update, never a
+     * restarted 650ms animation. Android's frame clock runs independently
+     * from the GPS (normally 1Hz) and samples a time-based smooth controller.
+     */
+    public void followFrame(SmoothFollowCamera.Frame frame) {
+        if (frame == null) return;
+        pendingCamera = frame.center;
+        pendingZoom = frame.zoom;
+        pendingBearing = frame.bearing;
+        pendingGps = frame.vehicle;
+        if (!ready()) return;
+        setVehicle(frame.vehicle);
+        boolean moved = lastRenderedCamera == null
+                || GeoMath.distance(lastRenderedCamera, frame.center) > 0.32;
+        boolean zoomed = !Double.isFinite(lastRenderedZoom)
+                || Math.abs(frame.zoom - lastRenderedZoom) > 0.006;
+        double yaw = !Double.isFinite(lastRenderedBearing) ? 360
+                : (frame.bearing - lastRenderedBearing + 540) % 360 - 180;
+        if (!moved && !zoomed && Math.abs(yaw) < 0.28) return;
+        map.moveCamera(CameraUpdateFactory.newCameraPosition(
+                new CameraPosition.Builder()
+                        .target(new LatLng(frame.center.lat, frame.center.lon))
+                        .zoom(frame.zoom)
+                        .bearing((frame.bearing % 360 + 360) % 360)
+                        .build()));
+        lastRenderedCamera = frame.center;
+        lastRenderedZoom = frame.zoom;
+        lastRenderedBearing = frame.bearing;
     }
 
     public void previewRoute(List<GeoMath.Point> path) {
