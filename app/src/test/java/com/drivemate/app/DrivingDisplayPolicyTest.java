@@ -13,7 +13,7 @@ public class DrivingDisplayPolicyTest {
         assertFalse(DrivingDisplayPolicy.showFollowingTurn(Double.NaN, 5));
     }
 
-    @Test public void 2dModesNeverTilt() {
+    @Test public void twoDModesNeverTilt() {
         assertEquals(38, DrivingDisplayPolicy.tilt(38, DrivingDisplayPolicy.CAMERA_AUTO_3D), 0.01);
         assertEquals(0, DrivingDisplayPolicy.tilt(38, DrivingDisplayPolicy.CAMERA_HEADING_2D), 0.01);
         assertEquals(0, DrivingDisplayPolicy.tilt(38, DrivingDisplayPolicy.CAMERA_NORTH_2D), 0.01);
