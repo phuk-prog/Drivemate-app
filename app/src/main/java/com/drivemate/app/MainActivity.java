@@ -299,6 +299,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private long lastCameraUpdate;
     private GeoMath.Point lastCameraCenter;
     private GeoMath.Point displayGps;
+    private MapStartupPolicy.Viewport startupMapView;
+    private boolean locationSubscribed;
+    private long lastMapAreaSavedAt;
     private SmoothFollowCamera smoothFollow;
     private boolean smoothLoopRunning;
     private boolean foreground;
@@ -336,6 +339,11 @@ public final class MainActivity extends Activity implements LocationListener {
         trafficEnabled = settings.getBoolean("traffic", false);
         useLocalMap = settings.getBoolean("drivemate_vector_map", true);
         vectorSavedState = savedInstanceState;
+        startupMapView = MapStartupPolicy.initial(
+                settings.getFloat("last_map_lat", Float.NaN),
+                settings.getFloat("last_map_lon", Float.NaN),
+                settings.getLong("last_map_at", 0L),
+                System.currentTimeMillis());
         try {
             driveTiles = new DriveTileServer(this);
         } catch (java.io.IOException e) {
@@ -387,7 +395,11 @@ public final class MainActivity extends Activity implements LocationListener {
             return false;
         });
         map.setMinZoomLevel(2.0);
-        map.getController().setZoom(15.5);
+        // Never initialise a UK navigation app at MapLibre's world-default
+        // camera. An approximate saved map area is DISPLAY ONLY, never GPS.
+        map.getController().setZoom(startupMapView.zoom);
+        map.getController().setCenter(new GeoPoint(
+                startupMapView.center.lat, startupMapView.center.lon));
         map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         // Keep both map engines inside the SAME background-only host:
         // the visible TomTom raster map covers MapLibre until actual UK roads
@@ -420,6 +432,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             }
                         });
                 vectorMap.setOnUserGesture(this::disengageFollowForGesture);
+                vectorMap.setCamera(startupMapView.center, startupMapView.zoom, 0);
                 // Place MapLibre below the existing TomTom map while waiting
                 // for first verifiably painted UK street features.
                 mapHost.addView(vectorMap.view(), 0,
