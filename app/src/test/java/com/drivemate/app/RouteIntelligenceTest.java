@@ -21,6 +21,12 @@ public class RouteIntelligenceTest {
                 Arrays.asList(noFollow, unknown, verified), 20, 300));
         assertNull(RouteIntelligence.approachingLanes(
                 Collections.singletonList(verified), 0, 150));
+        // Once the car has crossed a lane-section end, old lane advice
+        // must disappear rather than persist at the last junction.
+        assertNull(RouteIntelligence.approachingLanes(
+                Collections.singletonList(verified), 270, 300));
+        assertEquals("⤺", new RouteIntelligence.Lane("LEFT_U_TURN", true).symbol());
+        assertEquals("⤻", new RouteIntelligence.Lane("RIGHT_U_TURN", true).symbol());
     }
 
     @Test public void speedLimitRequiresStrongMatchingAndFreshRoute() {
