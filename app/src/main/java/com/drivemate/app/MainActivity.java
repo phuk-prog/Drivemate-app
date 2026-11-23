@@ -319,6 +319,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private MapStartupPolicy.Viewport startupMapView;
     private boolean locationSubscribed;
     private long lastMapAreaSavedAt;
+    private long lastPrefetchAt;
     private SmoothFollowCamera smoothFollow;
     private boolean smoothLoopRunning;
     private boolean foreground;
@@ -1513,8 +1514,11 @@ public final class MainActivity extends Activity implements LocationListener {
             }
             boolean requested = false;
             if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                // Ask for the fastest rate the GNSS hardware supports (0 ms, 0 m).
+                // Android delivers at the receiver's own maximum, typically 1 Hz
+                // on most phones and higher on some. This is the main battery cost.
                 locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER,
-                        1000L, 1f, this);
+                        0L, 0f, this);
                 locationManager.registerGnssStatusCallback(gnssCallback,
                         new Handler(Looper.getMainLooper()));
                 requested = true;
@@ -1585,7 +1589,13 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active || smoothFollow == null) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
             if (!active || smoothFollow == null) vectorMap.setVehicle(smoothed);
-            if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
+            // Prefetch at most every 3 s: at a high GPS rate, per-fix tile work would
+            // compete with rendering.
+            long nowPrefetch = SystemClock.elapsedRealtime();
+            if (!autoFallback && nowPrefetch - lastPrefetchAt >= 3000) {
+                lastPrefetchAt = nowPrefetch;
+                vectorMap.prefetch(gpsPoint(fix));
+            }
         }
         if ((!active || smoothFollow == null) && fix.hasBearing()
                 && fix.hasSpeed() && fix.getSpeed() > 1.5f)
