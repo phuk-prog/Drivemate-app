@@ -59,6 +59,7 @@ public final class VectorDriveMap {
     private boolean styleReady;
     private boolean trafficEnabled;
     private boolean nightMode;
+    private boolean highDetailEnabled = true;
     private String tomtomKey;
     private boolean disposed;
     private GeoMath.Point pendingGps;
@@ -231,6 +232,7 @@ public final class VectorDriveMap {
                 installOverlays(style);
                 styleReady = true;
                 setTraffic(trafficEnabled);
+                updateHighDetailVisibility();
                 if (pendingGps != null) setVehicle(pendingGps);
                 if (pendingDest != null) setDestination(pendingDest);
                 setEntrance(pendingEntrance);
@@ -278,6 +280,12 @@ public final class VectorDriveMap {
         style.addLayer(routeLayer);
         // This stroke traces the real calculated route through an approaching
         // roundabout. It never attempts to deduce geometry from an exit count.
+        LineLayer junctionHalo = new LineLayer("dm-junction-halo", "dm-junction");
+        junctionHalo.setProperties(PropertyFactory.lineColor(
+                        nightMode ? "#071923" : "#FFFFFF"),
+                PropertyFactory.lineWidth(13f),
+                PropertyFactory.lineOpacity(0.96f));
+        style.addLayer(junctionHalo);
         LineLayer junctionLayer = new LineLayer("dm-junction-highlight", "dm-junction");
         junctionLayer.setProperties(PropertyFactory.lineColor("#12DFC7"),
                 PropertyFactory.lineWidth(8f),
@@ -497,6 +505,25 @@ public final class VectorDriveMap {
         double zoom = Math.max(4, Math.min(16.5, 8 - Math.log(
                 Math.max(0.00005, span)) / Math.log(2)));
         setCamera(midpoint, zoom, 0);
+    }
+
+    /**
+     * Optional true high-zoom TomTom raster tiles are drawn ABOVE z14 OSM
+     * streets but BELOW the real route and junction geometry. If the key is
+     * unavailable or a tile fails, the OSM vector map remains visible.
+     */
+    public void setHighDetailEnabled(boolean enabled) {
+        highDetailEnabled = enabled;
+        updateHighDetailVisibility();
+    }
+
+    private void updateHighDetailVisibility() {
+        if (!ready() || map.getStyle() == null) return;
+        org.maplibre.android.style.layers.Layer layer =
+                map.getStyle().getLayer("tomtom-street-detail");
+        if (layer != null) layer.setProperties(
+                PropertyFactory.visibility(highDetailEnabled && !tomtomKey.isEmpty()
+                        ? "visible" : "none"));
     }
 
     public void setTraffic(boolean visible) {
