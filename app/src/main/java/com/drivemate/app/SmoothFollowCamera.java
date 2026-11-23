@@ -88,8 +88,10 @@ public final class SmoothFollowCamera {
         gpsConfident = trustworthy;
         // Only snap the displayed car to TomTom geometry on a high-confidence
         // fix. Never use snapped position for actual routing decisions.
-        roadSnap = trustworthy && accuracyMetres <= 25 && offRouteMetres <= 23
-                && safeSpeed >= 1.5;
+        // This applies when stopped too (lights, queues): a precise fix within a
+        // lane-width or two of the route draws the car on the route line rather
+        // than beside it.
+        roadSnap = trustworthy && accuracyMetres <= 25 && offRouteMetres <= 23;
         offsetFollowing = trustworthy && offRouteMetres <= 50 && safeSpeed >= 1.5;
         vehicleFix = trustworthy ? filteredGps
                 : (vehicle == null ? filteredGps : vehicle);
@@ -210,7 +212,7 @@ public final class SmoothFollowCamera {
         visualAlong = Math.max(lastAnimatedProgress, visualAlong);
         lastAnimatedProgress = visualAlong;
         GeoMath.Point wantedVehicle = vehicleFix;
-        if (offsetFollowing) {
+        if (offsetFollowing || roadSnap) {
             // Preserve the measured lateral offset rather than falsely
             // snapping moderate-accuracy GPS to the centreline. The road
             // supplies only the short forward movement between real fixes.
