@@ -2938,15 +2938,27 @@ public final class MainActivity extends Activity implements LocationListener {
             segment.add(index.pointAt(along));
         segment.add(index.pointAt(to));
         if (segment.size() < 2) return;
-        junctionLine = new Polyline();
-        junctionLine.setColor(Color.rgb(0, 224, 209));
-        junctionLine.setWidth(dp(7));
         List<GeoPoint> drawing = new ArrayList<>();
         for (GeoMath.Point point : segment)
             drawing.add(new GeoPoint(point.lat, point.lon));
+        // A dark casing keeps the verified path legible against both day and
+        // night raster roads, motorway junctions, and bright crossings.
+        junctionHaloLine = new Polyline();
+        junctionHaloLine.setColor(Color.rgb(12, 42, 58));
+        junctionHaloLine.setWidth(dp(13));
+        junctionHaloLine.setPoints(drawing);
+        map.getOverlays().add(junctionHaloLine);
+        junctionLine = new Polyline();
+        junctionLine.setColor(Color.rgb(0, 224, 209));
+        junctionLine.setWidth(dp(7));
         junctionLine.setPoints(drawing);
         map.getOverlays().add(junctionLine);
         if (vectorMap != null) vectorMap.setJunctionPreview(segment);
+        if (junctionDiagram != null)
+            junctionDiagram.setRoute(segment,
+                    "ROUNDABOUT".equalsIgnoreCase(instruction.junctionType)
+                            || instruction.maneuver.toUpperCase(Locale.UK).contains("ROUNDABOUT"),
+                    instruction.exitNumber);
         highlightedJunctionIndex = instructionIndex;
         if (!showingVector()) map.invalidate();
     }
@@ -2957,6 +2969,11 @@ public final class MainActivity extends Activity implements LocationListener {
             junctionLine = null;
             map.invalidate();
         }
+        if (junctionHaloLine != null) {
+            map.getOverlays().remove(junctionHaloLine);
+            junctionHaloLine = null;
+        }
+        if (junctionDiagram != null) junctionDiagram.setRoute(null, false, 0);
         if (highlightedJunctionIndex >= 0 && vectorMap != null)
             vectorMap.setJunctionPreview(null);
         highlightedJunctionIndex = -1;
