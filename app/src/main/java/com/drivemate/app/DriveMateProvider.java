@@ -32,8 +32,27 @@ public final class DriveMateProvider {
         try{
             String shape=response.getJSONObject("trip").getJSONArray("legs").getJSONObject(0).getString("shape");
             JSONObject trace=new JSONObject().put("encoded_polyline",shape).put("shape_match","edge_walk").put("costing","auto").put("units","kilometers")
-                .put("filters",new JSONObject().put("action","include").put("attributes",new JSONArray().put("shape").put("edge.speed_limit").put("edge.begin_shape_index").put("edge.end_shape_index")));
-            route.speedSections.addAll(speedSections(json(endpoint.substring(0,endpoint.length()-6)+"/trace_attributes",trace),route.points));
+                .put("filters",new JSONObject().put("action","include").put("attributes",new JSONArray().put("shape").put("edge.speed_limit").put("edge.way_id").put("edge.begin_shape_index").put("edge.end_shape_index")));
+            String root=endpoint.substring(0,endpoint.length()-6);
+            JSONObject graph=json(root+"/v1/graph-source",null),meta=json(root+"/v1/meta",null);
+            String source=graph.optString("source_sha256");
+            if(!source.matches("[a-f0-9]{64}") || !source.equals(meta.optString("source_sha256")) || !"uk".equals(meta.optString("scope")))return route;
+            JSONObject traced=json(root+"/trace_attributes",trace);
+            Map<Long,JSONObject> tags=new HashMap<>();Set<Long> ids=new LinkedHashSet<>();
+            JSONArray edges=traced.getJSONArray("edges");
+            for(int i=0;i<edges.length();i++){long id=edges.getJSONObject(i).optLong("way_id",0);if(id>0)ids.add(id);}
+            if(ids.size()>3000)return route;
+            List<Long> all=new ArrayList<>(ids);
+            for(int i=0;i<all.size();i+=60){
+                StringBuilder query=new StringBuilder();
+                for(long id:all.subList(i,Math.min(i+60,all.size()))){if(query.length()>0)query.append(',');query.append(id);}
+                JSONObject batch=json(root+"/v1/ways?ids="+query,null);
+                if(!source.equals(batch.optString("source_sha256")))return route;
+                JSONArray ways=batch.getJSONArray("ways");
+                for(int j=0;j<ways.length();j++){JSONObject way=ways.getJSONObject(j);tags.put(way.getLong("id"),way.getJSONObject("tags"));}
+            }
+            if(!source.equals(json(root+"/v1/graph-source",null).optString("source_sha256")))return route;
+            route.speedSections.addAll(verifiedSpeedSections(traced,route.points,tags));
         }catch(Exception ignored){/* No explicit aligned limit: unknown. */}
         return route;
     }
@@ -82,21 +101,42 @@ public final class DriveMateProvider {
     }
     static RouteIntelligence.LaneSection laneSection(JSONArray a,double along)throws JSONException{
         if(a==null||a.length()==0||along<5)return null;List<RouteIntelligence.Lane> lanes=new ArrayList<>();
-        int[] bits={2,4,8,16,32,64,128,256};String[] names={"STRAIGHT","SHARP_LEFT","LEFT","SLIGHT_LEFT","SLIGHT_RIGHT","RIGHT","SHARP_RIGHT","UTURN"};
+        int[] bits={2,4,8,16,32,64,128,256,512,1024};String[] names={"STRAIGHT","SHARP_LEFT","LEFT","SLIGHT_LEFT","SLIGHT_RIGHT","RIGHT","SHARP_RIGHT","UTURN","SLIGHT_LEFT","SLIGHT_RIGHT"};
         for(int i=0;i<a.length();i++){JSONObject lane=a.optJSONObject(i);if(lane==null)return null;
             int mask=lane.optInt("directions",0),active=lane.optInt("active",0);
-            if(mask<=0||(mask&~510)!=0||(active&~mask)!=0||Integer.bitCount(active)>1)return null;
+            if(mask<=0||(mask&~2046)!=0||(active&~mask)!=0||Integer.bitCount(active)>1)return null;
             List<String> directions=new ArrayList<>();String recommended="";
-            for(int d=0;d<bits.length;d++)if((mask&bits[d])!=0){directions.add(names[d]);if((active&bits[d])!=0)recommended=names[d];}
+            for(int d=0;d<bits.length;d++)if((mask&bits[d])!=0){if(!directions.contains(names[d]))directions.add(names[d]);if((active&bits[d])!=0)recommended=names[d];}
             if(directions.isEmpty())return null;lanes.add(new RouteIntelligence.Lane(recommended.isEmpty()?directions.get(0):recommended,!recommended.isEmpty(),directions));}
         RouteIntelligence.LaneSection s=new RouteIntelligence.LaneSection(Math.max(0,along-100),along+2,lanes);return s.trusted()?s:null;
     }
-    static List<RouteIntelligence.SpeedSection> speedSections(JSONObject trace,List<GeoMath.Point> route)throws Exception{
+    /** Only explicit symmetric numeric limits, no directional/conditional/variable guesses. */
+    static int explicitLimit(JSONObject tags){
+        if(tags==null)return 0;
+        Iterator<String> keys=tags.keys();
+        while(keys.hasNext()){
+            String k=keys.next();
+            if(k.startsWith("maxspeed:") && !k.equals("maxspeed:type") && !k.equals("maxspeed:source"))return 0;
+        }
+        String raw=tags.optString("maxspeed","").trim().toLowerCase(Locale.UK);
+        if(!raw.matches("[0-9]{1,3}(?:\\s*(?:mph|km/h|kmh))?"))return 0;
+        try{boolean mph=raw.endsWith("mph");int v=Integer.parseInt(raw.replaceAll("[^0-9]",""));
+            int kmh=mph?(int)Math.round(v*1.609344):v;return kmh>=5&&kmh<=140?kmh:0;
+        }catch(NumberFormatException e){return 0;}
+    }
+    static List<RouteIntelligence.SpeedSection> verifiedSpeedSections(JSONObject trace,List<GeoMath.Point> route,Map<Long,JSONObject> tags)throws Exception{
         List<RouteIntelligence.SpeedSection> result=new ArrayList<>();List<GeoMath.Point> matched=decode(trace.getString("shape"));
         if(matched.size()!=route.size())return result;for(int i=0;i<route.size();i++)if(GeoMath.distance(route.get(i),matched.get(i))>1.5)return result;
         double[] d=offsets(route);JSONArray edges=trace.getJSONArray("edges");
-        for(int i=0;i<edges.length();i++){JSONObject e=edges.getJSONObject(i);int speed=e.optInt("speed_limit",0),a=e.optInt("begin_shape_index",-1),b=e.optInt("end_shape_index",-1);
-            if(speed>=5&&speed<=140&&a>=0&&b>a&&b<d.length&&d[b]>d[a])result.add(new RouteIntelligence.SpeedSection(d[a],d[b],speed));}
+        for(int i=0;i<edges.length();i++){
+            JSONObject e=edges.getJSONObject(i);long id=e.optLong("way_id",0);int speed=explicitLimit(tags.get(id));
+            int reported=e.optInt("speed_limit",0),a=e.optInt("begin_shape_index",-1),b=e.optInt("end_shape_index",-1);
+            if(speed>0&&Math.abs(speed-reported)<=1&&a>=0&&b>a&&b<d.length&&d[b]>d[a]){
+                if(!result.isEmpty()){RouteIntelligence.SpeedSection last=result.get(result.size()-1);
+                    if(last.kmh==speed&&Math.abs(last.end-d[a])<0.01){result.set(result.size()-1,new RouteIntelligence.SpeedSection(last.start,d[b],speed));continue;}}
+                result.add(new RouteIntelligence.SpeedSection(d[a],d[b],speed));
+            }
+        }
         return result;
     }
     public static List<TomTomApi.Destination> search(String endpoint,String query,GeoMath.Point near)throws Exception{

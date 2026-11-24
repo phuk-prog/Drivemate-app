@@ -563,14 +563,14 @@ public final class MainActivity extends Activity implements LocationListener {
                             } else if (status == RoadDisplayHealth.State.FAILED
                                     && useLocalMap && !autoFallback) {
                                 vectorRoadsReady = false;
-                                if (!apiKey.isEmpty()) {
+                                if (!ownRouting() && !apiKey.isEmpty()) {
                                     autoFallback = true;
                                     updateMapVisibility();
                                     if (route != null && !active) showRoute(route, true);
                                     else if (currentLocation != null) centreOnLocation(true);
                                     setStatus("DriveMate streets not rendering · TomTom map active");
                                 } else {
-                                    setStatus("Map roads unavailable · check connection or TomTom key");
+                                    setStatus("Map roads unavailable · check map connection");
                                 }
                             }
                         });
@@ -1013,9 +1013,9 @@ public final class MainActivity extends Activity implements LocationListener {
         // its own rendered-road query proves the UK streets are visible.
         boolean vectorLoading = useLocalMap && !autoFallback && vectorMap != null;
         if (vectorMap != null)
-            vectorMap.setVisible(vectorLoading || apiKey.isEmpty());
+            vectorMap.setVisible(vectorLoading || ownRouting() || apiKey.isEmpty());
         if (map != null)
-            map.setVisibility(!vector && !apiKey.isEmpty()
+            map.setVisibility(!ownRouting() && !vector && !apiKey.isEmpty()
                     ? View.VISIBLE : View.INVISIBLE);
     }
 
@@ -1309,7 +1309,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * GPS fix and a TomTom key, to keep API use low.
      */
     private void maybeFetchQuickEtas() {
-        if (ownRouting() || apiKey.isEmpty() || places == null || currentLocation == null || active) return;
+        if ((!ownRouting() && apiKey.isEmpty()) || places == null || currentLocation == null || active) return;
         if (!MapStartupPolicy.freshForRouting(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
                 currentLocation.getTime(), System.currentTimeMillis(),
@@ -1321,10 +1321,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (home == null && work == null) return;
         quickEtaFetchedAt = now;
         GeoMath.Point from = gpsPoint(currentLocation);
-        String key = apiKey;
+        String key = apiKey, own = ownEndpoint();
         network.execute(() -> {
-            String homeLabel = home == null ? null : quickEta(key, from, home);
-            String workLabel = work == null ? null : quickEta(key, from, work);
+            String homeLabel = home == null ? null : quickEta(key, own, from, home);
+            String workLabel = work == null ? null : quickEta(key, own, from, work);
             runOnUiThread(() -> {
                 if (isFinishing()) return;
                 homeEtaLabel = homeLabel;
@@ -1335,10 +1335,10 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** Drive time such as "14 min", or null if TomTom can't route right now. */
-    private static String quickEta(String key, GeoMath.Point from, TomTomApi.Destination to) {
+    private static String quickEta(String key, String own, GeoMath.Point from, TomTomApi.Destination to) {
         if (to == null || to.point == null) return null;
         try {
-            TomTomApi.Route trip = TomTomApi.route(key, from, to.point);
+            TomTomApi.Route trip = own.isEmpty()?TomTomApi.route(key,from,to.point):DriveMateProvider.route(own,from,to.point);
             return NavigationUnits.duration(trip.timeSeconds);
         } catch (Exception error) {
             return null;
@@ -1411,7 +1411,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Share diagnostics (no location included)",
                 "3D buildings · " + (buildings3d ? "On" : "Off"),
                 "DriveMate-first routing and search · " + (ownRouting() ? "Experimental" : "Off"),
-                "Journey map review · " + mapReview.snapshot().size() + " findings"
+                "Journey map review · " + mapReview.snapshot().size() + " findings",
+                "Independent map survey drafts"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1549,6 +1550,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             break;
                         case 24: configureIndependent(); break;
                         case 25: showMapReview(); break;
+                        case 26: showSurveyNotes(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1571,6 +1573,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 if(!ru.isEmpty()&&(!DriveMateProvider.valid(ru)||!ru.endsWith("/route"))){showError("Enter a trusted HTTPS /route endpoint");return;}
                 if(!su.isEmpty()&&!DriveMateProvider.valid(su)){showError("Enter a trusted HTTPS Photon endpoint");return;}
                 getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("own_route_endpoint",ru).putString("own_search_endpoint",su).putBoolean("licensed_comparison",license.isChecked()).apply();
+                if(!ru.isEmpty()){useLocalMap=true;autoFallback=false;getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("drivemate_vector_map",true).apply();updateMapVisibility();}
                 setStatus(ru.isEmpty()?"TomTom routing selected":"Experimental DriveMate routing selected");quickEtaFetchedAt=0;homeEtaLabel=null;workEtaLabel=null;
             }).setNegativeButton("Cancel",null).show();
     }
@@ -1592,13 +1595,40 @@ public final class MainActivity extends Activity implements LocationListener {
         String[] labels=new String[items.size()];for(int i=0;i<labels.length;i++)labels[i]=items.get(i).label();
         new AlertDialog.Builder(this).setTitle("Map review · "+items.size()+" possible differences").setItems(labels,(d,i)->surveyFinding(items.get(i))).setNeutralButton("Clear",(d,w)->mapReview.clear()).setNegativeButton("Close",null).show();
     }
+    private boolean safelyParked(){
+        return !active&&currentLocation!=null&&currentLocation.hasSpeed()&&currentLocation.getSpeed()<0.5f&&System.currentTimeMillis()-currentLocation.getTime()<10000;
+    }
+    private void showSurveyNotes(){
+        if(!safelyParked()){showError("Review surveys only when safely parked.");return;}
+        SurveyNotes notes=new SurveyNotes(this);List<String> saved=notes.list();
+        new AlertDialog.Builder(this).setTitle("Independent map survey drafts")
+            .setItems(saved.toArray(new String[0]),(d,i)->new AlertDialog.Builder(this).setTitle("Independent survey")
+                .setMessage(saved.get(i)).setPositiveButton("Share",(dd,w)->shareSurvey(saved.get(i)))
+                .setNeutralButton("Delete",(dd,w)->new AlertDialog.Builder(this).setMessage("Delete this private survey draft?").setPositiveButton("Delete",(ddd,www)->notes.delete(i)).setNegativeButton("Cancel",null).show()).setNegativeButton("Close",null).show())
+            .setPositiveButton("New independent survey",(d,w)->editSurvey()).setNegativeButton("Close",null).show();
+    }
+    private void editSurvey(){
+        if(!safelyParked())return;
+        EditText entry=new EditText(this);entry.setHint("Independent road observation: location, direction, sign, date and evidence");
+        new AlertDialog.Builder(this).setTitle("New survey").setMessage("Use only your own observations or compatible official data. No TomTom values or copied comparison locations.")
+            .setView(entry).setPositiveButton("Save draft",(d,w)->{
+                if(!safelyParked())return;
+                if(!new SurveyNotes(this).add(entry.getText().toString()))showError("Enter evidence (up to 2000 characters; maximum 100 drafts).");
+                else setStatus("Independent survey saved privately");
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void shareSurvey(String note){
+        if(!safelyParked())return;
+        android.content.Intent share=new android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"Independent road survey: "+note);
+        startActivity(android.content.Intent.createChooser(share,"Share independent survey"));
+    }
     private void surveyFinding(MapReview.Finding item){
         EditText evidence=new EditText(this);evidence.setHint("Independently observed location, sign, direction and date");
         new AlertDialog.Builder(this).setTitle(item.label()).setMessage(String.format(Locale.UK,"DriveMate location: %.5f, %.5f · travel heading %.0f°\n\nNot proof of a map error. Verify road signs or permitted official records independently. Only independent observations can be shared; never copy TomTom results.",item.point.lat,item.point.lon,item.bearing))
-            .setView(evidence).setPositiveButton("Share survey note",(d,w)->{
-                String note=evidence.getText().toString().trim();if(note.isEmpty()){showError("Independent survey evidence required.");return;}
-                android.content.Intent share=new android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"Independent road survey: "+note);
-                startActivity(android.content.Intent.createChooser(share,"Share independent survey"));
+            .setView(evidence).setPositiveButton("Save independent draft",(d,w)->{
+                if(!safelyParked())return;
+                if(!new SurveyNotes(this).add(evidence.getText().toString()))showError("Independent survey evidence required (up to 2000 characters).");
+                else setStatus("Independent survey saved privately");
             }).setNegativeButton("Close",null).show();
     }
 
@@ -3390,7 +3420,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active || route == null) return;
         long age = System.currentTimeMillis() - route.fetchedAtMs;
         boolean confident = accuracy <= 35 && offRoute <= 30 && age >= 0
-                && age <= 480000 && !gpsLost;
+                && ("DriveMate".equals(route.provider)||age <= 480000) && !gpsLost;
         RouteIntelligence.LaneSection lanes = confident
                 ? RouteIntelligence.lanesForManeuver(route.laneSections, along,
                         laneLookAheadMetres(fix.hasSpeed() ? fix.getSpeed() : 0f),
@@ -3400,7 +3430,7 @@ public final class MainActivity extends Activity implements LocationListener {
             laneGuidanceText.setVisibility(lanes == null ? View.GONE : View.VISIBLE);
         }
         RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
-                route.speedSections, along, offRoute, accuracy, age);
+                route.speedSections, along, offRoute, accuracy, "DriveMate".equals(route.provider)?0:age);
         boolean speeding = limit != null && fix.hasSpeed()
                 && RouteIntelligence.overspeed(fix.getSpeed(), limit, speedToleranceMph);
         if (speedLimitText != null) {
