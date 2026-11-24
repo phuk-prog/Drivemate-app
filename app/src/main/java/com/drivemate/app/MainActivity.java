@@ -506,7 +506,7 @@ public final class MainActivity extends Activity implements LocationListener {
             }
         });
         // TomTom credentials optional; configure independent services in Settings.
-        else configureTiles();
+        if (!apiKey.isEmpty()) configureTiles();
         ensureLocationPermission();
     }
 
