@@ -67,7 +67,7 @@ public final class NavigationCameraTest {
         assertTrue(near.zoom > far.zoom);
         assertTrue(near.tiltDegrees < far.tiltDegrees);
         assertTrue(near.tiltDegrees >= 28);
-        assertTrue(far.tiltDegrees <= 48);
+        assertTrue(far.tiltDegrees <= 54);
     }
 
     @Test public void largeGuidanceCardStillKeepsVehicleAndJunctionAhead() {
@@ -112,20 +112,18 @@ public final class NavigationCameraTest {
         assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, Double.NaN), 1e-9);
     }
 
-    @Test public void distantNextTurnDoesNotZoomTheMapOut() {
-        // Owner report: 320 yd from the next turn at walking pace, the map
-        // zoomed far out to fit the whole approach. The cruise view is now
-        // speed-based, so a far turn gives the same close view as a mid one.
-        GeoMath.Point gps = north.get(0);
-        NavigationCamera.Frame farTurn = NavigationCamera.calculate(
-                north, gps, 0, 1800, 1, 1400, 400, 300);
-        NavigationCamera.Frame midTurn = NavigationCamera.calculate(
-                north, gps, 0, 300, 1, 1400, 400, 300);
-        // Only camera tilt (which also eases with distance) differs slightly;
-        // the old behaviour was about 3 zoom levels further out for the far turn.
-        assertEquals(farTurn.zoom, midTurn.zoom, 0.1);
-        // About 110 m ahead on a ~700 px view: street level (~18.5). The old
-        // logic fitted the whole 1.8 km approach, about 14.9.
-        assertTrue(farTurn.zoom > 18.0);
+    @Test public void distantTurnDoesNotFitTheEntireJourney(){
+        GeoMath.Point gps=north.get(0);
+        NavigationCamera.Frame far=NavigationCamera.calculate(north,gps,0,1800,1,1400,400,300);
+        NavigationCamera.Frame near=NavigationCamera.calculate(north,gps,0,300,1,1400,400,300);
+        assertTrue(far.zoom>16);
+        assertTrue(near.zoom<far.zoom);
+        assertTrue(far.cameraCenterAlongMetres<400);
+    }
+    @Test public void forwardCameraHasGreaterLeadAtUrbanApproach(){
+        NavigationCamera.Frame f=NavigationCamera.calculate(north,north.get(0),0,384,1.3f,1450,230,155);
+        assertTrue(f.cameraCenterAlongMetres>120);
+        assertTrue(f.tiltDegrees>45);
+        assertTrue(f.cameraCenterAlongMetres<384);
     }
 }

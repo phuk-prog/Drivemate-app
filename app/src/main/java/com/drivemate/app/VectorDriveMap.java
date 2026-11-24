@@ -52,6 +52,13 @@ public final class VectorDriveMap {
     private final DriveTileServer tiles;
     private MapLibreMap map;
     private GeoJsonSource routeSource;
+    private GeoJsonSource remainingRouteSource;
+    private double routeLength,confirmedProgress;
+    private long lastRoadLabelAt;
+    private String roadCandidate="",currentRoad="";
+    private int roadCandidateCount;
+    private String pendingRoadName="";
+    private GeoJsonSource roadNameSource;
     private GeoJsonSource junctionSource;
     private GeoJsonSource vehicleSource;
     private GeoJsonSource destinationSource;
@@ -141,7 +148,7 @@ public final class VectorDriveMap {
         org.maplibre.android.style.layers.Layer layer = map.getStyle() == null ? null
                 : map.getStyle().getLayer("dm-tomtom-high-detail");
         if (layer != null) layer.setProperties(PropertyFactory.visibility(
-                enabled && !tomtomKey.isEmpty() ? "visible" : "none"));
+                enabled && !navigationDetail && !tomtomKey.isEmpty() ? "visible" : "none"));
     }
 
     /**
@@ -155,8 +162,8 @@ public final class VectorDriveMap {
         org.maplibre.android.style.layers.Layer blocks = map.getStyle().getLayer("uk-buildings-3d");
         org.maplibre.android.style.layers.Layer flat = map.getStyle().getLayer("uk-buildings");
         if (blocks != null) blocks.setProperties(PropertyFactory.visibility(
-                enabled && !navigationDetail ? "visible" : "none"));
-        if (flat != null) flat.setMaxZoom(enabled && !navigationDetail ? 15f : 24f);
+                enabled ? "visible" : "none"));
+        if (flat != null) flat.setMaxZoom(enabled ? 14.5f : 24f);
     }
 
     /**
@@ -169,6 +176,8 @@ public final class VectorDriveMap {
         if (!navigating) { framingZoomOut=0; followJunction=null; }
         if (!ready() || map.getStyle() == null) return;
         setBuildings3D(buildings3d);
+        setHighDetailEnabled(highDetailEnabled);
+        if(!navigating)clearCurrentRoad();
         for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops"}) {
             org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer(id);
             if (layer != null) layer.setProperties(PropertyFactory.visibility(
@@ -292,7 +301,8 @@ public final class VectorDriveMap {
                 if (pendingDest != null) setDestination(pendingDest);
                 setEntrance(pendingEntrance);
                 setParkedCar(pendingParked);
-                if (pendingRoute != null) setRoute(pendingRoute);
+                if (pendingRoute != null) {renderRoute();renderRemaining();}
+                publishRoadName();
                 if (pendingJunctionRoute != null) setJunctionPreview(pendingJunctionRoute);
                 if (pendingCamera != null) setCamera(pendingCamera,
                         pendingZoom, pendingBearing);
@@ -316,6 +326,12 @@ public final class VectorDriveMap {
         parkedSource = new GeoJsonSource("dm-parked",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(routeSource);
+        remainingRouteSource=new GeoJsonSource("dm-remaining-route",FeatureCollection.fromFeatures(new Feature[0]));
+        roadNameSource=new GeoJsonSource("dm-current-road",FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(remainingRouteSource);style.addSource(roadNameSource);
+        style.addImage("dm-shield-blue",shieldBitmap(0xff164d94));
+        style.addImage("dm-shield-green",shieldBitmap(0xff285a48));
+        style.addImage("dm-shield-white",shieldBitmap(0xfff4f8fa));
         junctionSource = new GeoJsonSource("dm-junction",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(junctionSource);
@@ -323,16 +339,26 @@ public final class VectorDriveMap {
         style.addSource(entranceSource);
         style.addSource(parkedSource);
         style.addSource(vehicleSource);
-        LineLayer routeHalo = new LineLayer("dm-route-halo", "dm-route");
-        routeHalo.setProperties(PropertyFactory.lineColor(
-                        nightMode ? "#112B3B" : "#FFFFFF"),
-                PropertyFactory.lineWidth(10f),
-                PropertyFactory.lineOpacity(0.9f));
+        // Muted full geometry under the remaining, independently coloured ribbon.
+        LineLayer travelled=new LineLayer("dm-route-travelled","dm-route");
+        travelled.setProperties(PropertyFactory.lineColor(nightMode?"#52667a":"#8da3ad"),
+                PropertyFactory.lineWidth(7f),PropertyFactory.lineOpacity(.68f),
+                PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+        style.addLayer(travelled);
+        LineLayer routeHalo = new LineLayer("dm-route-halo", "dm-remaining-route");
+        routeHalo.setProperties(PropertyFactory.lineColor(nightMode?"#12374e":"#154b78"),
+                PropertyFactory.lineWidth(19f),PropertyFactory.lineOpacity(.96f),
+                PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(routeHalo);
-        LineLayer routeLayer = new LineLayer("dm-route-line", "dm-route");
-        routeLayer.setProperties(PropertyFactory.lineColor("#157EED"),
-                PropertyFactory.lineWidth(6.5f));
+        LineLayer routeLayer = new LineLayer("dm-route-line", "dm-remaining-route");
+        routeLayer.setProperties(PropertyFactory.lineColor(nightMode?"#24d9f5":"#007dbb"),
+                PropertyFactory.lineWidth(14f),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(routeLayer);
+        LineLayer gleam=new LineLayer("dm-route-centre","dm-remaining-route");
+        gleam.setProperties(PropertyFactory.lineColor(nightMode?"#b2f6ff":"#57e5ff"),
+                PropertyFactory.lineWidth(2.0f),PropertyFactory.lineOpacity(.72f),
+                PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+        style.addLayer(gleam);
         // This stroke traces the real calculated route through an approaching
         // roundabout. It never attempts to deduce geometry from an exit count.
         LineLayer junctionHalo = new LineLayer("dm-junction-casing", "dm-junction");
@@ -372,25 +398,35 @@ public final class VectorDriveMap {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
                 PropertyFactory.iconRotationAlignment("viewport"),
-                PropertyFactory.iconRotate(0f));
+                PropertyFactory.iconRotate(0f),PropertyFactory.iconSize(1.0f));
         style.addLayer(vehicle);
+        SymbolLayer currentRoadLayer=new SymbolLayer("dm-current-road-label","dm-current-road");
+        currentRoadLayer.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("name")),
+                PropertyFactory.textFont(new String[]{"Noto Sans Regular"}),PropertyFactory.textSize(14f),
+                PropertyFactory.textColor("#ffffff"),PropertyFactory.textHaloColor("#0a273b"),PropertyFactory.textHaloWidth(3f),
+                PropertyFactory.textAnchor("top"),PropertyFactory.textOffset(new Float[]{0f,1.9f}),
+                PropertyFactory.textAllowOverlap(false),PropertyFactory.textIgnorePlacement(false));
+        style.addLayer(currentRoadLayer);
     }
 
-    private static Bitmap makeVehicleArrow() {
-        Bitmap bitmap = Bitmap.createBitmap(56, 56, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(Color.WHITE);
-        canvas.drawCircle(28, 28, 22, paint);
-        paint.setColor(Color.rgb(21, 126, 237));
-        Path arrow = new Path();
-        arrow.moveTo(28, 7);
-        arrow.lineTo(42, 43);
-        arrow.lineTo(28, 34);
-        arrow.lineTo(14, 43);
-        arrow.close();
-        canvas.drawPath(arrow, paint);
-        return bitmap;
+    private static Bitmap shieldBitmap(int color){
+        Bitmap bitmap=Bitmap.createBitmap(36,25,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bitmap);
+        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setColor(Color.WHITE);
+        canvas.drawRoundRect(new RectF(0,0,36,25),5,5,paint);paint.setColor(color);
+        canvas.drawRoundRect(new RectF(1.5f,1.5f,34.5f,23.5f),4,4,paint);return bitmap;
+    }
+    static Bitmap makeVehicleArrow() {
+        Bitmap bitmap = Bitmap.createBitmap(80,80,Bitmap.Config.ARGB_8888);
+        Canvas canvas=new Canvas(bitmap);Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        // A translucent position halo, an offset shadow and a white-edged arrow.
+        paint.setColor(0x3032cce9);canvas.drawCircle(40,41,36,paint);
+        Path arrow=new Path();arrow.moveTo(40,9);arrow.lineTo(68,60);arrow.quadTo(69,65,63,64);
+        arrow.lineTo(40,55);arrow.lineTo(17,64);arrow.quadTo(11,65,12,60);arrow.close();
+        canvas.save();canvas.translate(0,4);paint.setColor(0x8830485d);canvas.drawPath(arrow,paint);canvas.restore();
+        paint.setColor(Color.WHITE);paint.setStyle(Paint.Style.FILL);canvas.drawPath(arrow,paint);
+        canvas.save();canvas.scale(.80f,.80f,40,40);
+        paint.setShader(new android.graphics.LinearGradient(20,10,60,65,new int[]{0xff39d9f9,0xff0579d1,0xff1754b8},null,android.graphics.Shader.TileMode.CLAMP));
+        canvas.drawPath(arrow,paint);paint.setShader(null);canvas.restore();return bitmap;
     }
 
     private void setVehicleHeading(double clockwiseScreenDegrees) {
@@ -408,17 +444,57 @@ public final class VectorDriveMap {
     }
 
     public void setRoute(List<GeoMath.Point> path) {
-        pendingRoute = path;
-        if (!ready() || routeSource == null) return;
-        if (path == null || path.size() < 2) {
-            routeSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
-            return;
-        }
-        List<Point> geometry = new ArrayList<>();
-        // Only the drawing path is simplified, never the TomTom guidance route.
-        for (GeoMath.Point p : DisplayPolyline.simplify(path, 1.5))
-            geometry.add(Point.fromLngLat(p.lon, p.lat));
-        routeSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geometry)));
+        pendingRoute=path;routeLength=path==null?0:GeoMath.length(path);
+        confirmedProgress=0;clearCurrentRoad();renderRoute();renderRemaining();
+    }
+    private void geometry(GeoJsonSource source,List<GeoMath.Point> path){
+        if(!ready()||source==null)return;
+        if(path==null||path.size()<2){source.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;}
+        List<Point> points=new ArrayList<>();
+        for(GeoMath.Point p:DisplayPolyline.simplify(path,1.5))points.add(Point.fromLngLat(p.lon,p.lat));
+        if(points.size()<2){source.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;}
+        source.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(points)));
+    }
+    private void renderRoute(){geometry(routeSource,pendingRoute);}
+    private void renderRemaining(){
+        if(pendingRoute==null||confirmedProgress<=0){geometry(remainingRouteSource,pendingRoute);return;}
+        geometry(remainingRouteSource,GeoMath.slice(pendingRoute,confirmedProgress,routeLength));
+    }
+    public void setConfirmedRouteProgress(double along){
+        if(!navigationDetail||!Double.isFinite(along)||routeLength<=0)return;
+        double next=Math.max(0,Math.min(routeLength,along));
+        if(Math.abs(next-confirmedProgress)<8&&next<routeLength)return;
+        confirmedProgress=next;renderRemaining();
+    }
+    public void clearCurrentRoad(){
+        roadCandidate="";currentRoad="";pendingRoadName="";roadCandidateCount=0;lastRoadLabelAt=0;
+        publishRoadName();
+    }
+    private void publishRoadName(){
+        if(!ready()||roadNameSource==null)return;
+        if(pendingRoadName.isEmpty()||pendingGps==null){roadNameSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;}
+        Feature f=Feature.fromGeometry(Point.fromLngLat(pendingGps.lon,pendingGps.lat));f.addStringProperty("name",pendingRoadName);roadNameSource.setGeoJson(f);
+    }
+    /** Only unambiguous named road geometry near a confirmed GPS fix, never next-turn text. */
+    public void updateCurrentRoad(GeoMath.Point gps){
+        if(!ready()||!navigationDetail||gps==null)return;
+        long now=SystemClock.elapsedRealtime();if(now-lastRoadLabelAt<800)return;lastRoadLabelAt=now;
+        java.util.Set<String> names=new java.util.HashSet<>();
+        try{
+            android.graphics.PointF pos=map.getProjection().toScreenLocation(new LatLng(gps.lat,gps.lon));
+            if(pos==null||!Float.isFinite(pos.x)||!Float.isFinite(pos.y))return;
+            float pad=18*activity.getResources().getDisplayMetrics().density;
+            for(Feature feature:map.queryRenderedFeatures(new RectF(pos.x-pad,pos.y-pad,pos.x+pad,pos.y+pad),"uk-roads")){
+                if(!feature.hasProperty("name")||!(feature.geometry() instanceof LineString))continue;
+                String name=feature.getStringProperty("name");if(name==null||name.trim().isEmpty()||name.length()>80)continue;
+                List<GeoMath.Point> coords=new ArrayList<>();for(Point pt:((LineString)feature.geometry()).coordinates())coords.add(new GeoMath.Point(pt.latitude(),pt.longitude()));
+                if(coords.size()>1&&GeoMath.project(coords,gps).offRouteMetres<=12)names.add(name.trim());
+            }
+        }catch(RuntimeException ignored){names.clear();}
+        String candidate=names.size()==1?names.iterator().next():"";
+        if(candidate.isEmpty()){clearCurrentRoad();return;}
+        if(!candidate.equals(roadCandidate)){roadCandidate=candidate;roadCandidateCount=1;pendingRoadName="";publishRoadName();return;}
+        if(++roadCandidateCount>=2){currentRoad=candidate;pendingRoadName=currentRoad;publishRoadName();}
     }
 
     public void setJunctionPreview(List<GeoMath.Point> segment) {
@@ -442,6 +518,7 @@ public final class VectorDriveMap {
         vehicleSource.setGeoJson(Feature.fromGeometry(
                 Point.fromLngLat(point.lon, point.lat)));
         lastRenderedVehicle = point;
+        if(!pendingRoadName.isEmpty())publishRoadName();
     }
 
     public void setDestination(GeoMath.Point point) {
@@ -531,7 +608,7 @@ public final class VectorDriveMap {
                 || (turn!=null && outside(turn,w,followTop,bottom,16));
         boolean safelyInside=!outside(car,w,followTop,bottom,48)
                 && (turn==null || !outside(turn,w,followTop,bottom,48));
-        if(clipped)framingZoomOut=Math.min(.8,framingZoomOut+.12);
+        if(clipped)framingZoomOut=Math.min(1.3,framingZoomOut+.12);
         else if(safelyInside)framingZoomOut=Math.max(0,framingZoomOut-.06);
         return framingZoomOut;
     }

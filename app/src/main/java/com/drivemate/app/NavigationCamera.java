@@ -80,12 +80,14 @@ public final class NavigationCamera {
         // about 110 m of road ahead at walking pace, growing with speed (about
         // 200 m at 30 mph, 370 m at 70 mph). A distant next turn no longer
         // zooms the map out to fit the whole approach.
-        double cruise = clamp(80 + speed * 9.0, 110, 1000);
+        double cruise = clamp(250 + speed * 12.0, 250, 1000);
         double horizon = cruise;
+        // At walking pace, show a useful urban approach without fitting a distant journey.
+        if(junctionAhead>cruise&&junctionAhead<=480) horizon=Math.min(520,junctionAhead+65);
         if (junctionAhead <= cruise) {
             // Approaching the manoeuvre: zoom in so the turn and a short stretch
             // of road beyond it fill the view, keeping more at higher speed.
-            horizon = clamp(junctionAhead + Math.max(45, speed * 3.0), 70, cruise);
+            horizon = clamp(junctionAhead + Math.max(65, speed * 4.0), 105, cruise);
         }
         boolean detailApproach = junctionDetail && junctionAhead <= 420;
         if (detailApproach) {
@@ -97,8 +99,8 @@ public final class NavigationCamera {
 
         // Stronger forward perspective on long approaches; ease toward a
         // clearer overhead junction diagram as the manoeuvre gets close.
-        double tilt = clamp(28 + junctionAhead * 0.033
-                + Math.min(5, speed * 0.16), 28, 48);
+        double tilt = clamp(31 + junctionAhead * 0.046
+                + Math.min(6, speed * 0.18), 31, 54);
         if (detailApproach) {
             // More overhead than the default 3D view, especially for exits.
             double blend = 1 - junctionAhead / 420.0;
@@ -117,8 +119,8 @@ public final class NavigationCamera {
         // Keep the car in the lower usable viewport and the turn higher up.
         // Include overlay displacement but never look so far past a nearby
         // turn that it disappears underneath the bottom navigation controls.
-        double lead = clamp(effectiveHorizon * 0.29,
-                Math.min(25, horizon * 0.26), horizon * 0.48);
+        double lead = clamp(effectiveHorizon * 0.40,
+                Math.min(35, horizon * 0.30), horizon * 0.60);
         double visibleCenterY = headerHeightPx + viewHeight * 0.5;
         double screenCenterY = screenHeightPx * 0.5;
         double centerAlong = progress + lead

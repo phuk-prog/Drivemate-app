@@ -149,6 +149,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 SmoothFollowCamera.Frame frame = smoothFollow.frame(now);
                 if (frame != null) {
                     lastCameraBearing = frame.bearing;
+                    if(drivingCompass!=null)drivingCompass.setRotation((float)-frame.bearing);
                     lastTravelBearing = frame.travelBearing;
                     if (showingVector() && vectorMap != null) {
                         vectorMap.followFrame(frame);
@@ -269,6 +270,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private LinearLayout brandHeader;
     private LinearLayout tripMetricsRow;
     private LinearLayout drivingTurnCard;
+    private TextView drivingCompass;
+    private Button drivingMore;
+    private boolean drivingControlsExpanded;
     private LinearLayout previewTurnRow;
     private LinearLayout previewDetailsRow;
     private LinearLayout bottomActionRow;
@@ -855,6 +859,10 @@ public final class MainActivity extends Activity implements LocationListener {
         // On a route the three compact controls occupy one row at the bottom.
         // The map is no longer covered by a large instruction/control sheet.
         navActions.addView(stopButton, new LinearLayout.LayoutParams(0, dp(45), 1));
+        drivingMore=chip("Controls");drivingMore.setTextColor(Color.WHITE);drivingMore.setBackgroundTintList(driveControl);
+        drivingMore.setContentDescription("Show navigation controls");drivingMore.setVisibility(View.GONE);
+        drivingMore.setOnClickListener(v->{drivingControlsExpanded=!drivingControlsExpanded;applyDrivingControls();});
+        navActions.addView(drivingMore,new LinearLayout.LayoutParams(0,dp(45),1));
         FrameLayout.LayoutParams navPanelPos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         navPanelPos.setMargins(dp(8), 0, dp(8), dp(9));
         frame.addView(navigationPanel, navPanelPos);
@@ -983,6 +991,12 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsButtonPos = new FrameLayout.LayoutParams(dp(60), dp(60), Gravity.BOTTOM | Gravity.RIGHT);
         gpsButtonPos.rightMargin = dp(13);
         frame.addView(followButton, gpsButtonPos);
+        drivingCompass=text("N ↑",13,Color.WHITE,true);
+        drivingCompass.setGravity(Gravity.CENTER);drivingCompass.setBackground(drivingCard(22));
+        drivingCompass.setElevation(dp(5));drivingCompass.setContentDescription("Map north direction");
+        FrameLayout.LayoutParams compassPos=new FrameLayout.LayoutParams(dp(44),dp(44),Gravity.TOP|Gravity.LEFT);
+        compassPos.leftMargin=dp(12);frame.addView(drivingCompass,compassPos);drivingCompass.setVisibility(View.GONE);
+        top.addOnLayoutChangeListener((view,l,t,r,b,ol,ot,or,ob)->{compassPos.topMargin=b+dp(10);drivingCompass.requestLayout();});
         // With a route on screen, keep speed and recentre just above the bottom
         // panel whatever its height, so neither is cut off behind it.
         navigationPanel.addOnLayoutChangeListener((view, l3, t3, r3, b3, ol3, ot3, or3, ob3) -> {
@@ -1049,7 +1063,7 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout turnCard = new LinearLayout(this);
         turnCard.setOrientation(LinearLayout.VERTICAL);
         turnCard.setPadding(dp(12), dp(9), dp(12), dp(10));
-        turnCard.setBackground(rounded(Color.rgb(14, 47, 66), 14));
+        turnCard.setBackground(drivingCard(18));
         drivingTurnCard = turnCard;
         LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
         turnCardPos.topMargin = dp(6);
@@ -1072,11 +1086,11 @@ public final class MainActivity extends Activity implements LocationListener {
         // so the road name is not cut off behind a long sentence.
         LinearLayout words = new LinearLayout(this);
         words.setOrientation(LinearLayout.VERTICAL);
-        topDistanceText = text("", 30, Color.WHITE, true);
+        topDistanceText = text("", 34, Color.WHITE, true);
         topDistanceText.setSingleLine(true);
         topDistanceText.setVisibility(View.GONE);
         words.addView(topDistanceText);
-        topInstructionText = text("Preparing next instruction…", 18, Color.WHITE, true);
+        topInstructionText = text("Preparing next instruction…", 19, Color.WHITE, true);
         topInstructionText.setMaxLines(2);
         topInstructionText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         words.addView(topInstructionText);
@@ -1085,11 +1099,12 @@ public final class MainActivity extends Activity implements LocationListener {
         contentPos.topMargin = dp(2);
         turnCard.addView(content, contentPos);
 
-        topNextTurnText = text("", 12, Color.rgb(201, 231, 239), false);
-        topNextTurnText.setSingleLine(true);
+        topNextTurnText = text("", 13, Color.rgb(201, 231, 239), true);
+        topNextTurnText.setBackground(rounded(0xff17394c,8));topNextTurnText.setPadding(dp(8),dp(6),dp(8),dp(6));
+        topNextTurnText.setMaxLines(2);
         topNextTurnText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
-        thenPos.topMargin = dp(1);
+        thenPos.topMargin = dp(6);
         turnCard.addView(topNextTurnText, thenPos);
         verifiedJunctionRoad = text("", 12, CYAN, true);
         verifiedJunctionRoad.setSingleLine(true);
@@ -1160,6 +1175,17 @@ public final class MainActivity extends Activity implements LocationListener {
         return number;
     }
 
+    private GradientDrawable drivingCard(int radius){
+        GradientDrawable d=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff123d53,0xff071d31});
+        d.setCornerRadius(dp(radius));d.setStroke(dp(1),0xff397b95);return d;
+    }
+    private void applyDrivingControls(){
+        if(drivingMore==null)return;
+        drivingMore.setVisibility(active?View.VISIBLE:View.GONE);
+        drivingMore.setText(drivingControlsExpanded?"Less":"Controls");
+        drivingMore.setContentDescription(drivingControlsExpanded?"Hide extra navigation controls":"Show extra navigation controls");
+        if(active){repeatButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);refreshButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);voiceButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);}
+    }
     private void applyNavigationChrome() {
         boolean navigating = active;
         if (drivingTopPanel != null)
@@ -1169,6 +1195,13 @@ public final class MainActivity extends Activity implements LocationListener {
         if (tripMetricsRow != null)
             tripMetricsRow.setVisibility(navigating ? View.VISIBLE : View.GONE);
         if (voiceButton != null) voiceButton.setVisibility(navigating ? View.VISIBLE : View.GONE);
+        if(!navigating)drivingControlsExpanded=false;
+        applyDrivingControls();
+        if(drivingCompass!=null)drivingCompass.setVisibility(navigating?View.VISIBLE:View.GONE);
+        if(navigating){navigationPanel.setBackground(drivingCard(20));tripMetricsRow.setBackground(drivingCard(13));
+            for(TextView caption:tripMetricCaptions)caption.setTextColor(0xffc4dce8);
+            for(TextView value:new TextView[]{tripEtaValue,tripMinutesValue,tripDistanceValue})value.setTextColor(Color.WHITE);
+        }else if(navigationPanel!=null){navigationPanel.setBackground(rounded(nightDisplay?DARK:Color.WHITE,22));}
         if (!navigating) {
             if (arrivalHintText != null && arrivalHintText.getTag() instanceof View)
                 ((View) arrivalHintText.getTag()).setVisibility(View.GONE);
@@ -1827,16 +1860,16 @@ public final class MainActivity extends Activity implements LocationListener {
         if (map != null && !apiKey.isEmpty())
             map.setTileSource(tileSource(night ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
                     night ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
-        int panel = night ? DARK : Color.WHITE;
-        int foreground = night ? Color.WHITE : Color.rgb(25, 48, 62);
-        int subdued = night ? Color.rgb(191, 225, 236) : Color.rgb(55, 80, 96);
-        if (navigationPanel != null) navigationPanel.setBackground(rounded(panel, 22));
+        int panel = night || active ? DARK : Color.WHITE;
+        int foreground = night || active ? Color.WHITE : Color.rgb(25, 48, 62);
+        int subdued = night || active ? Color.rgb(191, 225, 236) : Color.rgb(55, 80, 96);
+        if (navigationPanel != null) navigationPanel.setBackground(active?drivingCard(20):rounded(panel, 22));
         if (tripMetricsRow != null)
-            tripMetricsRow.setBackground(rounded(night ? DARK : Color.rgb(232, 242, 247), 14));
+            tripMetricsRow.setBackground(active?drivingCard(13):rounded(night ? DARK : Color.rgb(232, 242, 247), 14));
         // The turn card always uses the DriveMate navy with white text and cyan
         // accents, in Light and Dark alike, so it matches the header.
         if (drivingTurnCard != null)
-            drivingTurnCard.setBackground(rounded(DARK, 14));
+            drivingTurnCard.setBackground(drivingCard(18));
         for (TextView caption : tripMetricCaptions) caption.setTextColor(subdued);
         for (TextView value : new TextView[]{tripEtaValue, tripMinutesValue,
                 tripDistanceValue, instructionText,
@@ -2390,22 +2423,9 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private BitmapDrawable makeCarIcon() {
-        Bitmap bitmap = Bitmap.createBitmap(dp(48), dp(48), Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        float cx = bitmap.getWidth() / 2f;
-        float cy = bitmap.getHeight() / 2f;
-        paint.setColor(Color.WHITE);
-        canvas.drawCircle(cx, cy, dp(15), paint);
-        paint.setColor(BLUE);
-        Path arrow = new Path();
-        arrow.moveTo(cx, cy - dp(15));
-        arrow.lineTo(cx + dp(11), cy + dp(11));
-        arrow.lineTo(cx, cy + dp(6));
-        arrow.lineTo(cx - dp(11), cy + dp(11));
-        arrow.close();
-        canvas.drawPath(arrow, paint);
-        return new BitmapDrawable(getResources(), bitmap);
+        Bitmap source=VectorDriveMap.makeVehicleArrow();
+        Bitmap scaled=Bitmap.createScaledBitmap(source,dp(55),dp(55),true);
+        return new BitmapDrawable(getResources(),scaled);
     }
 
     private void centreOnLocation(boolean forceZoom) {
@@ -2470,7 +2490,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // request zero pitch instead of abandoning the smooth-follow engine.
         if (vectorMap != null && showingVector()) {
             double distance = nextJunctionOffsetMetres-along;
-            GeoMath.Point junction = distance >= 0 && distance <= Math.max(120,velocity*8+80)
+            GeoMath.Point junction = distance >= 0 && distance <= Math.max(480,velocity*8+100)
                     ? GeoMath.pointAtDistance(route.points,nextJunctionOffsetMetres) : null;
             vectorMap.setFollowViewport(headerHeight,bottomPanelHeight,junction);
         }
@@ -2666,6 +2686,7 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setVisibility(View.GONE);
         repeatButton.setVisibility(View.VISIBLE);
         refreshButton.setVisibility(View.VISIBLE);
+        applyDrivingControls();
         stopButton.setText("End");
         stopButton.setContentDescription("End navigation");
         setStatus("Navigating with "+route.provider+" · "+destination.title);
@@ -2717,7 +2738,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void applyHighDetailPolicy() {
         if (vectorMap == null) return;
         boolean rotating = active && cameraMode != DrivingDisplayPolicy.CAMERA_NORTH_2D;
-        vectorMap.setHighDetailEnabled(highDetailOnline && !rotating);
+        vectorMap.setHighDetailEnabled(highDetailOnline && !active);
         // Same moments decide map clutter: shops, cafés and bus stops hide
         // while navigating; fuel, EV charging, parking and stations stay.
         vectorMap.setBuildings3D(buildings3d);
@@ -3206,8 +3227,8 @@ public final class MainActivity extends Activity implements LocationListener {
         for (GeoMath.Point point : displayPoints)
             geometry.add(new GeoPoint(point.lat, point.lon));
         routeLine.setPoints(geometry);
-        routeLine.getOutlinePaint().setColor(BLUE);
-        routeLine.getOutlinePaint().setStrokeWidth(dp(5));
+        routeLine.getOutlinePaint().setColor(0xff007dbb);
+        routeLine.getOutlinePaint().setStrokeWidth(dp(11));
         routeLine.getOutlinePaint().setStrokeCap(Paint.Cap.ROUND);
         routeLine.getOutlinePaint().setStrokeJoin(Paint.Join.ROUND);
         map.getOverlays().add(routeLine);
@@ -3261,6 +3282,7 @@ public final class MainActivity extends Activity implements LocationListener {
         guidancePositionConfirmed=false;nextInstruction="";
         setTripMetricLabels(false);
         if(wasConfirmed&&speech!=null)speech.stop();
+        if(vectorMap!=null)vectorMap.clearCurrentRoad();
         if(repeatButton!=null)repeatButton.setEnabled(false);
         if(topTurnTitle!=null)topTurnTitle.setText(title);
         if(topInstructionText!=null)topInstructionText.setText(reason);
@@ -3354,6 +3376,7 @@ public final class MainActivity extends Activity implements LocationListener {
             spokenDistanceIndex=-1;spokenCloseIndex=-1;spokenNowIndex=-1;
         }
         stabilizedAlong = along;
+        if(vectorMap!=null){vectorMap.setConfirmedRouteProgress(along);if(showingVector()&&accuracy<=25)vectorMap.updateCurrentRoad(current);else vectorMap.clearCurrentRoad();}
         if ("DriveMate".equals(route.provider)) { requestComparison(); if(comparisonPermitted()) mapReview.observe(route,comparisonRoute,along); }
         topTurnArrow.setVisibility(View.VISIBLE);
         if (vectorMap != null && showingVector() && !autoFallback
@@ -3449,7 +3472,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? "GPS UNCERTAIN · CHECK ROAD SIGNS"
                 : roundabout ? "ROUNDABOUT"
                         : fork ? "ROAD FORK · FOLLOW ARROW" : "NEXT TURN");
-        int iconSide = dp(roundabout || fork ? 70 : 54);
+        int iconSide = dp(roundabout || fork ? 70 : 62);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
             android.view.ViewGroup.LayoutParams iconParams = topTurnArrow.getLayoutParams();
             iconParams.width = iconSide;
@@ -3465,7 +3488,7 @@ public final class MainActivity extends Activity implements LocationListener {
         topDistanceText.setVisibility(View.VISIBLE);
         // Roundabouts and forks already show the exit in the title and icon,
         // so the road name alone is enough. Other turns keep the full action.
-        topInstructionText.setText((roundabout || fork) && !road.isEmpty() ? road : direction);
+        topInstructionText.setText(DrivingRoadLabel.highlight((roundabout || fork) && !road.isEmpty() ? road : direction));
         topInstructionText.setContentDescription(
                 "Next turn in " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
                 + ": " + direction);
@@ -3486,7 +3509,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + " later · " + followUp;
             nextTurnText.setText(followingTurn);
             boolean showThen = DrivingDisplayPolicy.showFollowingTurn(untilTurn, afterTurn);
-            topNextTurnText.setText(showThen ? followingTurn : "");
+            topNextTurnText.setText(showThen ? DrivingRoadLabel.highlight(followingTurn) : "");
             topNextTurnText.setVisibility(showThen ? View.VISIBLE : View.GONE);
             nextTurnText.setVisibility(View.GONE);
         } else {

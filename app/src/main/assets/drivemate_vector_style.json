@@ -57,7 +57,7 @@
       "source": "world",
       "source-layer": "earth",
       "paint": {
-        "fill-color": "#E7EFDE"
+        "fill-color": "#e0ead8"
       }
     },
     {
@@ -66,7 +66,7 @@
       "source": "world",
       "source-layer": "water",
       "paint": {
-        "fill-color": "#B5DCE9"
+        "fill-color": "#73b8d6"
       }
     },
     {
@@ -87,7 +87,7 @@
       "source": "uk",
       "source-layer": "land",
       "paint": {
-        "fill-color": "#E8EFE2"
+        "fill-color": "#e0ead8"
       }
     },
     {
@@ -96,7 +96,7 @@
       "source": "uk",
       "source-layer": "ocean",
       "paint": {
-        "fill-color": "#B9DCEB"
+        "fill-color": "#73b8d6"
       }
     },
     {
@@ -105,7 +105,7 @@
       "source": "uk",
       "source-layer": "water_polygons",
       "paint": {
-        "fill-color": "#A8D5E7"
+        "fill-color": "#73b8d6"
       }
     },
     {
@@ -127,7 +127,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#A8D5E7",
+        "line-color": "#73b8d6",
         "line-width": [
           "interpolate",
           [
@@ -153,8 +153,8 @@
       "source": "uk",
       "source-layer": "sites",
       "paint": {
-        "fill-color": "#E1ECD6",
-        "fill-opacity": 0.4
+        "fill-color": "#bad3aa",
+        "fill-opacity": 0.55
       }
     },
     {
@@ -183,8 +183,8 @@
       "source-layer": "buildings",
       "minzoom": 13,
       "paint": {
-        "fill-color": "#D7DED6",
-        "fill-outline-color": "#C6D0C8"
+        "fill-color": "#c5d0d2",
+        "fill-outline-color": "#a8b7b9"
       },
       "maxzoom": 15
     },
@@ -305,7 +305,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#CCD4D2",
+        "line-color": "#f5f8f2",
         "line-width": [
           "interpolate",
           [
@@ -317,13 +317,15 @@
           7,
           1.2,
           12,
-          3.1,
+          3.8,
           14,
-          6.5,
+          7.3,
+          16,
+          11,
           18,
-          17,
           19,
-          24
+          19,
+          25
         ]
       },
       "filter": [
@@ -368,7 +370,19 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#FFFFFF",
+        "line-color": [
+          "match",
+          [
+            "get",
+            "kind"
+          ],
+          [
+            "service",
+            "living_street"
+          ],
+          "#b8c4c6",
+          "#a6b2b8"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -380,13 +394,15 @@
           7,
           0.9,
           12,
-          2.2,
+          2.7,
           14,
-          5.1,
+          5.6,
+          16,
+          8.5,
           18,
-          14,
+          15,
           19,
-          19.5
+          20
         ]
       },
       "filter": [
@@ -450,7 +466,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#FAE8CE",
+        "line-color": "#9faeb2",
         "line-width": [
           "interpolate",
           [
@@ -508,7 +524,18 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#F4C98B",
+        "line-color": [
+          "match",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway",
+          "#9b8cc5",
+          "trunk",
+          "#85b39a",
+          "#c4ae85"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -518,15 +545,17 @@
             "zoom"
           ],
           7,
-          1.5,
+          1.7,
           12,
-          3.2,
+          4.5,
           14,
-          6,
-          18,
+          8.4,
           16,
+          12.5,
+          18,
+          20,
           19,
-          22
+          25
         ]
       }
     },
@@ -568,7 +597,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#9A927F",
+        "line-color": "#f5f8f2",
         "line-width": [
           "interpolate",
           [
@@ -626,7 +655,18 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#F8D29D",
+        "line-color": [
+          "match",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway_link",
+          "#9b8cc5",
+          "trunk_link",
+          "#85b39a",
+          "#c4ae85"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -651,9 +691,9 @@
       "type": "fill-extrusion",
       "source": "uk",
       "source-layer": "buildings",
-      "minzoom": 15,
+      "minzoom": 14.5,
       "paint": {
-        "fill-extrusion-color": "#D3DAD5",
+        "fill-extrusion-color": "#c5d0d2",
         "fill-extrusion-height": [
           "interpolate",
           [
@@ -662,13 +702,405 @@
           [
             "zoom"
           ],
-          15,
+          14.5,
           0,
-          15.6,
-          8
+          15.4,
+          6
         ],
         "fill-extrusion-base": 0,
-        "fill-extrusion-opacity": 0.82
+        "fill-extrusion-opacity": 0.88
+      }
+    },
+    {
+      "id": "uk-ref-motorway",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 9,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway"
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 360,
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-padding": 4,
+        "icon-image": "dm-shield-blue",
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "icon-rotation-alignment": "viewport",
+        "text-rotation-alignment": "viewport",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#ffffff"
+      }
+    },
+    {
+      "id": "uk-ref-trunk",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 12,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "trunk"
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 360,
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-padding": 4,
+        "icon-image": "dm-shield-green",
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "icon-rotation-alignment": "viewport",
+        "text-rotation-alignment": "viewport",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#ffffff"
+      }
+    },
+    {
+      "id": "uk-ref-primary",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 12,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "primary"
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 360,
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-padding": 4,
+        "icon-image": "dm-shield-white",
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "icon-rotation-alignment": "viewport",
+        "text-rotation-alignment": "viewport",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#102e43"
+      }
+    },
+    {
+      "id": "uk-ref-secondary",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 12,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "secondary"
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 360,
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-padding": 4,
+        "icon-image": "dm-shield-white",
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "icon-rotation-alignment": "viewport",
+        "text-rotation-alignment": "viewport",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#102e43"
+      }
+    },
+    {
+      "id": "uk-ref-tertiary",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "street_labels",
+      "minzoom": 12,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "tertiary"
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 360,
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-padding": 4,
+        "icon-image": "dm-shield-white",
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "icon-rotation-alignment": "viewport",
+        "text-rotation-alignment": "viewport",
+        "text-keep-upright": true
+      },
+      "paint": {
+        "text-color": "#102e43"
+      }
+    },
+    {
+      "id": "uk-road-ref-fallback",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "streets",
+      "minzoom": 13,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "in",
+          [
+            "get",
+            "kind"
+          ],
+          [
+            "literal",
+            [
+              "motorway",
+              "trunk",
+              "primary",
+              "secondary",
+              "tertiary"
+            ]
+          ]
+        ]
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 420,
+        "text-field": [
+          "to-string",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 11,
+        "icon-image": [
+          "match",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway",
+          "dm-shield-blue",
+          "trunk",
+          "dm-shield-green",
+          "dm-shield-white"
+        ],
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ],
+        "icon-rotation-alignment": "viewport",
+        "text-rotation-alignment": "viewport"
+      },
+      "paint": {
+        "text-color": [
+          "match",
+          [
+            "get",
+            "kind"
+          ],
+          [
+            "motorway",
+            "trunk"
+          ],
+          "#ffffff",
+          "#102e43"
+        ]
+      }
+    },
+    {
+      "id": "uk-motorway-junction-ref",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "pois",
+      "minzoom": 13,
+      "filter": [
+        "all",
+        [
+          "has",
+          "ref"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "motorway_junction"
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "concat",
+          "J",
+          [
+            "to-string",
+            [
+              "get",
+              "ref"
+            ]
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "icon-image": "dm-shield-blue",
+        "icon-text-fit": "both",
+        "icon-text-fit-padding": [
+          3,
+          5,
+          3,
+          5
+        ]
+      },
+      "paint": {
+        "text-color": "#ffffff"
       }
     },
     {
@@ -700,17 +1132,17 @@
           12,
           10,
           16,
-          14,
+          13,
           19,
-          17.5
+          15
         ],
         "symbol-placement": "line",
         "text-rotation-alignment": "map",
-        "symbol-spacing": 240
+        "symbol-spacing": 270
       },
       "paint": {
-        "text-color": "#536372",
-        "text-halo-color": "#FFFFFF",
+        "text-color": "#203a4e",
+        "text-halo-color": "#f1f6ea",
         "text-halo-width": 1.9
       }
     },
@@ -1173,6 +1605,83 @@
         "text-color": "#7A4A12",
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.5
+      }
+    },
+    {
+      "id": "uk-driving-landmarks",
+      "type": "symbol",
+      "source": "uk",
+      "source-layer": "pois",
+      "minzoom": 14,
+      "filter": [
+        "all",
+        [
+          "has",
+          "name"
+        ],
+        [
+          "any",
+          [
+            "has",
+            "historic"
+          ],
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "tourism"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "attraction",
+                "museum",
+                "viewpoint"
+              ]
+            ]
+          ],
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "landmark",
+                "attraction",
+                "museum",
+                "monument"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "layout": {
+        "text-field": [
+          "get",
+          "name"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "text-max-width": 9,
+        "text-padding": 8
+      },
+      "paint": {
+        "text-color": "#203a4e",
+        "text-halo-color": "#f1f6ea",
+        "text-halo-width": 1.6
       }
     },
     {
