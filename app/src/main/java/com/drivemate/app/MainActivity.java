@@ -93,6 +93,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private static final long ROUTE_REFRESH_MS = 300_000L;
 
     private final ExecutorService network = Executors.newSingleThreadExecutor();
+    private final ExecutorService packWorker = Executors.newSingleThreadExecutor();
+    private boolean downloadingLocalPack;
     private final Handler gpsHandler = new Handler(Looper.getMainLooper());
     private boolean gpsLost;
     private final Runnable gpsWatchdog = new Runnable() {
@@ -1309,7 +1311,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * GPS fix and a TomTom key, to keep API use low.
      */
     private void maybeFetchQuickEtas() {
-        if ((!ownRouting() && apiKey.isEmpty()) || places == null || currentLocation == null || active) return;
+        if (localRouting() || (!ownRouting() && apiKey.isEmpty()) || places == null || currentLocation == null || active) return;
         if (!MapStartupPolicy.freshForRouting(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
                 currentLocation.getTime(), System.currentTimeMillis(),
@@ -1412,7 +1414,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "3D buildings · " + (buildings3d ? "On" : "Off"),
                 "DriveMate-first routing and search · " + (ownRouting() ? "Experimental" : "Off"),
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
-                "Independent map survey drafts"
+                "Independent map survey drafts",
+                "Offline routing · UK experimental preview"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1551,6 +1554,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 24: configureIndependent(); break;
                         case 25: showMapReview(); break;
                         case 26: showSurveyNotes(); break;
+                        case 27: showOfflineRouting(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1558,7 +1562,28 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private String ownEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_route_endpoint","");}
     private String ownSearchEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_search_endpoint","");}
-    private boolean ownRouting(){return !ownEndpoint().isEmpty();}
+    private boolean localRouting(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("local_routing_preview",false);}
+    private boolean ownRouting(){return localRouting()||!ownEndpoint().isEmpty();}
+    private void showOfflineRouting(){
+        if(active||route!=null||routing){showError("End or cancel the current journey before changing map data.");return;}
+        LocalRoutingPack pack=new LocalRoutingPack(this);
+        new AlertDialog.Builder(this).setTitle("Offline UK routing (experimental)")
+            .setMessage((pack.installed()?"Verified installation present.":"Download approximately 2.40 GB over unmetered Wi-Fi; extra space needed for decompression.")+"\n\nLocal route previews and mapped place names only. No driving guidance, postcode search or nationwide performance acceptance yet. Map display uses its existing cache.")
+            .setPositiveButton(pack.installed()?"Enable local previews":"Download UK routing",(d,w)->{
+                if(pack.installed()){enableLocalRouting(true);return;}
+                if(downloadingLocalPack){showError("Download already running");return;}
+                downloadingLocalPack=true;setStatus("Preparing UK routing download…");
+                packWorker.execute(()->{try{pack.download(message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing()&&!active&&route==null&&!routing)enableLocalRouting(true);});}
+                    catch(Exception e){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(e.getMessage());});}});
+            }).setNeutralButton("Disable local mode",(d,w)->enableLocalRouting(false)).setNegativeButton("Close",null).show();
+    }
+    private void enableLocalRouting(boolean enabled){
+        if(active||route!=null||routing)return;
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("local_routing_preview",enabled).apply();
+        if(enabled){useLocalMap=true;autoFallback=false;getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("drivemate_vector_map",true).apply();}
+        updateMapVisibility();quickEtaFetchedAt=0;homeEtaLabel=null;workEtaLabel=null;
+        setStatus(enabled?"Offline route preview mode · not for driving":"Offline preview mode disabled");
+    }
     private boolean comparisonPermitted(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("licensed_comparison",false);}
     private void configureIndependent(){
         if(active||route!=null||routing){showError("End or cancel the journey before changing providers.");return;}
@@ -1578,6 +1603,7 @@ public final class MainActivity extends Activity implements LocationListener {
             }).setNegativeButton("Cancel",null).show();
     }
     private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
+        if(localRouting())return new LocalRoutingPack(this).search(query);
         return ownRouting()?DriveMateProvider.search(ownSearchEndpoint(),query,near):TomTomApi.search(apiKey,query,near);
     }
     private void requestComparison(){
@@ -2577,7 +2603,7 @@ public final class MainActivity extends Activity implements LocationListener {
         etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
                 .format(new Date(System.currentTimeMillis()
                         + calculated.timeSeconds * 1000L)));
-        startButton.setVisibility(View.VISIBLE);
+        startButton.setVisibility("DriveMate local preview".equals(calculated.provider)?View.GONE:View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
         if (previewParkingButton != null) previewParkingButton.setVisibility(View.VISIBLE);
         saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save");
@@ -2587,11 +2613,12 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setContentDescription("Cancel route preview");
         stopButton.setVisibility(View.VISIBLE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setStatus("Route ready · tap Start when parked and ready");
+        setStatus("DriveMate local preview".equals(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready");
     }
 
     private void startNavigation() {
         if (route == null || destination == null) return;
+        if ("DriveMate local preview".equals(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
         if (currentLocation == null || System.currentTimeMillis() - currentLocation.getTime() > 15000) {
             showError("Waiting for a fresh GPS position before starting.");
             return;
@@ -2958,7 +2985,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void planRoute(boolean firstRoute) {
         if (routing || destination == null || currentLocation == null || (!ownRouting() && apiKey.isEmpty())) return;
-        if (!hasNetwork()) {
+        if (!localRouting() && !hasNetwork()) {
             setStatus("No internet · current route retained; traffic updates paused");
             if (route == null) showError("Connect to the internet to calculate a route.");
             return;
@@ -2974,10 +3001,11 @@ public final class MainActivity extends Activity implements LocationListener {
         final GeoMath.Point end = destination.point;
         final String keyForRequest = apiKey;
         final String own = ownEndpoint();
-        setStatus(own.isEmpty() ? (firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…") : "Planning DriveMate map route…");
+        final boolean local = localRouting();
+        setStatus(local ? "Calculating local route preview…" : own.isEmpty() ? (firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…") : "Planning DriveMate map route…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
+                TomTomApi.Route calculated = local?new LocalRoutingPack(this).preview(start,end):own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
