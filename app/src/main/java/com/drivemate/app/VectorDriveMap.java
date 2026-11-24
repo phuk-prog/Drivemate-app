@@ -62,6 +62,10 @@ public final class VectorDriveMap {
     // True z16–19 online road/label detail above the local PMTiles z14 ceiling.
     // The local vector map remains beneath these tiles if they fail to load.
     private boolean highDetailEnabled = true;
+    /** Extruded building blocks from z15 (Shortbread has outlines only, no heights). */
+    private boolean buildings3d = true;
+    /** While navigating, general POIs and bus stops are hidden to reduce clutter. */
+    private boolean navigationDetail;
     private String tomtomKey;
     private boolean disposed;
     private GeoMath.Point pendingGps;
@@ -133,6 +137,36 @@ public final class VectorDriveMap {
                 : map.getStyle().getLayer("dm-tomtom-high-detail");
         if (layer != null) layer.setProperties(PropertyFactory.visibility(
                 enabled && !tomtomKey.isEmpty() ? "visible" : "none"));
+    }
+
+    /**
+     * 3D buildings: extruded blocks from zoom 15 with the flat outlines below
+     * that. Off: flat outlines at every zoom. The tiles carry no building
+     * heights, so all blocks share one estimated height (about two storeys).
+     */
+    public void setBuildings3D(boolean enabled) {
+        buildings3d = enabled;
+        if (!ready() || map.getStyle() == null) return;
+        org.maplibre.android.style.layers.Layer blocks = map.getStyle().getLayer("uk-buildings-3d");
+        org.maplibre.android.style.layers.Layer flat = map.getStyle().getLayer("uk-buildings");
+        if (blocks != null) blocks.setProperties(PropertyFactory.visibility(
+                enabled ? "visible" : "none"));
+        if (flat != null) flat.setMaxZoom(enabled ? 15f : 24f);
+    }
+
+    /**
+     * Navigating: keep driving-relevant places (fuel, EV charging, parking,
+     * stations) and hide general shops, cafés and bus stops, which only add
+     * clutter at driving speed. Otherwise show everything the tiles hold.
+     */
+    public void setNavigationDetail(boolean navigating) {
+        navigationDetail = navigating;
+        if (!ready() || map.getStyle() == null) return;
+        for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops"}) {
+            org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer(id);
+            if (layer != null) layer.setProperties(PropertyFactory.visibility(
+                    navigating ? "none" : "visible"));
+        }
     }
 
     public void setNightMode(boolean enabled) {
@@ -244,6 +278,8 @@ public final class VectorDriveMap {
                 installOverlays(style);
                 styleReady = true;
                 setHighDetailEnabled(highDetailEnabled);
+                setBuildings3D(buildings3d);
+                setNavigationDetail(navigationDetail);
                 setTraffic(trafficEnabled);
                 if (pendingGps != null) setVehicle(pendingGps);
                 if (pendingDest != null) setDestination(pendingDest);
