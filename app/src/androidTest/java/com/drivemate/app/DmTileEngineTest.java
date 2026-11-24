@@ -30,7 +30,8 @@ public class DmTileEngineTest{
             android.util.Log.i("OfflineRoutingPilot","DM tile sample "+i+" metres="+result.metres+" ms="+result.ms+" cells="+result.cells.size());
         }
         assertNotNull(result);assertTrue(engine.features(engine.keys()).size()>100);
-        assertTrue(engine.search("Wells",engine.keys()).size()>0);
+        String street=null;for(JSONArray row:engine.features(engine.keys())){JSONObject tags=row.getJSONObject(1);if(tags.has("highway")&&tags.optString("name").length()>=2){street=tags.getString("name");break;}}
+        assertNotNull("Named street fixture",street);assertTrue(engine.search(street,engine.keys()).size()>0);
         try{engine.route(new GeoMath.Point(53.38,-1.47),new GeoMath.Point(51.21,-2.64));fail("Invented route outside coverage");}catch(DmTileEngine.CoverageException expected){}
         final DmTileEngine.Route r=result;final List<JSONArray> features=engine.features(engine.keys());
         InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
