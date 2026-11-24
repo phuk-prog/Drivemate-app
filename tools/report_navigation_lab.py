@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Evidence-grounded report. A successful script run is never a navigation pass."""
-import json,html,collections
+import json,html,collections,re
 from pathlib import Path
 root=Path(__file__).resolve().parents[1]/"navigation-lab"
 e=root/"evidence";e.mkdir(exist_ok=True)
@@ -15,6 +15,14 @@ engine=next(e.glob("drivemate/**/drivemate-engine-results.json"),None)
 own=read(engine,[]) if engine else []
 fix_count=len(trace.get("points",[]))
 rows=[{"application":"DriveMate","scope":"independent engine and renderer only","status":"engine replay completed" if own and len(own)==fix_count else "no complete engine evidence","fixes":len(own),"navigation_confirmed":False,"video":False,"audio_stream":False,"reason":"Production visual/audio guidance not exercised","frames":len(list(e.glob("drivemate/**/*.png"))),"states":dict(collections.Counter(x.get("status","unknown") for x in own))}]
+ui=next(e.glob("drivemate-ui/**/driving-ui-results.json"),None)
+ui_rows=read(ui,[]) if ui else []
+try:audio=(e/"drivemate-ui/audio-levels.txt").read_text()
+except OSError:audio=""
+match=re.search(r"max_volume:\s*(-?[0-9.]+) dB",audio)
+peak=float(match.group(1)) if match else None
+rows[0].update({"production_ui_fixture_fixes":len(ui_rows),"production_ui_active_fixes":sum(x.get("active") is True for x in ui_rows),"production_ui_voice_ready_fixes":sum(x.get("speech_ready") is True for x in ui_rows),"production_ui_frames":len(list((e/"drivemate-ui").rglob("*.png"))),"production_ui_audio_peak_dbfs":peak,"production_ui_fixture_only":True})
+if ui_rows:rows[0]["reason"]="Actual driving UI fixture replay also captured; turn geometry candidates not validated; audio content requires review"
 for pkg,name in names.items():
     row={**packages.get(pkg,{}),**references.get(pkg,{})}
     rows.append({"application":name,"scope":"actual Android application","status":row.get("status","not run"),"fixes":row.get("fixes",0),"navigation_confirmed":row.get("navigation_confirmed") is True,"video":row.get("video",False),"audio_stream":row.get("audio_stream",False),"audio_peak_dbfs":row.get("audio_peak_dbfs"),"audible_signal":row.get("audible_signal",False),"reason":row.get("reason","Active navigation and spoken instructions require review" if row.get("fixes") else "No completed replay"),"version":row.get("version","unknown"),"frames":len(list((e/pkg).glob("*.png")))})
@@ -24,6 +32,6 @@ report={"comparison_complete":False,"confirmed_navigation_apps":confirmed,"targe
 lines=["# DriveMate Navigation Lab — comparison report","","**INCOMPLETE — no app ranking until actual guidance is verified.**","",f"Journey: {trace.get('name','unavailable')}; {trace.get('metres',0):.0f} m; {fix_count} scheduled fixes.","",f"Confirmed navigation sessions: {confirmed}/{len(rows)}.","","| Application | Evidence scope | Status | GPS fixes | Screenshots | Video | Audio stream | Blocker / caveat |","|---|---|---|---:|---:|---|---|---|"]
 def safe(s):return str(s).replace("|","\\|").replace("\n"," ")
 for r in rows:lines.append("| "+" | ".join(safe(x) for x in [r["application"],r["scope"],r["status"],r["fixes"],r["frames"],"yes" if r["video"] else "no","yes" if r["audio_stream"] else "no",r["reason"]])+" |")
-lines+=["","## Junction-level comparison",f"{len(trace.get('turn_candidates',[]))} geometry turn candidates; captures before, during and after turns on confirmed replays. No validated spoken instruction scores yet.","## Audio levels",*[(r["application"]+": "+str(r.get("audio_peak_dbfs"))+" dBFS; audible signal "+str(r.get("audible_signal",False))) for r in rows],"","## DriveMate engine state counts",json.dumps(rows[0]["states"]),"","## Limitations"]+["- "+w for w in report["warnings"]]
+lines+=["","## Junction-level comparison",f"{len(trace.get('turn_candidates',[]))} geometry turn candidates; captures before, during and after turns on confirmed replays. No validated spoken instruction scores yet.","## Audio levels",*[(r["application"]+": "+str(r.get("audio_peak_dbfs"))+" dBFS; audible signal "+str(r.get("audible_signal",False))) for r in rows],"","## DriveMate engine state counts",json.dumps(rows[0]["states"]),"## Actual DriveMate driving UI fixture",json.dumps({k:v for k,v in rows[0].items() if k.startswith("production_ui")}),"","## Limitations"]+["- "+w for w in report["warnings"]]
 (e/"comparison-report.md").write_text("\n".join(lines)+"\n")
 print("\n".join(lines),flush=True)
