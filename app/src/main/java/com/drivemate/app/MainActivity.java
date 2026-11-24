@@ -1697,32 +1697,34 @@ public final class MainActivity extends Activity implements LocationListener {
         if (navigationPanel != null) navigationPanel.setBackground(rounded(panel, 22));
         if (tripMetricsRow != null)
             tripMetricsRow.setBackground(rounded(night ? DARK : Color.rgb(232, 242, 247), 14));
+        // The turn card always uses the DriveMate navy with white text and cyan
+        // accents, in Light and Dark alike, so it matches the header.
         if (drivingTurnCard != null)
-            drivingTurnCard.setBackground(rounded(night ? Color.rgb(14, 47, 66)
-                    : Color.rgb(247, 251, 252), 14));
+            drivingTurnCard.setBackground(rounded(DARK, 14));
         for (TextView caption : tripMetricCaptions) caption.setTextColor(subdued);
         for (TextView value : new TextView[]{tripEtaValue, tripMinutesValue,
-                tripDistanceValue, topInstructionText, topDistanceText, instructionText,
+                tripDistanceValue, instructionText,
                 distanceText, journeyTimeText, etaText}) {
             if (value != null) value.setTextColor(foreground);
         }
-        for (TextView value : new TextView[]{topNextTurnText, nextTurnText,
+        for (TextView value : new TextView[]{topInstructionText, topDistanceText}) {
+            if (value != null) value.setTextColor(Color.WHITE);
+        }
+        if (topNextTurnText != null) topNextTurnText.setTextColor(Color.rgb(201, 231, 239));
+        for (TextView value : new TextView[]{nextTurnText,
                 routeSummary, gpsAccuracyText}) {
             if (value != null) value.setTextColor(subdued);
         }
-        if (topTurnTitle != null) topTurnTitle.setTextColor(
-                night ? CYAN : Color.rgb(0, 105, 130));
+        if (topTurnTitle != null) topTurnTitle.setTextColor(CYAN);
         if (banner != null) banner.setTextColor(
                 night ? CYAN : Color.rgb(0, 96, 130));
-        if (laneGuidanceText != null) laneGuidanceText.setTextColor(
-                night ? CYAN : Color.rgb(0, 101, 130));
+        if (laneGuidanceText != null) laneGuidanceText.setTextColor(CYAN);
         if (trafficNoticeText != null) trafficNoticeText.setTextColor(
                 night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
-        if (topTurnArrow != null) topTurnArrow.setNightMode(night);
+        if (topTurnArrow != null) topTurnArrow.setNightMode(true);   // on the navy card
         if (maneuverIcon != null) maneuverIcon.setNightMode(night);
-        if (junctionDiagram != null) junctionDiagram.setNightMode(night);
-        if (verifiedJunctionRoad != null) verifiedJunctionRoad.setTextColor(
-                night ? CYAN : Color.rgb(0, 100, 131));
+        if (junctionDiagram != null) junctionDiagram.setNightMode(true);  // on the navy card
+        if (verifiedJunctionRoad != null) verifiedJunctionRoad.setTextColor(CYAN);
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
     }
 
