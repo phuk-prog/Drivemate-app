@@ -76,6 +76,7 @@ public final class TomTomApi {
         public final int timeSeconds;
         public final int trafficDelaySeconds;
         public final long fetchedAtMs;
+        public final String provider;
         public final List<RouteIntelligence.LaneSection> laneSections;
         public final List<RouteIntelligence.SpeedSection> speedSections;
         public final List<RouteIntelligence.TrafficSection> trafficSections;
@@ -84,6 +85,10 @@ public final class TomTomApi {
               List<RouteIntelligence.LaneSection> laneSections,
               List<RouteIntelligence.SpeedSection> speedSections,
               List<RouteIntelligence.TrafficSection> trafficSections) {
+            this(points,instructions,lengthMetres,timeSeconds,trafficDelaySeconds,laneSections,speedSections,trafficSections,"TomTom");
+        }
+        Route(List<GeoMath.Point> points, List<Instruction> instructions, double lengthMetres, int timeSeconds, int trafficDelaySeconds, List<RouteIntelligence.LaneSection> laneSections, List<RouteIntelligence.SpeedSection> speedSections, List<RouteIntelligence.TrafficSection> trafficSections, String provider) {
+            this.provider = provider;
             this.points = points;
             this.instructions = instructions;
             this.lengthMetres = lengthMetres;

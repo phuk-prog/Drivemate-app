@@ -304,6 +304,11 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView speedLimitText;
     private LaneGuidanceView laneGuidanceText;
     private NavigationMatch navigationMatch;
+    private final MapReview mapReview = new MapReview();
+    private TomTomApi.Route comparisonRoute;
+    private boolean comparisonBusy;
+    private int reviewGeneration;
+    private long comparisonRequestedAt;
     private long lastRoutePrefetchAt = -1;
     private TextView trafficNoticeText;
     private TextView arrivalHintText;
@@ -500,7 +505,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         && language != TextToSpeech.LANG_NOT_SUPPORTED;
             }
         });
-        if (apiKey.isEmpty()) map.post(this::showKeyDialog);
+        // TomTom credentials optional; configure independent services in Settings.
         else configureTiles();
         ensureLocationPermission();
     }
@@ -1304,7 +1309,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * GPS fix and a TomTom key, to keep API use low.
      */
     private void maybeFetchQuickEtas() {
-        if (apiKey.isEmpty() || places == null || currentLocation == null || active) return;
+        if (ownRouting() || apiKey.isEmpty() || places == null || currentLocation == null || active) return;
         if (!MapStartupPolicy.freshForRouting(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
                 currentLocation.getTime(), System.currentTimeMillis(),
@@ -1404,7 +1409,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 places != null && places.parkedCar() != null
                         ? "Find my parked car" : "Find my parked car · none saved",
                 "Share diagnostics (no location included)",
-                "3D buildings · " + (buildings3d ? "On" : "Off")
+                "3D buildings · " + (buildings3d ? "On" : "Off"),
+                "DriveMate-first routing and search · " + (ownRouting() ? "Experimental" : "Off"),
+                "Journey map review · " + mapReview.snapshot().size() + " findings"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1540,9 +1547,59 @@ public final class MainActivity extends Activity implements LocationListener {
                                     ? "3D buildings on (estimated height; map data has no real heights)"
                                     : "Flat building outlines", Toast.LENGTH_SHORT).show();
                             break;
+                        case 24: configureIndependent(); break;
+                        case 25: showMapReview(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
+    }
+
+    private String ownEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_route_endpoint","");}
+    private String ownSearchEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_search_endpoint","");}
+    private boolean ownRouting(){return !ownEndpoint().isEmpty();}
+    private boolean comparisonPermitted(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("licensed_comparison",false);}
+    private void configureIndependent(){
+        if(active||route!=null||routing){showError("End or cancel the journey before changing providers.");return;}
+        LinearLayout inputs=new LinearLayout(this);inputs.setOrientation(LinearLayout.VERTICAL);inputs.setPadding(dp(18),0,dp(18),0);
+        EditText re=new EditText(this);re.setSingleLine(true);re.setHint("https://your-host/route");re.setText(ownEndpoint());inputs.addView(re);
+        EditText se=new EditText(this);se.setSingleLine(true);se.setHint("https://your-host/api/ (Photon)");se.setText(ownSearchEndpoint());inputs.addView(se);
+        android.widget.CheckBox license=new android.widget.CheckBox(this);license.setText("I have confirmed written permission for TomTom comparison use");license.setChecked(comparisonPermitted());inputs.addView(license);
+        new AlertDialog.Builder(this).setTitle("Experimental DriveMate-first services")
+            .setMessage("Trusted HTTPS endpoints only. No silent TomTom routing fallback. Comparison requires permission under your agreement. Findings stay in this session; never copy TomTom results to OSM.")
+            .setView(inputs).setPositiveButton("Save",(d,w)->{
+                String ru=re.getText().toString().trim(),su=se.getText().toString().trim();
+                if(!ru.isEmpty()&&(!DriveMateProvider.valid(ru)||!ru.endsWith("/route"))){showError("Enter a trusted HTTPS /route endpoint");return;}
+                if(!su.isEmpty()&&!DriveMateProvider.valid(su)){showError("Enter a trusted HTTPS Photon endpoint");return;}
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("own_route_endpoint",ru).putString("own_search_endpoint",su).putBoolean("licensed_comparison",license.isChecked()).apply();
+                setStatus(ru.isEmpty()?"TomTom routing selected":"Experimental DriveMate routing selected");quickEtaFetchedAt=0;homeEtaLabel=null;workEtaLabel=null;
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
+        return ownRouting()?DriveMateProvider.search(ownSearchEndpoint(),query,near):TomTomApi.search(apiKey,query,near);
+    }
+    private void requestComparison(){
+        if(!active||!comparisonPermitted()||apiKey.isEmpty()||route==null||!"DriveMate".equals(route.provider)||comparisonBusy||currentLocation==null||destination==null||!hasNetwork())return;
+        long now=SystemClock.elapsedRealtime();if(comparisonRequestedAt>0&&now-comparisonRequestedAt<180000)return;
+        comparisonRequestedAt=now;comparisonBusy=true;final int generation=reviewGeneration;
+        final GeoMath.Point start=gpsPoint(currentLocation),end=destination.point;final String key=apiKey;
+        network.execute(()->{TomTomApi.Route reference=null;try{reference=TomTomApi.route(key,start,end);}catch(Exception ignored){}
+            final TomTomApi.Route result=reference;runOnUiThread(()->{if(generation!=reviewGeneration)return;comparisonBusy=false;if(active)comparisonRoute=result;});});
+    }
+    private void showMapReview(){
+        if(active){showError("Review map differences after ending navigation.");return;}
+        List<MapReview.Finding> items=mapReview.snapshot();
+        if(items.isEmpty()){new AlertDialog.Builder(this).setTitle("Journey map review").setMessage("No comparable differences recorded. Comparison requires an authorised TomTom connection and aligned road data.").setPositiveButton("Close",null).show();return;}
+        String[] labels=new String[items.size()];for(int i=0;i<labels.length;i++)labels[i]=items.get(i).label();
+        new AlertDialog.Builder(this).setTitle("Map review · "+items.size()+" possible differences").setItems(labels,(d,i)->surveyFinding(items.get(i))).setNeutralButton("Clear",(d,w)->mapReview.clear()).setNegativeButton("Close",null).show();
+    }
+    private void surveyFinding(MapReview.Finding item){
+        EditText evidence=new EditText(this);evidence.setHint("Independently observed location, sign, direction and date");
+        new AlertDialog.Builder(this).setTitle(item.label()).setMessage("Not proof of a map error. Verify the road signs or permitted official records independently. Only independent observations can be shared; never copy TomTom results.")
+            .setView(evidence).setPositiveButton("Share survey note",(d,w)->{
+                String note=evidence.getText().toString().trim();if(note.isEmpty()){showError("Independent survey evidence required.");return;}
+                android.content.Intent share=new android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"Independent road survey: "+note);
+                startActivity(android.content.Intent.createChooser(share,"Share independent survey"));
+            }).setNegativeButton("Close",null).show();
     }
 
     /** Always display the version installed in Android's package metadata.
@@ -1810,7 +1867,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         showError("Enter a complete address or postcode.");
                         return;
                     }
-                    if (apiKey.isEmpty()) {
+                    if (!ownRouting() && apiKey.isEmpty()) {
                         showKeyDialog();
                         return;
                     }
@@ -1819,7 +1876,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     network.execute(() -> {
                         try {
                             List<TomTomApi.Destination> options =
-                                    TomTomApi.search(apiKey, query, near);
+                                    providerSearch(query, near);
                             runOnUiThread(() -> {
                                 if (isFinishing()) return;
                                 if (options.isEmpty()) {
@@ -2351,7 +2408,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void searchDestination() {
-        if (apiKey.isEmpty()) {
+        if (!ownRouting() && apiKey.isEmpty()) {
             showKeyDialog();
             return;
         }
@@ -2372,7 +2429,7 @@ public final class MainActivity extends Activity implements LocationListener {
         final int searchId = ++requestGeneration;
         network.execute(() -> {
             try {
-                List<TomTomApi.Destination> found = TomTomApi.search(apiKey, query, near);
+                List<TomTomApi.Destination> found = providerSearch(query, near);
                 runOnUiThread(() -> {
                     if (searchId != requestGeneration || isFinishing()) return;
                     if (found.isEmpty()) {
@@ -2531,7 +2588,8 @@ public final class MainActivity extends Activity implements LocationListener {
         refreshButton.setVisibility(View.VISIBLE);
         stopButton.setText("End");
         stopButton.setContentDescription("End navigation");
-        setStatus("Navigating to " + destination.title);
+        setStatus("Navigating with "+route.provider+" · "+destination.title);
+        mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
         say("Navigation started. Follow the directions.");
         lastCameraUpdate = 0;
         previousInstructionIndex = 0;
@@ -2670,6 +2728,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     /** Parking information is requested only on demand and never guessed. */
     private void findNearbyParking() {
+        if (ownRouting()) { showError("Independent parking search not configured yet."); return; }
         if (destination == null || apiKey.isEmpty()) {
             showError("Choose a destination and configure TomTom before finding parking.");
             return;
@@ -2868,7 +2927,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void planRoute(boolean firstRoute) {
-        if (routing || destination == null || currentLocation == null || apiKey.isEmpty()) return;
+        if (routing || destination == null || currentLocation == null || (!ownRouting() && apiKey.isEmpty())) return;
         if (!hasNetwork()) {
             setStatus("No internet · current route retained; traffic updates paused");
             if (route == null) showError("Connect to the internet to calculate a route.");
@@ -2884,10 +2943,11 @@ public final class MainActivity extends Activity implements LocationListener {
         final GeoMath.Point start = gpsPoint(currentLocation);
         final GeoMath.Point end = destination.point;
         final String keyForRequest = apiKey;
-        setStatus(firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…");
+        final String own = ownEndpoint();
+        setStatus(own.isEmpty() ? (firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…") : "Planning DriveMate map route…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = TomTomApi.route(keyForRequest, start, end);
+                TomTomApi.Route calculated = own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
@@ -3042,7 +3102,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (firstRoute) {
             showPreview(calculated);
         } else {
-            setStatus("Route updated · latest TomTom traffic included");
+            setStatus("Route updated · "+calculated.provider);
             say("Updated route ready.");
             if (currentLocation != null) updateGuidance(currentLocation);
         }
@@ -3158,6 +3218,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         double along = projected.alongMetres;
         stabilizedAlong = along;
+        if ("DriveMate".equals(route.provider)) { requestComparison(); if(comparisonPermitted()) mapReview.observe(route,comparisonRoute,along); }
         topTurnArrow.setVisibility(View.VISIBLE);
         if (vectorMap != null && showingVector() && !autoFallback
                 && (lastRoutePrefetchAt < 0 || now-lastRoutePrefetchAt >= 90000)) {
@@ -3497,6 +3558,8 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void stopNavigation(boolean arrived) {
+        boolean reviewAvailable=active&&!mapReview.snapshot().isEmpty();
+        reviewGeneration++;comparisonBusy=false;comparisonRoute=null;
         boolean offerParkedCar = arrived && currentLocation != null
                 && ArrivalPolicy.canSaveParking(
                         currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
@@ -3574,7 +3637,8 @@ public final class MainActivity extends Activity implements LocationListener {
             if (speech != null) speech.stop();
         }
         map.invalidate();
-        if (offerParkedCar && !isFinishing()) offerSaveParkedCar();
+        if (reviewAvailable && !isFinishing()) showMapReview();
+        else if (offerParkedCar && !isFinishing()) offerSaveParkedCar();
     }
 
     private void setStatus(String message) {
