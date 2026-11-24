@@ -26,8 +26,17 @@ public class DmNavigationSessionTest {
         for(int i=0;i<1000;i++){
             GeoMath.Point position=GeoMath.pointAtDistance(path.points,length*i/1000.0);
             DmNavigationSession.Update u=session.fix(position,5,time+=1000,false);
-            assertTrue(u.status==DmNavigationSession.Status.ON_ROUTE||u.status==DmNavigationSession.Status.ARRIVAL_PREVIEW);
+            assertTrue(u.status==DmNavigationSession.Status.ON_ROUTE||u.status==DmNavigationSession.Status.ARRIVAL_PREVIEW||u.status==DmNavigationSession.Status.ROAD_END_ACCESS_UNVERIFIED);
         }
+        GeoMath.Point roadEnd=path.points.get(path.points.size()-1);
+        assertTrue(GeoMath.distance(roadEnd,b)>35);
+        assertEquals(DmNavigationSession.Status.ROAD_END_ACCESS_UNVERIFIED,session.fix(roadEnd,5,0,time+=1000,false).status);
+        DmNavigationSession exact=new DmNavigationSession(new DmTileEngine(raw,hash,offline),offline,new File(root,"exact.json"),hash);
+        DmTileEngine.Route exactRoute=exact.plan(a,roadEnd,false,0,1);
+        GeoMath.Point finalPoint=exactRoute.points.get(exactRoute.points.size()-1);
+        assertEquals(DmNavigationSession.Status.ON_ROUTE,exact.fix(finalPoint,5,0,1000,false).status);
+        assertEquals(DmNavigationSession.Status.ON_ROUTE,exact.fix(finalPoint,5,0,2000,false).status);
+        assertEquals(DmNavigationSession.Status.ARRIVAL_PREVIEW,exact.fix(finalPoint,5,0,3000,false).status);
         assertEquals(DmNavigationSession.Status.UNCERTAIN,session.fix(dev,100,time+=1000,false).status);
         assertEquals(DmNavigationSession.Status.OFF_ROUTE,session.fix(dev,5,time+=1000,false).status);
         assertEquals(DmNavigationSession.Status.OFF_ROUTE,session.fix(dev,5,time+=1000,false).status);

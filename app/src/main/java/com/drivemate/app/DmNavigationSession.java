@@ -7,13 +7,14 @@ import android.util.AtomicFile;
 
 /** Single-threaded experimental navigation state machine. No real-road guidance. */
 public final class DmNavigationSession {
-    public enum Status { ON_ROUTE, UNCERTAIN, OFF_ROUTE, REROUTED, COVERAGE_MISSING, ARRIVAL_PREVIEW }
+    public enum Status { ON_ROUTE, UNCERTAIN, OFF_ROUTE, REROUTED, COVERAGE_MISSING, ROAD_END_ACCESS_UNVERIFIED, ARRIVAL_PREVIEW }
     public static final class Update {
         public final Status status;public final double remaining,offRoute;public final DmTileEngine.Route route;
         Update(Status s,double r,double o,DmTileEngine.Route path){status=s;remaining=r;offRoute=o;route=path;}
     }
     private final DmTileEngine engine;private final DmTileDiskSource disk;
     private final AtomicFile state;private final String snapshot;
+    private final DmRouteEndPolicy endPolicy=new DmRouteEndPolicy();
     private GeoMath.Point destination;private DmTileEngine.Route route;
     private long lastFix=-1,lastAttempt=-60000;private int misses;
     public DmNavigationSession(DmTileEngine engine,DmTileDiskSource disk,File state,String snapshot){
@@ -23,7 +24,7 @@ public final class DmNavigationSession {
         if(!valid(start)||!valid(end))throw new IOException("Invalid journey coordinates");
         DmTileEngine.Route candidate=engine.route(start,end,fetch?null:disk.availableCells());
         if(fetch){DmCellPlanner.Coverage coverage=engine.coverage(candidate,radius,budget);disk.prefetch(coverage.cells);}
-        save(end);destination=end;route=candidate;misses=0;lastFix=-1;lastAttempt=-60000;return route;
+        save(end);destination=end;route=candidate;endPolicy.reset();misses=0;lastFix=-1;lastAttempt=-60000;return route;
     }
     private void save(GeoMath.Point end)throws Exception{
         JSONObject o=new JSONObject().put("snapshot",snapshot).put("lat",end.lat).put("lon",end.lon);
@@ -38,24 +39,28 @@ public final class DmNavigationSession {
     }
     private static boolean valid(GeoMath.Point p){return p!=null&&Double.isFinite(p.lat)&&Double.isFinite(p.lon)&&Math.abs(p.lat)<=90&&Math.abs(p.lon)<=180;}
     public Update fix(GeoMath.Point gps,double accuracy,long elapsedMs,boolean fetch)throws Exception{
+        return fix(gps,accuracy,Double.NaN,elapsedMs,fetch);
+    }
+    public Update fix(GeoMath.Point gps,double accuracy,double speed,long elapsedMs,boolean fetch)throws Exception{
         if(route==null)throw new IOException("No active preview");
         if(!valid(gps)||!Double.isFinite(accuracy)||accuracy<0||accuracy>35||elapsedMs<0||elapsedMs<=lastFix){
-            misses=0;return new Update(Status.UNCERTAIN,Double.NaN,Double.NaN,route);
+            endPolicy.reset();misses=0;return new Update(Status.UNCERTAIN,Double.NaN,Double.NaN,route);
         }
         lastFix=elapsedMs;GeoMath.Progress progress=GeoMath.project(route.points,gps);
         double remaining=Math.max(0,progress.totalMetres-progress.alongMetres);
         if(progress.offRouteMetres<=Math.max(35,accuracy*2)){
-            misses=0;Status status=remaining<25&&GeoMath.distance(gps,destination)<35?Status.ARRIVAL_PREVIEW:Status.ON_ROUTE;
+            misses=0;DmRouteEndPolicy.State end=endPolicy.observe(remaining,GeoMath.distance(gps,route.points.get(route.points.size()-1)),GeoMath.distance(gps,destination),accuracy,speed,elapsedMs);
+            Status status=end==DmRouteEndPolicy.State.ARRIVAL_PREVIEW?Status.ARRIVAL_PREVIEW:end==DmRouteEndPolicy.State.ROAD_END_ACCESS_UNVERIFIED?Status.ROAD_END_ACCESS_UNVERIFIED:Status.ON_ROUTE;
             return new Update(status,remaining,progress.offRouteMetres,route);
         }
-        misses++;
+        endPolicy.reset();misses++;
         if(misses<3||elapsedMs-lastAttempt<10000)return new Update(Status.OFF_ROUTE,remaining,progress.offRouteMetres,route);
         lastAttempt=elapsedMs;
         try{
             DmTileEngine.Route next=engine.route(gps,destination,fetch?null:disk.availableCells());
-            route=next;misses=0;return new Update(Status.REROUTED,GeoMath.length(next.points),progress.offRouteMetres,route);
+            route=next;endPolicy.reset();misses=0;return new Update(Status.REROUTED,GeoMath.length(next.points),progress.offRouteMetres,route);
         }catch(IOException e){return new Update(Status.COVERAGE_MISSING,Double.NaN,progress.offRouteMetres,route);}
     }
     public DmTileEngine.Route current(){return route;}
-    public void clear(){state.delete();route=null;destination=null;misses=0;}
+    public void clear(){state.delete();route=null;destination=null;endPolicy.reset();misses=0;}
 }
