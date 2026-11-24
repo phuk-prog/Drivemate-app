@@ -24,6 +24,8 @@ jobs:
           python3 tools/prepare_offline_routing_pilot.py
           python3 tools/prepare_dmtiles_pilot.py
           python3 tools/fetch_pinned_map.py
+      - name: Validate APK filename and traversal regression tests
+        run: python3 -m unittest discover -s tools -p test_navigation_lab_apk.py -v
       - name: Generate shared GPS trace and verify reference APKs against signed F-Droid index
         run: python3 tools/prepare_navigation_lab.py
       - name: Prepare optional local reference maps

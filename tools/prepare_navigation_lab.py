@@ -8,6 +8,16 @@ ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/"navigation-lab";OUT.mkdir(exist_ok=True)
 APPS={"OsmAnd":"net.osmand.plus","Organic Maps":"app.organicmaps","CoMaps":"app.comaps.fdroid","Navit":"org.navitproject.navit","Navi":"no.navi.app"}
 FDROID="43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"
+def apk_filename(name):
+    """F-Droid v2 names are repository-relative, optionally prefixed with one slash."""
+    if not isinstance(name,str):raise ValueError("Invalid APK filename type")
+    filename=name[1:] if name.startswith("/") else name
+    # Validate the stem separately to avoid accidental regex escaping of the suffix.
+    if not filename.endswith(".apk") or ".." in filename or len(filename)>255:
+        raise ValueError("Unsafe APK filename: "+repr(name)[:160])
+    if not re.fullmatch("[A-Za-z0-9][A-Za-z0-9._-]*",filename[:-4]):
+        raise ValueError("Unsafe APK filename: "+repr(name)[:160])
+    return filename
 def fetch(url,path,maxbytes):
     h=hashlib.sha256();size=0
     try:
@@ -103,8 +113,8 @@ def download_apps():
                 compatible.append(v)
             if not compatible:raise ValueError("No compatible x86 Android build in signed index")
             v=max(compatible,key=lambda v:int(v["manifest"]["versionCode"]))
-            m=v["manifest"];f=v["file"];filename=f["name"].lstrip("/")
-            if not re.fullmatch(r"[A-Za-z0-9._-]+\\.apk",filename):raise ValueError("Unsafe APK filename")
+            m=v["manifest"];f=v["file"];filename=apk_filename(f["name"])
+            print("LAB_APK_SELECTED",pkg,filename,m["versionCode"],flush=True)
             sha,size=fetch("https://f-droid.org/repo/"+filename,OUT/(pkg+".apk"),300_000_000)
             if sha!=f["sha256"] or size!=f["size"]:
                 (OUT/(pkg+".apk")).unlink();raise ValueError("APK checksum or size mismatch")
