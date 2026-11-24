@@ -81,6 +81,10 @@ public final class VectorDriveMap {
     private double lastRenderedZoom = Double.NaN;
     private double lastRenderedBearing = Double.NaN;
     private double lastRenderedTilt = Double.NaN;
+    private int followTop, followBottom;
+    private GeoMath.Point followJunction;
+    private double framingZoomOut;
+    private long lastFramingCheck;
     private double lastRenderedVehicleAngle = Double.NaN;
     private Runnable onUserGesture;
     private double pendingZoom = 14.5, pendingBearing;
@@ -162,6 +166,7 @@ public final class VectorDriveMap {
      */
     public void setNavigationDetail(boolean navigating) {
         navigationDetail = navigating;
+        if (!navigating) { framingZoomOut=0; followJunction=null; }
         if (!ready() || map.getStyle() == null) return;
         setBuildings3D(buildings3d);
         for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops"}) {
@@ -504,11 +509,42 @@ public final class VectorDriveMap {
      * restarted 650ms animation. Android's frame clock runs independently
      * from the GPS (normally 1Hz) and samples a time-based smooth controller.
      */
+    public void setFollowViewport(int top, int bottom, GeoMath.Point junction) {
+        followTop=Math.max(0,top); followBottom=Math.max(0,bottom); followJunction=junction;
+    }
+
+    // Check the actual projection at a low cadence, rather than assuming the
+    // route-arc-length estimate always fits a pitched or narrow display.
+    private double viewportZoomOut(SmoothFollowCamera.Frame frame) {
+        if (!ready() || !navigationDetail || lastRenderedCamera==null || frame.vehicle==null)
+            return 0;
+        long now=android.os.SystemClock.elapsedRealtime();
+        if(now-lastFramingCheck<500)return framingZoomOut;
+        lastFramingCheck=now;
+        int h=view.getHeight(), w=view.getWidth(), bottom=h-followBottom;
+        if(w<100 || bottom-followTop<120)return framingZoomOut;
+        android.graphics.PointF car=map.getProjection().toScreenLocation(
+                new LatLng(frame.vehicle.lat,frame.vehicle.lon));
+        android.graphics.PointF turn=followJunction==null?null:map.getProjection().toScreenLocation(
+                new LatLng(followJunction.lat,followJunction.lon));
+        boolean clipped=outside(car,w,followTop,bottom,16)
+                || (turn!=null && outside(turn,w,followTop,bottom,16));
+        boolean safelyInside=!outside(car,w,followTop,bottom,48)
+                && (turn==null || !outside(turn,w,followTop,bottom,48));
+        if(clipped)framingZoomOut=Math.min(.8,framingZoomOut+.12);
+        else if(safelyInside)framingZoomOut=Math.max(0,framingZoomOut-.06);
+        return framingZoomOut;
+    }
+    private static boolean outside(android.graphics.PointF point,int width,int top,int bottom,int margin){
+        return point==null || !Float.isFinite(point.x) || !Float.isFinite(point.y)
+                || point.x<margin || point.x>width-margin || point.y<top+margin || point.y>bottom-margin;
+    }
+
     public void followFrame(SmoothFollowCamera.Frame frame) {
         if (frame == null) return;
         // NavigationCamera zoom is in osmdroid units; convert for MapLibre.
         double mapZoom = NavigationCamera.toMapLibreZoom(frame.zoom,
-                activity.getResources().getDisplayMetrics().density);
+                activity.getResources().getDisplayMetrics().density) - viewportZoomOut(frame);
         pendingCamera = frame.center;
         pendingZoom = mapZoom;
         pendingBearing = frame.bearing;
@@ -593,6 +629,7 @@ public final class VectorDriveMap {
     public void prefetch(GeoMath.Point point) {
         if (point != null) tiles.prefetchAround(point.lat, point.lon);
     }
+    public void prefetchRoute(List<GeoMath.Point> ahead) { tiles.prefetchRoute(ahead); }
     public String cacheStats() {
         return tiles.localHits() + " local reads, " + tiles.downloadedTiles()
                 + " new tiles, " + tiles.errors() + " errors";

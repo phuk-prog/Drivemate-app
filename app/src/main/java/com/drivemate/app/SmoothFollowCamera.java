@@ -262,7 +262,7 @@ public final class SmoothFollowCamera {
         // vehicle arrow cannot point down the exit before making the turn.
         double toTurn = Math.max(0, nextUnconfirmedTurn
                 - Math.max(0, visualAlong - measuredProgress));
-        double ahead = clamp(toTurn - 5, 7, 22);
+        double ahead = Math.min(toTurn, clamp(toTurn - 5, 0, 22));
         GeoMath.Point headingStart = path.pointAt(Math.max(0, visualAlong - 3));
         GeoMath.Point headingEnd = path.pointAt(
                 Math.min(path.lengthMetres, visualAlong + ahead));

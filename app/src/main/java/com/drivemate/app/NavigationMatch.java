@@ -17,6 +17,7 @@ public final class NavigationMatch {
         }
     }
     public NavigationMatch(List<GeoMath.Point> path) {
+        if (path == null || path.size() < 2) throw new IllegalArgumentException("route required");
         this.path = path;
         offsets = new double[path.size()];
         for (int i=1;i<path.size();i++)
@@ -58,9 +59,10 @@ public final class NavigationMatch {
         boolean distinct=time>lastSample;
         lastSample=Math.max(lastSample,time);
         boolean ambiguous=Math.abs(alternateAlong-bestAlong)>35 && alternate-best<8;
-        boolean good=distinct && Float.isFinite(accuracy) && accuracy<=35
+        boolean good=distinct && Float.isFinite(accuracy) && accuracy>=0 && accuracy<=35
                 && bestOff<=Math.min(30,Math.max(12,accuracy*1.3)) && !ambiguous;
         if(good) {confirmed=Math.max(previous,bestAlong);confirmedAt=time;}
+        else {pendingInstruction=-1;confirmations=0;}
         return new State(new GeoMath.Progress(Math.max(0,confirmed),
                 good?bestOff:minOff,total),good);
     }

@@ -304,6 +304,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView speedLimitText;
     private LaneGuidanceView laneGuidanceText;
     private NavigationMatch navigationMatch;
+    private long lastRoutePrefetchAt = -1;
     private TextView trafficNoticeText;
     private TextView arrivalHintText;
     private Button findParkingButton;
@@ -2202,7 +2203,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!active || smoothFollow == null) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
             if (!active || smoothFollow == null) vectorMap.setVehicle(smoothed);
-            if (!autoFallback) vectorMap.prefetch(gpsPoint(fix));
+            if (!autoFallback && !active) vectorMap.prefetch(gpsPoint(fix));
         }
         if ((!active || smoothFollow == null) && fix.hasBearing()
                 && fix.hasSpeed() && fix.getSpeed() > 1.5f)
@@ -2331,6 +2332,12 @@ public final class MainActivity extends Activity implements LocationListener {
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
+        if (vectorMap != null && showingVector()) {
+            double distance = nextJunctionOffsetMetres-along;
+            GeoMath.Point junction = distance >= 0 && distance <= Math.max(120,velocity*8+80)
+                    ? GeoMath.pointAtDistance(route.points,nextJunctionOffsetMetres) : null;
+            vectorMap.setFollowViewport(headerHeight,bottomPanelHeight,junction);
+        }
         target = new NavigationCamera.Frame(target.center, target.zoom,
                 target.roadBearingDegrees, target.junctionMetres,
                 target.cameraCenterAlongMetres,
@@ -2530,6 +2537,7 @@ public final class MainActivity extends Activity implements LocationListener {
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
         navigationMatch = null;
+        lastRoutePrefetchAt = -1;
         observedSpeed = 0;
         applyHighDetailPolicy();
         startBackgroundNavigation();
@@ -3021,6 +3029,7 @@ public final class MainActivity extends Activity implements LocationListener {
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
         navigationMatch = null;
+        lastRoutePrefetchAt = -1;
         observedSpeed = 0;
         arrivalPolicy.reset();
         spokenDistanceIndex = -1;
@@ -3105,6 +3114,7 @@ public final class MainActivity extends Activity implements LocationListener {
         GeoMath.Point current = gpsPoint(fix);
         long now = SystemClock.elapsedRealtime();
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
+        if (System.currentTimeMillis() - fix.getTime() > 10000) return;
         if (navigationMatch == null) navigationMatch = new NavigationMatch(route.points);
         NavigationMatch.State matched = navigationMatch.match(current, accuracy,
                 fix.hasSpeed() ? fix.getSpeed() : 0f,
@@ -3133,6 +3143,8 @@ public final class MainActivity extends Activity implements LocationListener {
 
         if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {
             topTurnTitle.setText("POSITION UNCERTAIN · CHECK ROAD SIGNS");
+            topInstructionText.setText("Waiting for reliable GPS");
+            topTurnArrow.setVisibility(View.INVISIBLE);
             topDistanceText.setVisibility(View.GONE);
             topNextTurnText.setVisibility(View.GONE);
             if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
@@ -3146,6 +3158,15 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         double along = projected.alongMetres;
         stabilizedAlong = along;
+        topTurnArrow.setVisibility(View.VISIBLE);
+        if (vectorMap != null && showingVector() && !autoFallback
+                && (lastRoutePrefetchAt < 0 || now-lastRoutePrefetchAt >= 90000)) {
+            lastRoutePrefetchAt = now;
+            List<GeoMath.Point> ahead = new ArrayList<>();
+            for (int d=500; d<=4000 && along+d<projected.totalMetres; d+=500)
+                ahead.add(GeoMath.pointAtDistance(route.points, along+d));
+            vectorMap.prefetchRoute(ahead);
+        }
         if (fix.hasSpeed() && fix.getSpeed() >= 3) {
             observedSpeed = observedSpeed == 0 ? fix.getSpeed()
                     : 0.88 * observedSpeed + 0.12 * fix.getSpeed();
@@ -3288,10 +3309,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (untilTurn <= immediate && spokenNowIndex != next) {
             spokenNowIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 2)) say(direction);
-        } else if (untilTurn > immediate && untilTurn <= approach && spokenCloseIndex != next) {
+        } else if (untilTurn > immediate && untilTurn <= approach && spokenCloseIndex != next
+                && spokenNowIndex != next) {
             spokenCloseIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 1)) say(nextInstruction);
-        } else if (untilTurn > approach && untilTurn <= early && spokenDistanceIndex != next) {
+        } else if (untilTurn > approach && untilTurn <= early && spokenDistanceIndex != next
+                && spokenCloseIndex != next && spokenNowIndex != next) {
             spokenDistanceIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 0)) say(nextInstruction);
         }
@@ -3535,6 +3558,7 @@ public final class MainActivity extends Activity implements LocationListener {
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
         navigationMatch = null;
+        lastRoutePrefetchAt = -1;
         observedSpeed = 0;
         followLocation = true;
         updateFollowButton();

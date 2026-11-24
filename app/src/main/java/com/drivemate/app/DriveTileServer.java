@@ -54,6 +54,7 @@ public final class DriveTileServer implements AutoCloseable {
     private volatile PmTilesReader archive;
     private volatile boolean closed;
     private volatile long prefetchAt;
+    private final java.util.concurrent.atomic.AtomicBoolean routePrefetchPending = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile int lastPrefetchX = -1;
     private volatile int lastPrefetchY = -1;
     private volatile Runnable onFirstTile;
@@ -292,6 +293,30 @@ public final class DriveTileServer implements AutoCloseable {
             }
             trim();
         });
+    }
+
+    /** A small route corridor, on unmetered Wi-Fi only; no unbounded task queue. */
+    public void prefetchRoute(List<GeoMath.Point> ahead) {
+        if (closed || ahead == null || ahead.isEmpty() || !unmetered()
+                || !routePrefetchPending.compareAndSet(false,true)) return;
+        List<GeoMath.Point> snapshot = new ArrayList<>(ahead.subList(0,Math.min(8,ahead.size())));
+        try {
+            prefetcher.execute(() -> {
+                try {
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    for (GeoMath.Point point : snapshot) {
+                        if (closed || !unmetered()) break;
+                        int x=tileX(point.lon,MAX_ZOOM), y=tileY(point.lat,MAX_ZOOM);
+                        if (!seen.add(x+":"+y)) continue;
+                        try { fetchTile(MAX_ZOOM,x,y); }
+                        catch(IOException error) { break; }
+                    }
+                    trim();
+                } finally { routePrefetchPending.set(false); }
+            });
+        } catch(java.util.concurrent.RejectedExecutionException closedExecutor) {
+            routePrefetchPending.set(false);
+        }
     }
 
     public static int tileX(double lon, int z) {
