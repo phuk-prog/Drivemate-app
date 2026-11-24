@@ -1,7 +1,7 @@
 name: Real map on-device offline routing proof
 on:
   push:
-    branches: ['feat/offline-routing-proof-20261124','feat/local-navigation-20261124','feat/drivemate-own-stack-20261124']
+    branches: ['feat/offline-routing-proof-20261124','feat/local-navigation-20261124','feat/drivemate-own-stack-20261124','feat/drivemate-2-independent-20261124']
   workflow_dispatch:
 permissions:
   contents: read

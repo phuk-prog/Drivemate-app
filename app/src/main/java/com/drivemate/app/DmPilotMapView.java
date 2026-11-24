@@ -8,7 +8,8 @@ import java.util.*;
 public final class DmPilotMapView extends View{
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final List<JSONArray> features;
-    private final List<GeoMath.Point> route;
+    private List<GeoMath.Point> route;
+    public void updateRoute(List<GeoMath.Point> next){route=next;for(GeoMath.Point p:next)include(p.lat,p.lon);invalidate();}
     private boolean perspective;
     public void togglePerspective(){perspective=!perspective;invalidate();}
     private double minLat=90,maxLat=-90,minLon=180,maxLon=-180;
