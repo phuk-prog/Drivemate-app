@@ -178,28 +178,44 @@ public final class TomTomApi {
         return results;
     }
 
+    static final class EmptyGeometryException extends IOException {
+        final double providerLength;
+        EmptyGeometryException(double providerLength) {
+            super("TomTom route geometry is empty."); this.providerLength=providerLength;
+        }
+    }
+    interface RouteRequest { JSONObject get(String url) throws IOException, JSONException; }
     public static Route route(String key, GeoMath.Point start, GeoMath.Point destination)
+            throws IOException, JSONException {
+        return route(key,start,destination,TomTomApi::requestJson);
+    }
+    static Route route(String key, GeoMath.Point start, GeoMath.Point destination, RouteRequest request)
             throws IOException, JSONException {
         String pair = coordinate(start.lat) + "," + coordinate(start.lon) + ":"
                 + coordinate(destination.lat) + "," + coordinate(destination.lon);
         String url = "https://api.tomtom.com/routing/1/calculateRoute/" + pair + "/json"
                 + "?key=" + encode(key)
-                + "&travelMode=car&routeType=fastest&traffic=true"
+                + "&travelMode=car&routeType=fastest&traffic=true&routeRepresentation=polyline"
                 + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
-        JSONObject response;
         try {
-            response = requestJson(url
-                    + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic");
+            return parseRoute(request.get(url
+                    + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic"));
         } catch (IOException error) {
-            // An older/limited key must not prevent normal navigation.
-            // Only retry metadata-related 400/403 errors, not rate limiting,
-            // connection failures or server errors.
-            String message = error.getMessage();
-            if (message == null || (!message.startsWith("TomTom HTTP 400.")
-                    && !message.startsWith("TomTom HTTP 403."))) throw error;
-            response = requestJson(url);
+            String message=error.getMessage();
+            if (!(error instanceof EmptyGeometryException) &&
+                    (message==null||(!message.startsWith("TomTom HTTP 400.")&&!message.startsWith("TomTom HTTP 403.")))) throw error;
         }
-        return parseRoute(response);
+        // Retry once without optional metadata. Never synthesize a road line,
+        // invent instructions, or silently switch to another routing provider.
+        try {
+            return parseRoute(request.get(url));
+        } catch (EmptyGeometryException error) {
+            if (Double.isFinite(error.providerLength) && error.providerLength>=0
+                    && error.providerLength<=1 && GeoMath.distance(start,destination)<=100) {
+                throw new IOException("Destination is nearby, but TomTom returned no driving route. Check the entrance or select a nearby road.",error);
+            }
+            throw new IOException("TomTom returned no usable road route after retry. Try the destination entrance or another nearby road.",error);
+        }
     }
 
     /** Package-private to test real response shapes without network/API keys. */
@@ -216,9 +232,11 @@ public final class TomTomApi {
         // removed from the drawing/guidance geometry.
         List<Double> originalPointOffsets = new ArrayList<>();
         double geometryMetres = 0;
-        JSONArray legs = route.getJSONArray("legs");
+        JSONArray legs = route.optJSONArray("legs");
+        if (legs == null) throw new EmptyGeometryException(summary.optDouble("lengthInMeters",Double.NaN));
         for (int l = 0; l < legs.length(); l++) {
-            JSONArray coords = legs.getJSONObject(l).getJSONArray("points");
+            JSONArray coords = legs.getJSONObject(l).optJSONArray("points");
+            if (coords == null) continue;
             for (int i = 0; i < coords.length(); i++) {
                 JSONObject p = coords.getJSONObject(i);
                 GeoMath.Point point = new GeoMath.Point(p.getDouble("latitude"),
@@ -235,7 +253,7 @@ public final class TomTomApi {
                 originalPointOffsets.add(geometryMetres);
             }
         }
-        if (points.size() < 2) throw new IOException("TomTom route geometry is empty.");
+        if (points.size() < 2) throw new EmptyGeometryException(summary.optDouble("lengthInMeters",Double.NaN));
 
         List<Instruction> steps = new ArrayList<>();
         JSONObject guidance = route.optJSONObject("guidance");
