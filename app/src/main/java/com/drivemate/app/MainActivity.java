@@ -371,6 +371,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private double lastCameraBearing = Double.NaN;
     private double lastTravelBearing = Double.NaN;
     private double lastOffRouteMetres = Double.NaN;
+    private String lastMatchReason="not matched";
     /** Real Home/Work drive times from TomTom, refreshed at most every 5 minutes. */
     private String homeEtaLabel;
     /** Whether the highlighted junction is a roundabout (its diagram stays visible). */
@@ -2911,6 +2912,8 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         s.satellitesUsed = satellitesUsed;
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
+        s.matchReason=lastMatchReason;
+        s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
         s.highDetailTiles = highDetailOnline
@@ -3252,7 +3255,9 @@ public final class MainActivity extends Activity implements LocationListener {
         if (navigationMatch == null) navigationMatch = new NavigationMatch(route.points);
         NavigationMatch.State matched = navigationMatch.match(current, accuracy,
                 fix.hasSpeed() ? fix.getSpeed() : 0f,
-                fix.hasBearing() ? fix.getBearing() : Double.NaN, fix.getTime());
+                fix.hasBearing() && (!fix.hasBearingAccuracy() || fix.getBearingAccuracyDegrees() <= 30) ? fix.getBearing() : Double.NaN, fix.getTime());
+        if(matched.reason==NavigationMatch.Reason.DUPLICATE)return;
+        lastMatchReason=matched.reason.name();
         GeoMath.Progress projected = matched.progress;
         lastOffRouteMetres = projected.offRouteMetres;
 
@@ -3277,7 +3282,8 @@ public final class MainActivity extends Activity implements LocationListener {
 
         if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {
             topTurnTitle.setText("POSITION UNCERTAIN · CHECK ROAD SIGNS");
-            topInstructionText.setText("Waiting for reliable GPS");
+            topInstructionText.setText(matched.reason==NavigationMatch.Reason.POOR_ACCURACY ? "GPS accuracy too low · "+Math.round(accuracy)+" m" : matched.reason==NavigationMatch.Reason.AMBIGUOUS ? "Matching position to nearby roads" : matched.reason==NavigationMatch.Reason.RECOVERING ? "Confirming position on route" : "Position not confirmed on route");
+            tripEtaValue.setText("—");tripMinutesValue.setText("—");tripDistanceValue.setText("—");
             topTurnArrow.setVisibility(View.INVISIBLE);
             topDistanceText.setVisibility(View.GONE);
             topNextTurnText.setVisibility(View.GONE);
@@ -3291,6 +3297,10 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         double along = projected.alongMetres;
+        if(matched.reacquired){
+            while(previousInstructionIndex<route.instructions.size()-1 && route.instructions.get(previousInstructionIndex).routeOffsetMetres+8<along)previousInstructionIndex++;
+            spokenDistanceIndex=-1;spokenCloseIndex=-1;spokenNowIndex=-1;
+        }
         stabilizedAlong = along;
         if ("DriveMate".equals(route.provider)) { requestComparison(); if(comparisonPermitted()) mapReview.observe(route,comparisonRoute,along); }
         topTurnArrow.setVisibility(View.VISIBLE);

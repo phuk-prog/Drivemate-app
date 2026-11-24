@@ -24,6 +24,21 @@ public class NavigationMatchTest {
         assertEquals(1,m.instruction(offsets,139,1));
         assertEquals(2,m.instruction(offsets,150,1));
     }
+    @Test public void reacquiresOnlyAfterThreeConsistentFixes(){
+        NavigationMatch m=new NavigationMatch(Arrays.asList(p(51,0),p(51.02,0)));
+        assertTrue(m.match(p(51.0001,0),5,10,0,1000).confident);
+        assertFalse(m.match(p(51.002,0),5,10,0,2000).confident);
+        assertFalse(m.match(p(51.002,0),5,10,0,10000).confident);
+        assertFalse(m.match(p(51.0021,0),5,10,0,11000).confident);
+        NavigationMatch.State recovered=m.match(p(51.0022,0),5,10,0,12000);
+        assertTrue(recovered.confident);assertTrue(recovered.reacquired);
+        assertTrue(recovered.progress.alongMetres>200);
+    }
+    @Test public void duplicateDoesNotReportFalseOffRoute(){
+        NavigationMatch m=new NavigationMatch(Arrays.asList(p(51,0),p(51.02,0)));
+        assertTrue(m.match(p(51.0001,0),5,0,Double.NaN,1000).confident);
+        assertEquals(NavigationMatch.Reason.DUPLICATE,m.match(p(51.0001,0),5,0,Double.NaN,1000).reason);
+    }
     @Test public void fasterRoadsGetEarlierWarnings(){
         assertTrue(NavigationMatch.approachDistance(31)>NavigationMatch.approachDistance(8));
         assertTrue(NavigationMatch.earlyDistance(31)>NavigationMatch.earlyDistance(8));
