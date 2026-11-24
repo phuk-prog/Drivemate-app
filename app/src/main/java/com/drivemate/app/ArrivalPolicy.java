@@ -8,7 +8,9 @@ package com.drivemate.app;
  * three fresh, distinct, precise, low-speed GPS fixes.
  */
 public final class ArrivalPolicy {
-    private static final double APPROACH_METRES = 700;
+    /** Arrival hints start in the last 400 m of the route (or within 120 m of the pin). */
+    private static final double APPROACH_ROUTE_METRES = 400;
+    private static final double APPROACH_PIN_METRES = 120;
     private int consecutive;
     private long lastFixAt = -1;
 
@@ -39,7 +41,10 @@ public final class ArrivalPolicy {
             consecutive = 0;
             return State.EN_ROUTE;
         }
-        boolean approaching = pinDistance <= APPROACH_METRES || remainingRoute <= APPROACH_METRES;
+        // Route distance, not straight-line distance: a destination 600 m away
+        // across the railway can still be over a mile by road.
+        boolean approaching = remainingRoute <= APPROACH_ROUTE_METRES
+                || pinDistance <= APPROACH_PIN_METRES;
         if (!approaching) { consecutive = 0; return State.EN_ROUTE; }
         boolean near = pinDistance <= 90 && remainingRoute <= 180
                 && accuracy <= 45 && offRoute <= 55;

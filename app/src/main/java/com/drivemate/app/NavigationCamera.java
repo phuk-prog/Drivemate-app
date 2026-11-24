@@ -12,6 +12,10 @@ import java.util.List;
 public final class NavigationCamera {
     private NavigationCamera() {}
 
+    /** Zoom limits, in this class's osmdroid-style units (see toMapLibreZoom). */
+    public static final double MIN_ZOOM = 14.2;
+    public static final double MAX_ZOOM = 20.5;
+
     public static final class Frame {
         public final GeoMath.Point center;
         public final double zoom;
@@ -72,19 +76,23 @@ public final class NavigationCamera {
         double speed = Math.max(0, speedMetresPerSecond);
         double viewHeight = Math.max(220, screenHeightPx - headerHeightPx - panelHeightPx);
 
-        // Fit the *whole* approach, including a little road past the turn.
-        // At speed the safe look-ahead expands, even for a very close turn.
-        double horizon = clamp(Math.max(
-                junctionAhead + Math.max(55, speed * 4.0),
-                Math.max(180, speed * 9 + 80)), 180, 1350);
+        // Like mainstream navigation apps, the cruising view is set by speed:
+        // about 110 m of road ahead at walking pace, growing with speed (about
+        // 200 m at 30 mph, 370 m at 70 mph). A distant next turn no longer
+        // zooms the map out to fit the whole approach.
+        double cruise = clamp(80 + speed * 9.0, 110, 1000);
+        double horizon = cruise;
+        if (junctionAhead <= cruise) {
+            // Approaching the manoeuvre: zoom in so the turn and a short stretch
+            // of road beyond it fill the view, keeping more at higher speed.
+            horizon = clamp(junctionAhead + Math.max(45, speed * 3.0), 70, cruise);
+        }
         boolean detailApproach = junctionDetail && junctionAhead <= 420;
         if (detailApproach) {
-            // More detail without clipping the turn or the safe exit distance.
-            // High-speed driving always reserves a longer visible approach.
-            double safeToShow = junctionAhead + Math.max(62, speed * 4.0);
-            double highSpeedLookAhead = Math.max(160, speed * 8 + 70);
-            horizon = Math.max(safeToShow, Math.max(highSpeedLookAhead,
-                    horizon * 0.86));
+            // Junction detail: a little closer still, never cropping the turn
+            // itself plus a short exit (longer at speed).
+            double tight = Math.max(60, junctionAhead + Math.max(30, speed * 2.5));
+            horizon = Math.min(horizon, Math.max(tight, horizon * 0.82));
         }
 
         // Stronger forward perspective on long approaches; ease toward a
@@ -104,7 +112,7 @@ public final class NavigationCamera {
         double metresPerPixel = effectiveHorizon / (viewHeight * 0.76);
         double latFactor = Math.max(0.1, Math.cos(Math.toRadians(gps.lat)));
         double zoom = clamp(Math.log(156543.03392 * latFactor / metresPerPixel)
-                / Math.log(2), 14.2, 19.0);
+                / Math.log(2), MIN_ZOOM, MAX_ZOOM);
 
         // Keep the car in the lower usable viewport and the turn higher up.
         // Include overlay displacement but never look so far past a nearby

@@ -103,7 +103,7 @@ public final class SmoothFollowCamera {
             centerAlong = Double.isFinite(desired.cameraCenterAlongMetres)
                     ? clamp(desired.cameraCenterAlongMetres, 0, path.lengthMetres)
                     : nearbyProgress(desired.center, measuredProgress);
-            zoom = zoomTarget = clamp(desired.zoom, 14.2, 19.0);
+            zoom = zoomTarget = clamp(desired.zoom, NavigationCamera.MIN_ZOOM, NavigationCamera.MAX_ZOOM);
             bearing = bearingTarget = northUp ? 0 : normalize(desired.roadBearingDegrees);
             tilt = tiltTarget = clamp(desired.tiltDegrees, 0, 55);
             center = desired.center;
@@ -155,7 +155,7 @@ public final class SmoothFollowCamera {
             delayZoomOutUntil = nowMs + 2200;
         }
         previouslyUpcoming = junctionAheadMetres;
-        double candidate = clamp(desired.zoom, 14.2, 19.0);
+        double candidate = clamp(desired.zoom, NavigationCamera.MIN_ZOOM, NavigationCamera.MAX_ZOOM);
         boolean urgentApproach = junctionAheadMetres < 175 && candidate > zoomTarget;
         boolean holdExpired = lastZoomTargetChange < 0
                 || nowMs - lastZoomTargetChange >= 1700;

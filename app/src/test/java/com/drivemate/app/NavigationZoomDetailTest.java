@@ -23,7 +23,7 @@ public class NavigationZoomDetailTest {
         assertTrue("Detail camera must show a clearer overhead view",
                 detailCamera.tiltDegrees < defaultCamera.tiltDegrees);
         assertTrue(detailCamera.tiltDegrees >= 17);
-        assertTrue(detailCamera.zoom <= 19);
+        assertTrue(detailCamera.zoom <= NavigationCamera.MAX_ZOOM);
         assertTrue(detailCamera.cameraCenterAlongMetres >= progress);
         assertTrue(detailCamera.cameraCenterAlongMetres <= nextTurn + 100);
     }

@@ -35,6 +35,18 @@ public final class GuidanceLogic {
         return clean;
     }
 
+    /**
+     * Roundabout instruction without an exit count. TomTom's exit numbering
+     * can differ from the exits a driver counts (slip roads, accesses), so the
+     * exit road and the drawn roundabout lead instead. Without a road name the
+     * TomTom message is the only information, so it is kept.
+     */
+    public static String roundaboutLine(String street, String fallbackMessage) {
+        String road = street == null ? "" : street.trim();
+        if (!road.isEmpty()) return "At the roundabout, take the exit onto " + road;
+        return fallbackMessage == null ? "" : fallbackMessage.trim();
+    }
+
     static String ordinal(int value) {
         int mod100 = value % 100;
         if (mod100 >= 11 && mod100 <= 13) return value + "th";
