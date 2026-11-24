@@ -110,7 +110,7 @@ public final class DmTileEngine {
     public List<JSONArray> search(String query,Set<String> cells)throws Exception{
         String q=query.trim().toLowerCase(Locale.ROOT);List<JSONArray> out=new ArrayList<>();
         if(q.length()<2)return out;
-        for(String k:new TreeSet<>(cells)){JSONArray p=load(k).places;for(int i=0;i<p.length()&&out.size()<20;i++){JSONArray row=p.getJSONArray(i);if(row.getString(0).toLowerCase(Locale.ROOT).startsWith(q))out.add(row);}}return out;
+        for(String k:new TreeSet<>(cells)){JSONArray p=load(k).places;for(int i=0;i<p.length()&&out.size()<20;i++){JSONArray row=p.getJSONArray(i);if(row.getString(0).toLowerCase(Locale.ROOT).startsWith(q)||(row.length()>4&&row.optString(4).replace(" ","").toLowerCase(Locale.ROOT).startsWith(q.replace(" ",""))))out.add(row);}}return out;
     }
     public List<JSONArray> features(Set<String> cells)throws Exception{
         Map<Long,JSONArray> out=new LinkedHashMap<>();for(String k:new TreeSet<>(cells)){JSONArray a=load(k).features;for(int i=0;i<a.length();i++){JSONArray row=a.getJSONArray(i);out.put(row.getLong(0),row);}}return new ArrayList<>(out.values());
