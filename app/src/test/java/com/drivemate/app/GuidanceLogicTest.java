@@ -49,4 +49,14 @@ public class GuidanceLogicTest {
         assertEquals("SW1A 1AA", UkSearch.normalize("sw1a1aa"));
         assertEquals("Bestway Stockport", UkSearch.normalize("Bestway Stockport"));
     }
+
+    @Test public void roundaboutLineNamesTheExitRoadWithoutCountingExits() {
+        assertEquals("At the roundabout, take the exit onto Carrs Road",
+                GuidanceLogic.roundaboutLine("Carrs Road",
+                        "At the roundabout take the first exit onto Carrs Road"));
+        // No road name: TomTom's message is the only information, so keep it.
+        assertEquals("At the roundabout take the second exit",
+                GuidanceLogic.roundaboutLine("  ", "At the roundabout take the second exit"));
+        assertEquals("", GuidanceLogic.roundaboutLine(null, null));
+    }
 }

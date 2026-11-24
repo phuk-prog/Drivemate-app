@@ -16,7 +16,7 @@ public final class NavigationCameraTest {
         NavigationCamera.Frame close = NavigationCamera.calculate(
                 north, vehicle, 100, 125, 2, 1400, 180, 260);
         assertTrue(close.zoom > distant.zoom);
-        assertTrue(close.zoom <= 19.0);
+        assertTrue(close.zoom <= NavigationCamera.MAX_ZOOM);
         assertTrue(distant.zoom >= 14.2);
     }
     @Test public void cameraLooksAheadWithoutJumpingBeyondRoute() {
@@ -75,7 +75,8 @@ public final class NavigationCameraTest {
                 north, north.get(0), 150, 670, 2, 1400, 475, 140);
         assertTrue(frame.cameraCenterAlongMetres > 150);
         assertTrue(frame.cameraCenterAlongMetres < 670 + 130);
-        assertTrue(frame.zoom >= 14.2 && frame.zoom <= 19.0);
+        assertTrue(frame.zoom >= NavigationCamera.MIN_ZOOM
+                && frame.zoom <= NavigationCamera.MAX_ZOOM);
     }
 
     @Test public void approachHeadingDoesNotPrematurelyTurnOntoExit() {
@@ -109,5 +110,22 @@ public final class NavigationCameraTest {
         // A bad density never produces a wild camera.
         assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, 0), 1e-9);
         assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, Double.NaN), 1e-9);
+    }
+
+    @Test public void distantNextTurnDoesNotZoomTheMapOut() {
+        // Owner report: 320 yd from the next turn at walking pace, the map
+        // zoomed far out to fit the whole approach. The cruise view is now
+        // speed-based, so a far turn gives the same close view as a mid one.
+        GeoMath.Point gps = north.get(0);
+        NavigationCamera.Frame farTurn = NavigationCamera.calculate(
+                north, gps, 0, 1800, 1, 1400, 400, 300);
+        NavigationCamera.Frame midTurn = NavigationCamera.calculate(
+                north, gps, 0, 300, 1, 1400, 400, 300);
+        // Only camera tilt (which also eases with distance) differs slightly;
+        // the old behaviour was about 3 zoom levels further out for the far turn.
+        assertEquals(farTurn.zoom, midTurn.zoom, 0.1);
+        // About 110 m ahead on a ~700 px view: street level (~18.5). The old
+        // logic fitted the whole 1.8 km approach, about 14.9.
+        assertTrue(farTurn.zoom > 18.0);
     }
 }

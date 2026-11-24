@@ -17,6 +17,7 @@ import org.maplibre.android.MapLibre;
 import org.maplibre.android.camera.CameraPosition;
 import org.maplibre.android.camera.CameraUpdateFactory;
 import org.maplibre.android.geometry.LatLng;
+import org.maplibre.android.geometry.LatLngBounds;
 import org.maplibre.android.maps.MapLibreMap;
 import org.maplibre.android.maps.MapView;
 import org.maplibre.android.maps.Style;
@@ -537,7 +538,12 @@ public final class VectorDriveMap {
         lastRenderedTilt = frame.tilt;
     }
 
-    public void previewRoute(List<GeoMath.Point> path) {
+    /**
+     * Fit the whole route into the part of the screen the driver can see:
+     * below the search bar (padTop) and above the preview panel (padBottom),
+     * flat and north-up. Padding is in screen pixels.
+     */
+    public void previewRoute(List<GeoMath.Point> path, int padTop, int padBottom, int padSide) {
         setRoute(path);
         if (!ready() || path == null || path.isEmpty()) return;
         double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
@@ -549,12 +555,27 @@ public final class VectorDriveMap {
         }
         GeoMath.Point midpoint = new GeoMath.Point(
                 (minLat + maxLat) / 2, (minLon + maxLon) / 2);
-        // The legacy map continues to compute bounds exactly; this preview
-        // uses a conservative initial zoom to avoid jumping off the route.
-        double span = Math.max(maxLat - minLat, (maxLon - minLon) * 0.65);
-        double zoom = Math.max(4, Math.min(16.5, 8 - Math.log(
-                Math.max(0.00005, span)) / Math.log(2)));
-        setCamera(midpoint, zoom, 0);
+        if (maxLat - minLat < 1e-6 && maxLon - minLon < 1e-6) {
+            setCamera(midpoint, 16, 0);
+            return;
+        }
+        LatLngBounds bounds = new LatLngBounds.Builder()
+                .include(new LatLng(maxLat, maxLon))
+                .include(new LatLng(minLat, minLon))
+                .build();
+        try {
+            map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 0, 0,
+                    padSide, padTop, padSide, padBottom));
+        } catch (RuntimeException error) {
+            // For example if the map view has not been laid out yet.
+            Log.w(LOG_TAG, "Route preview fit failed; using a wide view", error);
+            setCamera(midpoint, 13, 0);
+        }
+        // The next driving frame must re-apply its own camera in full.
+        lastRenderedCamera = null;
+        lastRenderedZoom = Double.NaN;
+        lastRenderedBearing = Double.NaN;
+        lastRenderedTilt = Double.NaN;
     }
 
     public void setTraffic(boolean visible) {

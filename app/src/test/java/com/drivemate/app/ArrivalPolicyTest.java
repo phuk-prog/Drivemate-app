@@ -71,4 +71,14 @@ public class ArrivalPolicyTest {
         assertFalse(ArrivalPolicy.trustedEntrance(new GeoMath.Point(51.55, -0.10), place));
         assertFalse(ArrivalPolicy.trustedEntrance(null, place));
     }
+
+    @Test public void noArrivalBannerWhileStillOverAMileByRoad() {
+        // Owner report: 600 m from the pin in a straight line but 0.7 mi by road,
+        // the arrival banner and Parking button were already showing.
+        ArrivalPolicy a = new ArrivalPolicy();
+        assertEquals(ArrivalPolicy.State.EN_ROUTE, a.observe(
+                600, 1130, 5, 8, 0.4f, 10000, 10100));
+        assertEquals(ArrivalPolicy.State.APPROACHING, a.observe(
+                350, 390, 5, 8, 10f, 11000, 11100));
+    }
 }

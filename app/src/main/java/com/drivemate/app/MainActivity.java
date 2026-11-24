@@ -243,8 +243,10 @@ public final class MainActivity extends Activity implements LocationListener {
     private void updateJunctionDiagramVisibility() {
         if (junctionDiagram == null) return;
         boolean hasJunction = highlightedJunctionIndex >= 0;
-        junctionDiagram.setVisibility(hasJunction && active && !followLocation
-                ? View.VISIBLE : View.GONE);
+        // Roundabouts always show the drawn roundabout in the card (it replaces
+        // the exit number). Other junctions only when the map is panned away.
+        junctionDiagram.setVisibility(hasJunction && active
+                && (highlightedRoundabout || !followLocation) ? View.VISIBLE : View.GONE);
     }
 
     private MapView map;
@@ -362,6 +364,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private double lastOffRouteMetres = Double.NaN;
     /** Real Home/Work drive times from TomTom, refreshed at most every 5 minutes. */
     private String homeEtaLabel;
+    /** Whether the highlighted junction is a roundabout (its diagram stays visible). */
+    private boolean highlightedRoundabout;
     private String workEtaLabel;
     private long quickEtaFetchedAt;
     /** Display-only estimate of the vehicle position during short GPS gaps. */
@@ -1213,8 +1217,9 @@ public final class MainActivity extends Activity implements LocationListener {
         homePanel.setVisibility(show && !keyboardOpen ? View.VISIBLE : View.GONE);
         navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
         if (speedBadgeView != null) {
-            // Home shows no speed readout; it returns when navigating.
-            speedBadgeView.setVisibility(keyboardOpen || show ? View.GONE : View.VISIBLE);
+            // Speed only while actually navigating: not on home or route preview.
+            speedBadgeView.setVisibility(keyboardOpen || show || !active
+                    ? View.GONE : View.VISIBLE);
         }
         if (followButton != null) {
             followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
@@ -1692,32 +1697,34 @@ public final class MainActivity extends Activity implements LocationListener {
         if (navigationPanel != null) navigationPanel.setBackground(rounded(panel, 22));
         if (tripMetricsRow != null)
             tripMetricsRow.setBackground(rounded(night ? DARK : Color.rgb(232, 242, 247), 14));
+        // The turn card always uses the DriveMate navy with white text and cyan
+        // accents, in Light and Dark alike, so it matches the header.
         if (drivingTurnCard != null)
-            drivingTurnCard.setBackground(rounded(night ? Color.rgb(14, 47, 66)
-                    : Color.rgb(247, 251, 252), 14));
+            drivingTurnCard.setBackground(rounded(DARK, 14));
         for (TextView caption : tripMetricCaptions) caption.setTextColor(subdued);
         for (TextView value : new TextView[]{tripEtaValue, tripMinutesValue,
-                tripDistanceValue, topInstructionText, instructionText,
+                tripDistanceValue, instructionText,
                 distanceText, journeyTimeText, etaText}) {
             if (value != null) value.setTextColor(foreground);
         }
-        for (TextView value : new TextView[]{topNextTurnText, nextTurnText,
+        for (TextView value : new TextView[]{topInstructionText, topDistanceText}) {
+            if (value != null) value.setTextColor(Color.WHITE);
+        }
+        if (topNextTurnText != null) topNextTurnText.setTextColor(Color.rgb(201, 231, 239));
+        for (TextView value : new TextView[]{nextTurnText,
                 routeSummary, gpsAccuracyText}) {
             if (value != null) value.setTextColor(subdued);
         }
-        if (topTurnTitle != null) topTurnTitle.setTextColor(
-                night ? CYAN : Color.rgb(0, 105, 130));
+        if (topTurnTitle != null) topTurnTitle.setTextColor(CYAN);
         if (banner != null) banner.setTextColor(
                 night ? CYAN : Color.rgb(0, 96, 130));
-        if (laneGuidanceText != null) laneGuidanceText.setTextColor(
-                night ? CYAN : Color.rgb(0, 101, 130));
+        if (laneGuidanceText != null) laneGuidanceText.setTextColor(CYAN);
         if (trafficNoticeText != null) trafficNoticeText.setTextColor(
                 night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
-        if (topTurnArrow != null) topTurnArrow.setNightMode(night);
+        if (topTurnArrow != null) topTurnArrow.setNightMode(true);   // on the navy card
         if (maneuverIcon != null) maneuverIcon.setNightMode(night);
-        if (junctionDiagram != null) junctionDiagram.setNightMode(night);
-        if (verifiedJunctionRoad != null) verifiedJunctionRoad.setTextColor(
-                night ? CYAN : Color.rgb(0, 100, 131));
+        if (junctionDiagram != null) junctionDiagram.setNightMode(true);  // on the navy card
+        if (verifiedJunctionRoad != null) verifiedJunctionRoad.setTextColor(CYAN);
         if (vectorStyleChanging && !apiKey.isEmpty()) updateMapVisibility();
     }
 
@@ -2297,10 +2304,15 @@ public final class MainActivity extends Activity implements LocationListener {
      */
     private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
                                      double nextJunctionOffsetMetres) {
+        // The first fresh fix always starts the driving camera, so the map
+        // switches from the route overview to a heading-up driving view straight
+        // away. Afterwards poor or off-route fixes are skipped here, and
+        // SmoothFollowCamera itself ignores untrustworthy ones.
+        boolean cameraStarted = smoothFollow != null && smoothFollow.initialized();
         if (!active || !followLocation || route == null || gpsLost
-                || progress.offRouteMetres > 110
-                || (fix.hasAccuracy() && fix.getAccuracy() > 75)
                 || map.getHeight() < dp(350)) return;
+        if (cameraStarted && (progress.offRouteMetres > 110
+                || (fix.hasAccuracy() && fix.getAccuracy() > 75))) return;
         long now = SystemClock.elapsedRealtime();
         if (lastCameraUpdate > 0 && now - lastCameraUpdate < 450) return;
         if (smoothFollow == null)
@@ -2642,6 +2654,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 && currentLocation.getSpeed() <= 1.2f
                 && System.currentTimeMillis() - currentLocation.getTime() <= 7000;
         findParkingButton.setEnabled(parked);
+        // Parking search belongs to the very end of the journey.
+        findParkingButton.setVisibility(nearby ? View.VISIBLE : View.GONE);
         findParkingButton.setAlpha(parked ? 1f : 0.45f);
     }
 
@@ -2884,9 +2898,11 @@ public final class MainActivity extends Activity implements LocationListener {
                             return;
                         }
                         GeoMath.Progress old = GeoMath.project(route.points, start);
-                        boolean confirmedOffRoute = old.offRouteMetres > 90
-                                && currentLocation.getAccuracy() <= 35;
-                        if (!confirmedOffRoute && old.offRouteMetres > 45) {
+                        // Same rule as the reroute trigger, so a reroute is not
+                        // thrown away as "GPS alignment" noise.
+                        boolean confirmedOffRoute = ReroutePolicy.offRoute(
+                                old.offRouteMetres, currentLocation.getAccuracy());
+                        if (!confirmedOffRoute && old.offRouteMetres > 30) {
                             setStatus("Checking GPS alignment · previous route retained");
                             return;
                         }
@@ -3053,8 +3069,20 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         map.invalidate();
         if (vectorMap != null) {
-            if (preview) vectorMap.previewRoute(calculated.points);
-            else vectorMap.setRoute(calculated.points);
+            vectorMap.setRoute(calculated.points);
+            if (preview) {
+                // Fit once the preview panel has laid out, so the whole route
+                // sits between the search bar and the bottom panel.
+                final List<GeoMath.Point> previewPoints = calculated.points;
+                navigationPanel.post(() -> {
+                    if (vectorMap == null || active) return;
+                    int top = (topMapOverlay != null && topMapOverlay.getHeight() > 0
+                            ? topMapOverlay.getHeight() : dp(170)) + dp(28);
+                    int bottom = (navigationPanel.getHeight() > 0
+                            ? navigationPanel.getHeight() + dp(9) : dp(260)) + dp(28);
+                    vectorMap.previewRoute(previewPoints, top, bottom, dp(36));
+                });
+            }
         }
         if (preview && !showingVector()) {
             map.setMapOrientation(0);
@@ -3080,11 +3108,12 @@ public final class MainActivity extends Activity implements LocationListener {
 
         // Use precise fixes for detecting a genuine prolonged departure from
         // the route. Do not reroute over one noisy fix or during API failures.
-        if (accuracy <= 35 && projected.offRouteMetres > 90) {
+        float speedNow = fix.hasSpeed() ? fix.getSpeed() : 0f;
+        if (ReroutePolicy.offRoute(projected.offRouteMetres, accuracy)) {
             if (offRouteSince == 0) offRouteSince = now;
-            if (now - offRouteSince >= 12000
-                    && now - lastRerouteAttempt >= 45000
-                    && now - lastRouteRequest >= 30000 && !routing) {
+            if (ReroutePolicy.confirmed(offRouteSince, now, speedNow)
+                    && ReroutePolicy.mayRequest(now, lastRerouteAttempt, lastRouteRequest)
+                    && !routing) {
                 offRouteSince = 0;
                 lastRerouteAttempt = now;
                 setStatus("Off route · recalculating safely…");
@@ -3157,14 +3186,19 @@ public final class MainActivity extends Activity implements LocationListener {
         double untilTurn = Math.max(0, step.routeOffsetMetres - along);
         updateRoadIntelligence(fix, along, projected.offRouteMetres,
                 accuracy, untilTurn);
-        String direction = GuidanceLogic.actionLine(step.message, step.junctionType,
-                step.exitNumber);
         String glyph = GuidanceLogic.symbol(step.maneuver, step.junctionType,
                 step.turnAngleDegrees);
-        maneuverIcon.update(glyph, step.exitNumber);
-        maneuverIcon.setVisibility(View.VISIBLE);
-        topTurnArrow.update(glyph, step.exitNumber);
         boolean roundabout = "↻".equals(glyph);
+        // Roundabouts show no exit number: TomTom's count can differ from the
+        // exits the driver sees. The card draws the actual roundabout and names
+        // the exit road instead.
+        String direction = roundabout
+                ? GuidanceLogic.roundaboutLine(step.street, step.message)
+                : GuidanceLogic.actionLine(step.message, step.junctionType, step.exitNumber);
+        int shownExit = roundabout ? 0 : step.exitNumber;
+        maneuverIcon.update(glyph, shownExit);
+        maneuverIcon.setVisibility(View.VISIBLE);
+        topTurnArrow.update(glyph, shownExit);
         boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
         String road = step.street == null ? "" : step.street.trim();
         if (verifiedJunctionRoad != null) {
@@ -3178,8 +3212,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         topTurnTitle.setText(fix.hasAccuracy() && fix.getAccuracy() > 55
                 ? "GPS UNCERTAIN · CHECK ROAD SIGNS"
-                : roundabout && step.exitNumber > 0
-                        ? "ROUNDABOUT · " + GuidanceLogic.ordinal(step.exitNumber) + " EXIT"
+                : roundabout ? "ROUNDABOUT"
                         : fork ? "ROAD FORK · FOLLOW ARROW" : "NEXT TURN");
         int iconSide = dp(roundabout || fork ? 70 : 54);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
@@ -3205,8 +3238,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (next + 1 < route.instructions.size()) {
             TomTomApi.Instruction after = route.instructions.get(next + 1);
             double afterTurn = Math.max(0, after.routeOffsetMetres - step.routeOffsetMetres);
-            String followUp = GuidanceLogic.actionLine(after.message, after.junctionType,
-                    after.exitNumber);
+            boolean afterRoundabout = "↻".equals(GuidanceLogic.symbol(
+                    after.maneuver, after.junctionType, after.turnAngleDegrees));
+            String followUp = afterRoundabout
+                    ? GuidanceLogic.roundaboutLine(after.street, after.message)
+                    : GuidanceLogic.actionLine(after.message, after.junctionType,
+                            after.exitNumber);
             String followingTurn = "Then "
                     + GuidanceLogic.symbol(after.maneuver, after.junctionType,
                             after.turnAngleDegrees) + " "
@@ -3251,7 +3288,8 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean confident = accuracy <= 35 && offRoute <= 30 && age >= 0
                 && age <= 480000 && !gpsLost;
         RouteIntelligence.LaneSection lanes = confident
-                ? RouteIntelligence.approachingLanes(route.laneSections, along, 650) : null;
+                ? RouteIntelligence.approachingLanes(route.laneSections, along,
+                        laneLookAheadMetres(fix.hasSpeed() ? fix.getSpeed() : 0f)) : null;
         if (laneGuidanceText != null) {
             CharSequence arrows = laneArrows(lanes);
             laneGuidanceText.setText(arrows);
@@ -3335,6 +3373,12 @@ public final class MainActivity extends Activity implements LocationListener {
         return out;
     }
 
+    /** Show lanes about 200 m ahead in town, up to 600 m at motorway speed. */
+    private static double laneLookAheadMetres(float speedMps) {
+        double speed = Float.isFinite(speedMps) ? Math.max(0, speedMps) : 0;
+        return Math.max(200, Math.min(600, 120 + speed * 12));
+    }
+
     private void showTrafficTimeline() {
         if (!active || route == null || currentLocation == null) return;
         if (System.currentTimeMillis() - route.fetchedAtMs > 480000) {
@@ -3400,11 +3444,11 @@ public final class MainActivity extends Activity implements LocationListener {
         junctionLine.setPoints(drawing);
         map.getOverlays().add(junctionLine);
         if (vectorMap != null) vectorMap.setJunctionPreview(segment);
+        highlightedRoundabout = "ROUNDABOUT".equalsIgnoreCase(instruction.junctionType)
+                || instruction.maneuver.toUpperCase(Locale.UK).contains("ROUNDABOUT");
+        // Draw the real roundabout from the route geometry, without an exit count.
         if (junctionDiagram != null)
-            junctionDiagram.setRoute(segment,
-                    "ROUNDABOUT".equalsIgnoreCase(instruction.junctionType)
-                            || instruction.maneuver.toUpperCase(Locale.UK).contains("ROUNDABOUT"),
-                    instruction.exitNumber);
+            junctionDiagram.setRoute(segment, highlightedRoundabout, 0);
         highlightedJunctionIndex = instructionIndex;
         updateJunctionDiagramVisibility();
         if (!showingVector()) map.invalidate();
@@ -3425,6 +3469,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (highlightedJunctionIndex >= 0 && vectorMap != null)
             vectorMap.setJunctionPreview(null);
         highlightedJunctionIndex = -1;
+        highlightedRoundabout = false;
     }
 
     private void stopNavigation(boolean arrived) {
