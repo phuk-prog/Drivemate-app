@@ -1586,7 +1586,7 @@ public final class MainActivity extends Activity implements LocationListener {
             final TomTomApi.Route result=reference;runOnUiThread(()->{if(generation!=reviewGeneration)return;comparisonBusy=false;if(active)comparisonRoute=result;});});
     }
     private void showMapReview(){
-        if(active){showError("Review map differences after ending navigation.");return;}
+        if(active || currentLocation==null || !currentLocation.hasSpeed() || currentLocation.getSpeed()>=0.5f || System.currentTimeMillis()-currentLocation.getTime()>10000){showError("Review map differences only after ending navigation and parking safely.");return;}
         List<MapReview.Finding> items=mapReview.snapshot();
         if(items.isEmpty()){new AlertDialog.Builder(this).setTitle("Journey map review").setMessage("No comparable differences recorded. Comparison requires an authorised TomTom connection and aligned road data.").setPositiveButton("Close",null).show();return;}
         String[] labels=new String[items.size()];for(int i=0;i<labels.length;i++)labels[i]=items.get(i).label();
@@ -1594,7 +1594,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
     private void surveyFinding(MapReview.Finding item){
         EditText evidence=new EditText(this);evidence.setHint("Independently observed location, sign, direction and date");
-        new AlertDialog.Builder(this).setTitle(item.label()).setMessage("Not proof of a map error. Verify the road signs or permitted official records independently. Only independent observations can be shared; never copy TomTom results.")
+        new AlertDialog.Builder(this).setTitle(item.label()).setMessage(String.format(Locale.UK,"DriveMate location: %.5f, %.5f · travel heading %.0f°\n\nNot proof of a map error. Verify road signs or permitted official records independently. Only independent observations can be shared; never copy TomTom results.",item.point.lat,item.point.lon,item.bearing))
             .setView(evidence).setPositiveButton("Share survey note",(d,w)->{
                 String note=evidence.getText().toString().trim();if(note.isEmpty()){showError("Independent survey evidence required.");return;}
                 android.content.Intent share=new android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"Independent road survey: "+note);
@@ -3637,8 +3637,12 @@ public final class MainActivity extends Activity implements LocationListener {
             if (speech != null) speech.stop();
         }
         map.invalidate();
-        if (reviewAvailable && !isFinishing()) showMapReview();
-        else if (offerParkedCar && !isFinishing()) offerSaveParkedCar();
+        if (reviewAvailable && !isFinishing()) {
+            // Never open the review UI when the car is still moving or speed is unknown.
+            if (currentLocation != null && currentLocation.hasSpeed() && currentLocation.getSpeed() < 0.5f
+                    && System.currentTimeMillis()-currentLocation.getTime()<10000) showMapReview();
+            else setStatus("Journey ended · map review available in Settings when parked");
+        } else if (offerParkedCar && !isFinishing()) offerSaveParkedCar();
     }
 
     private void setStatus(String message) {

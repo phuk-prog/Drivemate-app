@@ -18,6 +18,11 @@ public class MapReviewTest {
         MapReview r=new MapReview();r.observe(route("DriveMate",32,false),route("TomTom",48,true),100);
         r.observe(route("DriveMate",32,false),route("TomTom",32,false),100);assertTrue(r.snapshot().isEmpty());
     }
+    @Test public void valhallaForkDirectionCodes(){
+        assertEquals("STRAIGHT",DriveMateProvider.maneuver(22));
+        assertEquals("RIGHT",DriveMateProvider.maneuver(23));
+        assertEquals("LEFT",DriveMateProvider.maneuver(24));
+    }
     @Test public void unknownLaneMaskIsNotInvented()throws Exception{
         assertNull(DriveMateProvider.laneSection(new org.json.JSONArray("[{\"directions\":8,\"active\":64}]"),200));
         assertNotNull(DriveMateProvider.laneSection(new org.json.JSONArray("[{\"directions\":66,\"active\":64}]"),200));

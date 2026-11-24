@@ -56,9 +56,9 @@ public final class DriveMateProvider {
             if(index<previous||index<0||index>=points.size())throw new IOException("Invalid maneuver index");previous=index;
             String msg=move.getString("instruction");if(msg.trim().isEmpty())throw new IOException("Empty maneuver");
             if(type>=1&&type<=3)continue;
-            String code=maneuver(type),junction=type>=20&&type<=22?"BIFURCATION":type==26||type==27?"ROUNDABOUT":"";
+            String code=maneuver(type),junction=type>=17&&type<=24?"BIFURCATION":type==26||type==27?"ROUNDABOUT":"";
             JSONArray names=move.optJSONArray("street_names");String street=names==null?"":names.optString(0,"");
-            steps.add(new TomTomApi.Instruction(offset[index],msg,code,junction,move.optInt("roundabout_exit_count",0),code.contains("LEFT")?-45:code.contains("RIGHT")?45:0,street,""));
+            steps.add(new TomTomApi.Instruction(offset[index],msg,code,junction,move.optInt("roundabout_exit_count",0),code.contains("LEFT")?-45:code.contains("RIGHT")?45:0,street,sign(move)));
             RouteIntelligence.LaneSection s=laneSection(move.optJSONArray("lanes"),offset[index]);if(s!=null)lanes.add(s);
         }
         double total=offset[offset.length-1];int seconds=(int)Math.round(trip.getJSONObject("summary").getDouble("time"));
@@ -69,7 +69,16 @@ public final class DriveMateProvider {
         switch(type){
             case 4:case 5:case 6:return "DESTINATION";case 9:return "SLIGHT_RIGHT";case 10:return "RIGHT";case 11:return "SHARP_RIGHT";
             case 12:case 13:return "UTURN";case 14:return "SHARP_LEFT";case 15:return "LEFT";case 16:return "SLIGHT_LEFT";
-            case 18:case 20:case 22:return "RIGHT";case 19:case 21:case 23:return "LEFT";case 26:case 27:return "ROUNDABOUT";default:return "STRAIGHT";}
+            case 18:case 20:case 23:case 37:return "RIGHT";case 19:case 21:case 24:case 38:return "LEFT";case 26:case 27:return "ROUNDABOUT";case 7:case 8:case 17:case 22:case 25:case 28:case 29:return "STRAIGHT";default:throw new IllegalArgumentException("Unsupported Valhalla maneuver "+type);}
+    }
+    static String sign(JSONObject move){
+        JSONObject sign=move.optJSONObject("sign");if(sign==null)return "";
+        List<String> labels=new ArrayList<>();
+        for(String key:new String[]{"exit_number_elements","exit_branch_elements","exit_toward_elements","exit_name_elements"}){
+            JSONArray list=sign.optJSONArray(key);if(list==null)continue;
+            for(int i=0;i<list.length();i++){JSONObject entry=list.optJSONObject(i);if(entry!=null&&!entry.optString("text").isEmpty())labels.add(entry.optString("text"));}
+        }
+        return String.join(" · ",labels);
     }
     static RouteIntelligence.LaneSection laneSection(JSONArray a,double along)throws JSONException{
         if(a==null||a.length()==0||along<5)return null;List<RouteIntelligence.Lane> lanes=new ArrayList<>();
