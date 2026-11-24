@@ -12,6 +12,7 @@ public final class DmTileEngine {
     public interface Source { InputStream open(String name)throws Exception; }
     private final JSONObject catalog,globalRules;
     private final Source source;
+    private final DmCellPlanner planner;
     private final LinkedHashMap<String,Tile> cache=new LinkedHashMap<>(16,.75f,true);
     private final Set<String> pinned=new HashSet<>();
     private static final int CELL=50000,MAX_TILES=24,MAX_NODES=80000;
@@ -26,7 +27,7 @@ public final class DmTileEngine {
         if(!sha(manifest).equals(expected))throw new IOException("Manifest checksum mismatch");
         JSONObject m=new JSONObject(new String(manifest,java.nio.charset.StandardCharsets.UTF_8));
         if(!"drivemate-tiles-v1".equals(m.getString("format"))||m.getInt("cell_microdegrees")!=CELL||!"ODbL-1.0".equals(m.getString("license")))throw new IOException("Unsupported map format");
-        catalog=m.getJSONObject("tiles");globalRules=m.getJSONObject("global_rules");this.source=source;
+        catalog=m.getJSONObject("tiles");globalRules=m.getJSONObject("global_rules");this.source=source;planner=new DmCellPlanner(catalog);
     }
     static String key(double lat,double lon){return Math.floorDiv((int)Math.round(lat*1e6),CELL)+"_"+Math.floorDiv((int)Math.round(lon*1e6),CELL);}
     public Set<String> keys(){Set<String> out=new TreeSet<>();catalog.keys().forEachRemaining(out::add);return out;}
@@ -59,12 +60,13 @@ public final class DmTileEngine {
         try{for(String k:cells){load(k);pinned.add(k);}}catch(Exception e){pinned.clear();pinned.addAll(prior);throw e;}
     }
     public int cachedTiles(){return cache.size();}
-    private Node nearest(GeoMath.Point p)throws Exception{
+    public DmCellPlanner.Coverage coverage(Route route,double radiusKm,long budget)throws Exception{return planner.coverage(route.points,route.cells,radiusKm,budget);}
+    private Node nearest(GeoMath.Point p,Set<String> allowed)throws Exception{
         int y=Math.floorDiv((int)Math.round(p.lat*1e6),CELL),x=Math.floorDiv((int)Math.round(p.lon*1e6),CELL);
         Node best=null;double dist=350;
-        if(!catalog.has(key(p.lat,p.lon)))throw new CoverageException("Position outside pilot map");
+        if(!catalog.has(key(p.lat,p.lon))||(allowed!=null&&!allowed.contains(key(p.lat,p.lon))))throw new CoverageException("Position outside pilot map");
         for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
-            String k=(y+dy)+"_"+(x+dx);if(!catalog.has(k))continue;
+            String k=(y+dy)+"_"+(x+dx);if(!catalog.has(k)||(allowed!=null&&!allowed.contains(k)))continue;
             for(Node n:load(k).nodes.values()){double d=GeoMath.distance(p,n.point);if(d<dist){dist=d;best=n;}}
         }if(best==null)throw new CoverageException("No nearby road in cached coverage");return best;
     }
@@ -83,8 +85,10 @@ public final class DmTileEngine {
         for(int i=0;i<s.node.rules.length();i++){JSONArray r=s.node.rules.getJSONArray(i);if(r.getLong(0)==s.way)out.add(new long[]{r.getLong(1),r.getLong(2)});}
         return out;
     }
-    public Route route(GeoMath.Point start,GeoMath.Point finish)throws Exception{
-        long began=SystemClock.elapsedRealtime();Node a=nearest(start),b=nearest(finish);
+    public Route route(GeoMath.Point start,GeoMath.Point finish)throws Exception{return route(start,finish,null);}
+    public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed)throws Exception{
+        long began=SystemClock.elapsedRealtime();Node a=nearest(start,allowed),b=nearest(finish,allowed);
+        Map<String,Long> lower=planner.lowerBounds(b.cell);
         if(a.id==b.id)throw new IOException("Same snapped junction");
         PriorityQueue<State> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));Map<Long,Double> best=new HashMap<>();
         q.add(new State(a,0,0,0,0,0,0,null));best.put(0L,0.0);int count=0;
@@ -97,8 +101,9 @@ public final class DmTileEngine {
                 if(s.edge!=0&&!LocalRoutingPilot.allowed(s.prev,dst,way,rs))continue;
                 double length=e.getLong(4)/1000.0,seconds=e.getLong(5)/1000.0;if(length<=0||seconds<=0)throw new IOException("Invalid edge");
                 double cost=s.cost+seconds;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
-                Node next=load(e.getString(2)).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");
-                best.put(id,cost);q.add(new State(next,id,way,s.node.id,cost,s.distance+length,cost+GeoMath.distance(next.point,b.point)*3.6/160,s));
+                String nextCell=e.getString(2);if(allowed!=null&&!allowed.contains(nextCell))continue;
+                Node next=load(nextCell).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");
+                best.put(id,cost);q.add(new State(next,id,way,s.node.id,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/160,lower.getOrDefault(next.cell,0L)/1000.0),s));
             }
         }throw new CoverageException("No connected route inside pilot limits");
     }

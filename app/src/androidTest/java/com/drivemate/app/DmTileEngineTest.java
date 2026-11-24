@@ -38,8 +38,9 @@ public class DmTileEngineTest{
         online.prefetch(engine.keys());
         DmTileDiskSource offline=new DmTileDiskSource(root,raw,hash,8_000_000,null);
         DmTileEngine restored=new DmTileEngine(raw,hash,offline);
-        DmTileEngine.Route original=restored.route(new GeoMath.Point(51.209,-2.647),new GeoMath.Point(51.207,-2.641));
-        DmTileEngine.Route diversion=restored.route(new GeoMath.Point(51.214,-2.646),new GeoMath.Point(51.207,-2.641));
+        DmTileEngine.Route original=restored.route(new GeoMath.Point(51.209,-2.647),new GeoMath.Point(51.207,-2.641),offline.availableCells());
+        DmCellPlanner.Coverage planned=restored.coverage(original,48.3,8_000_000);assertTrue(planned.cells.containsAll(original.cells));assertTrue(planned.bytes<=8_000_000);
+        DmTileEngine.Route diversion=restored.route(new GeoMath.Point(51.214,-2.646),new GeoMath.Point(51.207,-2.641),offline.availableCells());
         assertTrue(original.metres>0);assertTrue(diversion.metres>0);
         assertNotEquals(original.points.get(0).lat,diversion.points.get(0).lat,0.00001);
         android.util.Log.i("OfflineRoutingPilot","Persistent offline reroute metres="+diversion.metres+" ms="+diversion.ms);

@@ -1,4 +1,4 @@
-name: DriveMate 1.10.0 RC1 signed independent navigation update APK
+name: DriveMate 1.10.0 RC2 signed independent navigation update APK
 
 # Review-candidate signing only from the exact protected development branch.
 # No pull_request trigger: signing secrets never run for PR-submitted code.
@@ -69,7 +69,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$AAPT"
           "$AAPT" dump badging app/build/outputs/apk/release/app-release-unsigned.apk |
-            grep -F "package: name='com.drivemate.android' versionCode='101000' versionName='1.10.0-rc1'"
+            grep -F "package: name='com.drivemate.android' versionCode='101001' versionName='1.10.0-rc2'"
 
       - name: Decode privately stored signing key
         env:
@@ -97,7 +97,7 @@ jobs:
           bash tools/sign-release.sh \
             app/build/outputs/apk/release/app-release-unsigned.apk \
             "$RUNNER_TEMP/drivemate-private/DriveMate-Signing-Key.p12" \
-            app/build/outputs/apk/release/DriveMate-1.10.0-rc1-signed.apk
+            app/build/outputs/apk/release/DriveMate-1.10.0-rc2-signed.apk
 
       - name: Verify expected DriveMate certificate
         shell: bash
@@ -106,7 +106,7 @@ jobs:
           SIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$SIGNER"
           CERT="$("$SIGNER" verify --print-certs --min-sdk-version 26 \
-            app/build/outputs/apk/release/DriveMate-1.10.0-rc1-signed.apk | \
+            app/build/outputs/apk/release/DriveMate-1.10.0-rc2-signed.apk | \
             sed -nE 's/^(V[0-9.]+ Signer:|Signer #[0-9]+) certificate SHA-256 digest: ([[:xdigit:]]+)$/\2/p' | tr -d '\r' | tr '[:upper:]' '[:lower:]' | sort -u)"
           EXPECTED="9f11804f0c28f61be2588fc6e1663514cfcca6ad4da4e31e19e4186c029b1a38"
           if [[ "$CERT" != "$EXPECTED" ]]; then
@@ -118,8 +118,8 @@ jobs:
       - name: Upload privately signed installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: DriveMate-1.10.0-rc1-independent-privately-signed-APK
-          path: app/build/outputs/apk/release/DriveMate-1.10.0-rc1-signed.apk
+          name: DriveMate-1.10.0-rc2-independent-privately-signed-APK
+          path: app/build/outputs/apk/release/DriveMate-1.10.0-rc2-signed.apk
           if-no-files-found: error
           retention-days: 30
 

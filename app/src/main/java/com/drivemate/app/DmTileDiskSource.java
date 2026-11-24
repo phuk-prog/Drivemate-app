@@ -21,6 +21,10 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
             if(!k.matches("-?[0-9]+_-?[0-9]+")||!n.equals(k+".dmt.gz")||info.getLong("bytes")<=0||info.getLong("bytes")>8000000||!info.getString("sha256").matches("[a-f0-9]{64}"))throw new IOException("Invalid tile catalog");
             byName.put(n,info);
         }this.budget=budget;this.upstream=upstream;
+        File pins=new File(folder,"journey-pins.json");if(pins.isFile()){
+            JSONArray saved=new JSONArray(new String(DmTileEngine.read(new FileInputStream(pins),2_000_000),StandardCharsets.UTF_8));Set<String> cells=new HashSet<>();
+            for(int i=0;i<saved.length();i++)cells.add(saved.getString(i));protect(cells);
+        }
     }
     private boolean verified(byte[] raw,JSONObject info)throws Exception{return raw.length==info.getInt("bytes")&&DmTileEngine.sha(raw).equals(info.getString("sha256"));}
     public synchronized void protect(Set<String> cells)throws IOException{
@@ -53,8 +57,24 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
         for(File f:files){if(used+additional<=budget)break;if(protectedNames.contains(f.getName()))continue;long size=f.length();if(f.delete())used-=size;}
         if(used+additional>budget)throw new IOException("Not enough unpinned cache storage");
     }
+    public synchronized Set<String> availableCells()throws Exception{
+        Set<String> out=new HashSet<>();
+        for(Map.Entry<String,JSONObject> item:byName.entrySet()){
+            File file=new File(folder,item.getKey());JSONObject meta=item.getValue();
+            if(file.isFile()&&file.length()==meta.getLong("bytes"))out.add(item.getKey().substring(0,item.getKey().length()-7));
+        }return out;
+    }
     public synchronized void prefetch(Set<String> cells)throws Exception{
-        protect(cells);for(String k:cells)try(InputStream in=open(k+".dmt.gz")){}
+        Set<String> prior=new HashSet<>(protectedNames);protect(cells);
+        try{
+            protectedNames.addAll(prior);
+            for(String k:new TreeSet<>(cells))try(InputStream in=open(k+".dmt.gz")){}
+            protect(cells);
+            android.util.AtomicFile pins=new android.util.AtomicFile(new File(folder,"journey-pins.json"));
+            FileOutputStream out=pins.startWrite();
+            try{out.write(new JSONArray(new TreeSet<>(cells)).toString().getBytes(StandardCharsets.UTF_8));pins.finishWrite(out);}
+            catch(Exception err){pins.failWrite(out);throw err;}
+        }catch(Exception err){protectedNames.clear();protectedNames.addAll(prior);throw err;}
     }
     public static DmTileEngine.Source rangeArchive(String address,byte[] manifest,String expectedHash)throws Exception{
         if(!DmTileEngine.sha(manifest).equals(expectedHash))throw new IOException("Manifest checksum mismatch");
