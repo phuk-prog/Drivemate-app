@@ -71,26 +71,44 @@ def make_trace():
     (ROOT/"app/src/androidTest/assets/navigation-lab.json").write_text(json.dumps(trace))
     print("LAB_TRACE",len(points),"fixes",round(total),"metres",flush=True)
 def download_apps():
-    jar=OUT/"fdroid-index.jar"
-    fetch("https://f-droid.org/repo/index-v1.jar",jar,100_000_000)
-    # The JDK verifies the actual entry as it is read. No CLI output parsing.
-    verified=OUT/"index-verified.json"
+    # F-Droid v1 deliberately uses legacy SHA-1. Modern v2 has a signed
+    # entry.json committing to the exact full index size and SHA-256.
+    jar=OUT/"fdroid-entry.jar"
+    fetch("https://f-droid.org/repo/entry.jar",jar,2_000_000)
+    verified=OUT/"entry-verified.json"
     verified.unlink(missing_ok=True)
     subprocess.run(["java",str(ROOT/"tools/VerifyFdroidIndex.java"),str(jar),FDROID,str(verified)],check=True,timeout=90)
-    index=json.loads(verified.read_text())
-    print("LAB_INDEX_VERIFIED",FDROID,flush=True)
+    entry=json.loads(verified.read_text())
+    meta=entry["index"]
+    if meta["name"] not in ("/index-v2.json","index-v2.json"):raise ValueError("Unexpected signed index path")
+    if not 0<meta["size"]<=250_000_000:raise ValueError("Index exceeds bound")
+    import time
+    age=time.time()-int(entry["timestamp"])/1000
+    if age>30*86400 or age< -86400:raise ValueError("Stale or future repository entry")
+    index_path=OUT/"index-v2.json"
+    sha,size=fetch("https://f-droid.org/repo/index-v2.json",index_path,meta["size"])
+    if sha!=meta["sha256"] or size!=meta["size"]:raise ValueError("Index hash/size mismatch")
+    index=json.loads(index_path.read_text())
+    print("LAB_INDEX_VERIFIED_V2",FDROID,sha,flush=True)
     result={}
     for name,pkg in APPS.items():
         try:
-            versions=index["packages"][pkg]
-            compatible=[p for p in versions if int(p.get("minSdkVersion",1))<=34 and (not p.get("nativecode") or "x86_64" in p["nativecode"] or "x86" in p["nativecode"])]
+            versions=index["packages"][pkg]["versions"].values()
+            compatible=[]
+            for v in versions:
+                m=v["manifest"];abi=m.get("nativecode",[])
+                if int((m.get("usesSdk") or {}).get("minSdkVersion",1))>34:continue
+                if abi and not any(a in abi for a in ("x86_64","x86")):continue
+                if not v["file"]["name"].endswith(".apk"):continue
+                compatible.append(v)
             if not compatible:raise ValueError("No compatible x86 Android build in signed index")
-            p=max(compatible,key=lambda p:int(p["versionCode"]));filename=p["apkName"]
-            if not re.fullmatch(r"[A-Za-z0-9._-]+\.apk",filename):raise ValueError("Unsafe APK filename")
+            v=max(compatible,key=lambda v:int(v["manifest"]["versionCode"]))
+            m=v["manifest"];f=v["file"];filename=f["name"].lstrip("/")
+            if not re.fullmatch(r"[A-Za-z0-9._-]+\\.apk",filename):raise ValueError("Unsafe APK filename")
             sha,size=fetch("https://f-droid.org/repo/"+filename,OUT/(pkg+".apk"),300_000_000)
-            if sha!=p["hash"] or size!=p["size"]:
+            if sha!=f["sha256"] or size!=f["size"]:
                 (OUT/(pkg+".apk")).unlink();raise ValueError("APK checksum or size mismatch")
-            result[pkg]={"name":name,"version":p["versionName"],"versionCode":p["versionCode"],"sha256":sha,"bytes":size,"status":"downloaded"}
+            result[pkg]={"name":name,"version":m.get("versionName","unknown"),"versionCode":m["versionCode"],"sha256":sha,"bytes":size,"status":"downloaded"}
         except Exception as e:result[pkg]={"name":name,"status":"blocked","reason":str(e)}
         print("LAB_PACKAGE",pkg,result[pkg],flush=True)
     (OUT/"packages.json").write_text(json.dumps(result,indent=2))
