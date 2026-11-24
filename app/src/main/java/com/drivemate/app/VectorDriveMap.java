@@ -504,8 +504,11 @@ public final class VectorDriveMap {
      */
     public void followFrame(SmoothFollowCamera.Frame frame) {
         if (frame == null) return;
+        // NavigationCamera zoom is in osmdroid units; convert for MapLibre.
+        double mapZoom = NavigationCamera.toMapLibreZoom(frame.zoom,
+                activity.getResources().getDisplayMetrics().density);
         pendingCamera = frame.center;
-        pendingZoom = frame.zoom;
+        pendingZoom = mapZoom;
         pendingBearing = frame.bearing;
         pendingGps = frame.vehicle;
         if (!ready()) return;
@@ -515,7 +518,7 @@ public final class VectorDriveMap {
         boolean moved = lastRenderedCamera == null
                 || GeoMath.distance(lastRenderedCamera, frame.center) > 0.32;
         boolean zoomed = !Double.isFinite(lastRenderedZoom)
-                || Math.abs(frame.zoom - lastRenderedZoom) > 0.006;
+                || Math.abs(mapZoom - lastRenderedZoom) > 0.006;
         double yaw = !Double.isFinite(lastRenderedBearing) ? 360
                 : (frame.bearing - lastRenderedBearing + 540) % 360 - 180;
         boolean tilted = !Double.isFinite(lastRenderedTilt)
@@ -524,12 +527,12 @@ public final class VectorDriveMap {
         map.moveCamera(CameraUpdateFactory.newCameraPosition(
                 new CameraPosition.Builder()
                         .target(new LatLng(frame.center.lat, frame.center.lon))
-                        .zoom(frame.zoom)
+                        .zoom(mapZoom)
                         .bearing((frame.bearing % 360 + 360) % 360)
                         .tilt(frame.tilt)
                         .build()));
         lastRenderedCamera = frame.center;
-        lastRenderedZoom = frame.zoom;
+        lastRenderedZoom = mapZoom;
         lastRenderedBearing = frame.bearing;
         lastRenderedTilt = frame.tilt;
     }

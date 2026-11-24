@@ -3373,10 +3373,9 @@ public final class MainActivity extends Activity implements LocationListener {
         double from = Math.max(0, instruction.routeOffsetMetres - 110);
         double to = Math.min(index.lengthMetres, instruction.routeOffsetMetres + 130);
         if (to - from < 10) return;
-        List<GeoMath.Point> segment = new ArrayList<>();
-        for (double along = from; along < to; along += 12)
-            segment.add(index.pointAt(along));
-        segment.add(index.pointAt(to));
+        // Follow the route's own vertices so the highlight sits exactly on the
+        // route line (12 m sampling cut across roundabout curves).
+        List<GeoMath.Point> segment = GeoMath.slice(route.points, from, to);
         if (segment.size() < 2) return;
         List<GeoPoint> drawing = new ArrayList<>();
         for (GeoMath.Point point : segment)

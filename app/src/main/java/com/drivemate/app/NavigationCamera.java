@@ -136,6 +136,19 @@ public final class NavigationCamera {
         return new Frame(center, zoom, bearing, junctionAhead, centerAlong, tilt);
     }
 
+    /**
+     * Zoom levels here assume 256-pixel tiles measured in physical screen
+     * pixels, which is what the osmdroid raster map draws. MapLibre measures
+     * zoom with 512-pixel tiles in density-independent pixels, so the same
+     * view is 1 + log2(density) levels lower there. Without this conversion
+     * the vector camera was about 2.4 levels (roughly 5x) too close on a
+     * typical phone, which pushed the car off-screen at the start of a route.
+     */
+    public static double toMapLibreZoom(double zoom, double density) {
+        double d = density > 0 && Double.isFinite(density) ? density : 1;
+        return zoom - 1 - Math.log(d) / Math.log(2);
+    }
+
     static double clamp(double value, double min, double max) {
         return Math.max(min, Math.min(max, value));
     }
