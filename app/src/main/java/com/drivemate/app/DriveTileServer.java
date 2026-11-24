@@ -70,7 +70,7 @@ public final class DriveTileServer implements AutoCloseable {
         if ((!tiles.isDirectory() && !tiles.mkdirs())
                 || (!ranges.isDirectory() && !ranges.mkdirs()))
             throw new IOException("Cannot initialise local DriveMate map cache");
-        source = new RangeSource(ranges);
+        source = new RangeSource(ranges, new File(base, "offline-verified.pmtiles"));
         socket = new ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"));
         Thread acceptor = new Thread(this::accept, "drivemate-local-map");
         acceptor.setDaemon(true);
@@ -353,15 +353,21 @@ public final class DriveTileServer implements AutoCloseable {
      * Fail closed if the server ignores Range; never download 1.9GB by mistake.
      */
     private static final class RangeSource implements PmTilesReader.Source {
-        final File directory;
+        final File directory, offline;
         private volatile long dataStarts;
-        RangeSource(File directory) { this.directory = directory; }
+        RangeSource(File directory, File offline) { this.directory = directory; this.offline = offline; }
         @Override public long size() { return SOURCE_SIZE; }
 
         @Override public byte[] read(long offset, int length) throws IOException {
             if (offset < 0 || length <= 0 || length > 4 * 1024 * 1024
                     || offset > SOURCE_SIZE - length)
                 throw new IOException("PMTiles range outside verified release bounds");
+            // Full archive is installed atomically by the checksum-verifying downloader.
+            if (offline.isFile() && offline.length() == SOURCE_SIZE) {
+                try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(offline, "r")) {
+                    byte[] data = new byte[length]; file.seek(offset); file.readFully(data); return data;
+                }
+            }
             File local = new File(directory, offset + "-" + length + ".part");
             if (local.isFile() && local.length() == length) {
                 byte[] cached = readBytes(local, 4 * 1024 * 1024);

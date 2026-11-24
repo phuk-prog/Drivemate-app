@@ -8,6 +8,6 @@ adb shell svc wifi disable
 adb shell svc data disable
 sleep 5
 adb shell dumpsys connectivity > offline-pilot-results/connectivity.txt
-adb shell am instrument -w -r -e class com.drivemate.app.OfflineRoutingPilotTest com.drivemate.android.mapzoom.test/androidx.test.runner.AndroidJUnitRunner | tee offline-pilot-results/instrumentation.txt
+adb shell am instrument -w -r -e class com.drivemate.app.OfflineRoutingPilotTest,com.drivemate.app.PublishedRoutingManifestTest com.drivemate.android.mapzoom.test/androidx.test.runner.AndroidJUnitRunner | tee offline-pilot-results/instrumentation.txt
 adb logcat -d -s OfflineRoutingPilot:I > offline-pilot-results/route-timings.txt
-grep -F 'OK (1 test)' offline-pilot-results/instrumentation.txt
+grep -F 'OK (2 tests)' offline-pilot-results/instrumentation.txt

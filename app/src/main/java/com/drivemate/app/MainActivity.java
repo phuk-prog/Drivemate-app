@@ -1415,7 +1415,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "DriveMate-first routing and search · " + (ownRouting() ? "Experimental" : "Off"),
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
                 "Independent map survey drafts",
-                "Offline routing · UK experimental preview"
+                "Offline routing · UK experimental preview",
+                "Offline visual map · download full UK"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1555,6 +1556,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 25: showMapReview(); break;
                         case 26: showSurveyNotes(); break;
                         case 27: showOfflineRouting(); break;
+                        case 28: showOfflineDisplay(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1576,6 +1578,18 @@ public final class MainActivity extends Activity implements LocationListener {
                 packWorker.execute(()->{try{pack.download(message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing()&&!active&&route==null&&!routing)enableLocalRouting(true);});}
                     catch(Exception e){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(e.getMessage());});}});
             }).setNeutralButton("Disable local mode",(d,w)->enableLocalRouting(false)).setNegativeButton("Close",null).show();
+    }
+    private void showOfflineDisplay(){
+        if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
+        LocalRoutingPack pack=new LocalRoutingPack(this);
+        new AlertDialog.Builder(this).setTitle("Full UK offline visual map")
+            .setMessage(pack.displayInstalled()?"A complete visual map is installed. Verify it again if needed.":"Download the pinned UK visual map (approximately 1.87 GB) over unmetered Wi-Fi. Offline rendering uses this archive; this does not install the routing graph.")
+            .setPositiveButton(pack.displayInstalled()?"Verify":"Download",(d,w)->{
+                if(downloadingLocalPack||active||route!=null||routing)return;
+                downloadingLocalPack=true;packWorker.execute(()->{try{pack.downloadDisplay(message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));
+                    runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing()){useLocalMap=true;autoFallback=false;updateMapVisibility();}});}
+                    catch(Exception e){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(e.getMessage());});}});
+            }).setNegativeButton("Close",null).show();
     }
     private void enableLocalRouting(boolean enabled){
         if(active||route!=null||routing)return;
@@ -2594,7 +2608,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
-        instructionText.setText("Review your route before driving.");
+        instructionText.setText("DriveMate local preview".equals(calculated.provider)?"Experimental route preview — not for driving.":"Review your route before driving.");
         maneuverIcon.setVisibility(View.GONE);
         nextTurnText.setVisibility(View.GONE);
         distanceText.setText("Distance: " + NavigationUnits.displayDistance(
@@ -2605,7 +2619,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         + calculated.timeSeconds * 1000L)));
         startButton.setVisibility("DriveMate local preview".equals(calculated.provider)?View.GONE:View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
-        if (previewParkingButton != null) previewParkingButton.setVisibility(View.VISIBLE);
+        if (previewParkingButton != null) previewParkingButton.setVisibility("DriveMate local preview".equals(calculated.provider)?View.GONE:View.VISIBLE);
         saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save");
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);

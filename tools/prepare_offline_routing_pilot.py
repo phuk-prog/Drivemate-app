@@ -44,3 +44,11 @@ report={"source_sha256":SOURCE_SHA,"source_ref":REF,"database_sha256":digest(db)
 (out/"wells-routing.json").write_text(json.dumps(report,indent=2))
 print(json.dumps(report,indent=2))
 
+
+# Verify the exact currently published routing manifest before Android CI.
+url="https://github.com/phuk-prog/Drivemate-map/releases/download/routes-20261124T044450Z-4f30f06120b2-ba57998035b63/uk-routing-manifest.json"
+with urllib.request.urlopen(url,timeout=60) as response: raw=response.read(65536)
+assert hashlib.sha256(raw).hexdigest()=="19e668dc43d0abdc09e22af2a09672ac0d5dc6b8b12dd39b2b1c74d3a97f5b51"
+manifest=json.loads(raw);assert manifest["format"]=="drivemate-uk-routing-v1"
+(out/"published-routing-manifest.json").write_bytes(raw)
+print("Verified actual pinned UK routing manifest; raw database bytes:",manifest["database_bytes"],"compressed bytes:",manifest["gzip_bytes"])

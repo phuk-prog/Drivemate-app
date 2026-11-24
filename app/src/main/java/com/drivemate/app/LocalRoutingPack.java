@@ -53,8 +53,9 @@ public final class LocalRoutingPack {
         if(file.length()>65536)throw new IOException("Manifest too large");
         try(InputStream in=new FileInputStream(file);ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1){if(out.size()+n>65536)throw new IOException("Manifest too large");out.write(b,0,n);}return out.toByteArray();}
     }
-    private HttpURLConnection open(String name)throws Exception{
-        URL url=new URL(ROOT+name);
+    private HttpURLConnection open(String name)throws Exception{return openUrl(ROOT+name);}
+    private HttpURLConnection openUrl(String address)throws Exception{
+        URL url=new URL(address);
         for(int i=0;i<6;i++){
             if(!unmetered())throw new IOException("Download paused: unmetered Wi-Fi required");
             String host=url.getHost();
@@ -70,6 +71,31 @@ public final class LocalRoutingPack {
     private byte[] remoteManifest()throws Exception{
         HttpURLConnection c=open("uk-routing-manifest.json");
         try(InputStream in=c.getInputStream();ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[4096];int n;while((n=in.read(b))!=-1){if(out.size()+n>65536)throw new IOException("Manifest too large");out.write(b,0,n);}return out.toByteArray();}finally{c.disconnect();}
+    }
+    public boolean displayInstalled(){
+        File f=new File(app.getFilesDir(),"drivemate-map/"+DriveTileServer.MAP_RELEASE+"/offline-verified.pmtiles");
+        return f.isFile()&&f.length()==DriveTileServer.SOURCE_SIZE;
+    }
+    public synchronized void downloadDisplay(Progress progress)throws Exception{
+        if(!unmetered())throw new IOException("Connect to unmetered Wi-Fi first");
+        File dir=new File(app.getFilesDir(),"drivemate-map/"+DriveTileServer.MAP_RELEASE);
+        if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("Cannot create map storage");
+        File dest=new File(dir,"offline-verified.pmtiles"),stage=new File(dir,"offline-download.tmp");
+        final String expected="eb1114fb953e51d17d4fceed387c86a35e9df1d2ea9fa7fbc156f78bf566e8c1";
+        if(dest.isFile()&&dest.length()==DriveTileServer.SOURCE_SIZE&&expected.equals(LocalRoutingPilot.sha256(dest))){progress.update("UK visual map already verified");return;}
+        stage.delete();if(dir.getUsableSpace()<DriveTileServer.SOURCE_SIZE+128_000_000L)throw new IOException("Need approximately 2 GB free for visual map");
+        HttpURLConnection c=openUrl(DriveTileServer.SOURCE);MessageDigest md=digest();long count=0,check=0;
+        try{
+            try(InputStream in=c.getInputStream();FileOutputStream out=new FileOutputStream(stage)){
+                byte[] b=new byte[128*1024];int n;while((n=in.read(b))!=-1){count+=n;if(count>DriveTileServer.SOURCE_SIZE)throw new IOException("Oversized map");
+                    md.update(b,0,n);out.write(b,0,n);if(count-check>=8*1024*1024){check=count;if(!unmetered())throw new IOException("Wi-Fi disconnected");
+                        progress.update("Downloading UK visual map "+(100*count/DriveTileServer.SOURCE_SIZE)+"%");}}
+                out.getFD().sync();
+            }
+            if(count!=DriveTileServer.SOURCE_SIZE||!expected.equals(hex(md.digest())))throw new IOException("Visual map hash mismatch");
+            if(!stage.renameTo(dest))throw new IOException("Cannot activate verified visual map");
+            progress.update("UK visual map available offline");
+        }finally{c.disconnect();stage.delete();}
     }
     public synchronized void download(Progress progress)throws Exception{
         if(!unmetered())throw new IOException("Connect to unmetered Wi-Fi first");
