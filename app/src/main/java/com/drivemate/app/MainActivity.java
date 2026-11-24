@@ -373,6 +373,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private double lastOffRouteMetres = Double.NaN;
     private String lastMatchReason="not matched";
     private boolean guidancePositionConfirmed;
+    private boolean confirmedSinceRouteInstall;
+    private boolean joiningRoute;
+    private long lastJoinCameraAt=-1;
     /** Real Home/Work drive times from TomTom, refreshed at most every 5 minutes. */
     private String homeEtaLabel;
     /** Whether the highlighted junction is a roundabout (its diagram stays visible). */
@@ -2367,6 +2370,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
         if (active && route != null && !routing) updateGuidance(fix);
+        else if(active&&joiningRoute&&followLocation&&lastJoinCameraAt>=0&&SystemClock.elapsedRealtime()-lastJoinCameraAt>=1000){centreOnLocation(false);lastJoinCameraAt=SystemClock.elapsedRealtime();}
         if (!active && !showingVector()) map.postInvalidateOnAnimation();
     }
 
@@ -2666,7 +2670,7 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setContentDescription("End navigation");
         setStatus("Navigating with "+route.provider+" · "+destination.title);
         mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
-        guidancePositionConfirmed=false;
+        guidancePositionConfirmed=false;confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         nextInstruction="";
         say("Navigation started.");
         lastCameraUpdate = 0;
@@ -2916,7 +2920,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         s.satellitesUsed = satellitesUsed;
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
-        s.matchReason=lastMatchReason;
+        s.matchReason=joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason;
         s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
@@ -3159,6 +3163,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
         clearPendingRoute();
         route = calculated;
+        confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         if (active) {
             // A new route needs an independent motion index, never a blend
             // through the unrelated polyline of the previous route.
@@ -3252,7 +3257,9 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void suspendPositionGuidance(String title,String reason) {
         boolean wasConfirmed=guidancePositionConfirmed;
+        joiningRoute=false;
         guidancePositionConfirmed=false;nextInstruction="";
+        setTripMetricLabels(false);
         if(wasConfirmed&&speech!=null)speech.stop();
         if(repeatButton!=null)repeatButton.setEnabled(false);
         if(topTurnTitle!=null)topTurnTitle.setText(title);
@@ -3267,6 +3274,27 @@ public final class MainActivity extends Activity implements LocationListener {
         if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
         if(trafficNoticeText!=null)trafficNoticeText.setVisibility(View.GONE);
         clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
+    }
+
+    private void setTripMetricLabels(boolean planned){
+        if(tripMetricCaptions.size()>=3){
+            tripMetricCaptions.get(0).setText(planned?"PLAN ETA":"ETA");
+            tripMetricCaptions.get(1).setText(planned?"PLAN MIN":"MIN LEFT");
+            tripMetricCaptions.get(2).setText(planned?"PLAN DIST":"DISTANCE LEFT");
+        }
+    }
+    private void showJoiningRoute(Location fix,long now){
+        suspendPositionGuidance("JOIN HIGHLIGHTED ROUTE","GPS ready · join the route using road signs");
+        joiningRoute=true;setTripMetricLabels(true);
+        String eta=new SimpleDateFormat("HH:mm",Locale.UK).format(new Date(System.currentTimeMillis()+route.timeSeconds*1000L));
+        tripEtaValue.setText(eta);tripEtaValue.setContentDescription("Planned ETA after joining road "+eta);
+        tripMinutesValue.setText(TripHeaderFormat.minutesLeft(route.timeSeconds));
+        tripMinutesValue.setContentDescription("Planned driving time after joining route");
+        tripDistanceValue.setText(TripHeaderFormat.distanceLeft(route.lengthMetres,metricUnits));
+        tripDistanceValue.setContentDescription("Planned road distance, excludes access to route");
+        if(followLocation&&(lastJoinCameraAt<0||now-lastJoinCameraAt>=1000)){
+            centreOnLocation(lastJoinCameraAt<0);lastJoinCameraAt=now;
+        }
     }
 
     private void updateGuidance(Location fix) {
@@ -3288,8 +3316,11 @@ public final class MainActivity extends Activity implements LocationListener {
 
         // Use precise fixes for detecting a genuine prolonged departure from
         // the route. Do not reroute over one noisy fix or during API failures.
-        float speedNow = fix.hasSpeed() ? fix.getSpeed() : 0f;
-        if (ReroutePolicy.offRoute(projected.offRouteMetres, accuracy)) {
+        float speedNow = fix.hasSpeed() ? fix.getSpeed() : Float.NaN;
+        boolean joining=RouteJoinPolicy.joining(confirmedSinceRouteInstall,accuracy,GeoMath.distance(current,route.points.get(0)),projected.offRouteMetres,matched.reason);
+        if (RouteJoinPolicy.waitForAccess(joining,speedNow)) {
+            offRouteSince=0;
+        } else if (ReroutePolicy.offRoute(projected.offRouteMetres, accuracy)) {
             if (offRouteSince == 0) offRouteSince = now;
             if (ReroutePolicy.confirmed(offRouteSince, now, speedNow)
                     && ReroutePolicy.mayRequest(now, lastRerouteAttempt, lastRouteRequest)
@@ -3307,6 +3338,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
 
         if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {
+            if(joining){showJoiningRoute(fix,now);return;}
             String reason=matched.reason==NavigationMatch.Reason.POOR_ACCURACY ? "GPS accuracy too low · "+Math.round(accuracy)+" m" : matched.reason==NavigationMatch.Reason.AMBIGUOUS ? "Matching position to nearby roads" : matched.reason==NavigationMatch.Reason.RECOVERING ? "Confirming position on route" : "Position not confirmed on route";
             if(matched.reason==NavigationMatch.Reason.OUTSIDE_WINDOW && accuracy<=35 && fix.hasSpeed() && fix.getSpeed()<1.5f && GeoMath.distance(current,route.points.get(0))<=100 && projected.offRouteMetres<=100) {
                 reason="Near route start · follow signs to the highlighted road";
@@ -3314,7 +3346,7 @@ public final class MainActivity extends Activity implements LocationListener {
             suspendPositionGuidance("POSITION UNCERTAIN · CHECK ROAD SIGNS",reason);
             return;
         }
-        guidancePositionConfirmed=true;
+        guidancePositionConfirmed=true;confirmedSinceRouteInstall=true;joiningRoute=false;setTripMetricLabels(false);
         if(repeatButton!=null)repeatButton.setEnabled(true);
         double along = projected.alongMetres;
         if(matched.reacquired){
