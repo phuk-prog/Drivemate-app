@@ -10,6 +10,23 @@ public final class DrivingDisplayPolicy {
     public static final int THEME_AUTO = 0;
     public static final int THEME_DAY = 1;
     public static final int THEME_NIGHT = 2;
+    /** New installs start with the light map; the driver can pick Dark or Automatic. */
+    public static final int DEFAULT_THEME = THEME_DAY;
+    /** Settings menu order: Light, Dark, Automatic. Stored values are unchanged. */
+    public static final int[] THEME_MENU = {THEME_DAY, THEME_NIGHT, THEME_AUTO};
+
+    /** Name shown in Settings for a stored theme value. */
+    public static String themeName(int preference) {
+        if (preference == THEME_NIGHT) return "Dark";
+        if (preference == THEME_AUTO) return "Automatic";
+        return "Light";
+    }
+
+    /** Clamp a stored value; anything unknown falls back to the light default. */
+    public static int validTheme(int stored) {
+        return stored == THEME_AUTO || stored == THEME_DAY || stored == THEME_NIGHT
+                ? stored : DEFAULT_THEME;
+    }
 
     /** Only advertise a second manoeuvre when it follows the first closely. */
     public static boolean showFollowingTurn(double metresToFirst, double gapMetres) {

@@ -34,4 +34,22 @@ public class DrivingDisplayPolicyTest {
         assertFalse(DrivingDisplayPolicy.junctionPreview(true, 600));
         assertFalse(DrivingDisplayPolicy.junctionPreview(true, Double.NaN));
     }
+
+    @Test public void mapStartsLightAndMenuOffersLightDarkAutomatic() {
+        assertEquals(DrivingDisplayPolicy.THEME_DAY, DrivingDisplayPolicy.DEFAULT_THEME);
+        assertFalse(DrivingDisplayPolicy.night(DrivingDisplayPolicy.DEFAULT_THEME, true));
+        assertArrayEquals(new int[]{DrivingDisplayPolicy.THEME_DAY,
+                DrivingDisplayPolicy.THEME_NIGHT, DrivingDisplayPolicy.THEME_AUTO},
+                DrivingDisplayPolicy.THEME_MENU);
+        assertEquals("Light", DrivingDisplayPolicy.themeName(DrivingDisplayPolicy.THEME_DAY));
+        assertEquals("Dark", DrivingDisplayPolicy.themeName(DrivingDisplayPolicy.THEME_NIGHT));
+        assertEquals("Automatic", DrivingDisplayPolicy.themeName(DrivingDisplayPolicy.THEME_AUTO));
+    }
+
+    @Test public void unknownStoredThemeFallsBackToLight() {
+        assertEquals(DrivingDisplayPolicy.THEME_DAY, DrivingDisplayPolicy.validTheme(7));
+        assertEquals(DrivingDisplayPolicy.THEME_DAY, DrivingDisplayPolicy.validTheme(-1));
+        assertEquals(DrivingDisplayPolicy.THEME_NIGHT, DrivingDisplayPolicy.validTheme(2));
+        assertEquals(DrivingDisplayPolicy.THEME_AUTO, DrivingDisplayPolicy.validTheme(0));
+    }
 }
