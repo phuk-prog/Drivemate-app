@@ -13,3 +13,7 @@ out=ROOT/"app/src/main/assets/dmtiles"
 out.mkdir(parents=True,exist_ok=True)
 subprocess.run([sys.executable,str(work/"compile_dmtiles.py"),"--source",str(work/"wells-places-2026-11-19.osm"),"--sha256",SHA,"--out",str(out)],check=True)
 (out/"manifest.sha256").write_text(hashlib.sha256((out/"manifest.json").read_bytes()).hexdigest()+"\n")
+
+# Avoid Android asset packager special handling of .gz suffix.
+for tile in out.glob("*.dmt.gz"):
+    tile.replace(tile.with_name(tile.name+".bin"))

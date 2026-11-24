@@ -18,7 +18,7 @@ public class DmTileEngineTest{
         android.content.res.AssetManager assets=app.getAssets();
         byte[] raw=DmTileEngine.read(assets.open("dmtiles/manifest.json"),2000000);
         String hash=new String(DmTileEngine.read(assets.open("dmtiles/manifest.sha256"),128)).trim();
-        DmTileEngine engine=new DmTileEngine(raw,hash,name->assets.open("dmtiles/"+name));
+        DmTileEngine engine=new DmTileEngine(raw,hash,name->assets.open("dmtiles/"+name+".bin"));
         engine.retainJourney(engine.keys());assertTrue(engine.cachedTiles()>1);
         JSONObject fixture=new JSONObject(new String(DmTileEngine.read(test.getAssets().open("wells-routing.json"),1000000)));
         JSONArray samples=fixture.getJSONArray("samples");assertTrue(samples.length()>=2);
@@ -33,6 +33,16 @@ public class DmTileEngineTest{
         String street=null;for(JSONArray row:engine.features(engine.keys())){JSONObject tags=row.getJSONObject(1);if(tags.has("highway")&&tags.optString("name").length()>=2){street=tags.getString("name");break;}}
         assertNotNull("Named street fixture",street);assertTrue(engine.search(street,engine.keys()).size()>0);
         try{engine.route(new GeoMath.Point(53.38,-1.47),new GeoMath.Point(51.21,-2.64));fail("Invented route outside coverage");}catch(DmTileEngine.CoverageException expected){}
+        File root=new File(app.getCacheDir(),"dmtiles-persistence-"+System.nanoTime());
+        DmTileDiskSource online=new DmTileDiskSource(root,raw,hash,8_000_000,name->assets.open("dmtiles/"+name+".bin"));
+        online.prefetch(engine.keys());
+        DmTileDiskSource offline=new DmTileDiskSource(root,raw,hash,8_000_000,null);
+        DmTileEngine restored=new DmTileEngine(raw,hash,offline);
+        DmTileEngine.Route original=restored.route(new GeoMath.Point(51.209,-2.647),new GeoMath.Point(51.207,-2.641));
+        DmTileEngine.Route diversion=restored.route(new GeoMath.Point(51.214,-2.646),new GeoMath.Point(51.207,-2.641));
+        assertTrue(original.metres>0);assertTrue(diversion.metres>0);
+        assertNotEquals(original.points.get(0).lat,diversion.points.get(0).lat,0.00001);
+        android.util.Log.i("OfflineRoutingPilot","Persistent offline reroute metres="+diversion.metres+" ms="+diversion.ms);
         final DmTileEngine.Route r=result;final List<JSONArray> features=engine.features(engine.keys());
         InstrumentationRegistry.getInstrumentation().runOnMainSync(()->{
             DmPilotMapView view=new DmPilotMapView(app,features,r.points);view.layout(0,0,500,500);

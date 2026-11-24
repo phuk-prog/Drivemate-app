@@ -12,7 +12,9 @@ public final class DmPilotScreen{
             android.content.res.AssetManager assets=a.getAssets();
             byte[] manifest=DmTileEngine.read(assets.open("dmtiles/manifest.json"),2_000_000);
             String expected=new String(DmTileEngine.read(assets.open("dmtiles/manifest.sha256"),128),java.nio.charset.StandardCharsets.UTF_8).trim();
-            DmTileEngine engine=new DmTileEngine(manifest,expected,name->assets.open("dmtiles/"+name));
+            DmTileDiskSource cache=new DmTileDiskSource(new java.io.File(a.getFilesDir(),"dmtiles-cache"),manifest,expected,8_000_000,name->assets.open("dmtiles/"+name+".bin"));
+            DmTileEngine engine=new DmTileEngine(manifest,expected,cache);
+            cache.prefetch(engine.keys());
             engine.retainJourney(engine.keys());
             DmTileEngine.Route r=engine.route(new GeoMath.Point(51.209,-2.647),new GeoMath.Point(51.207,-2.641));
             List<JSONArray> features=engine.features(engine.keys());
