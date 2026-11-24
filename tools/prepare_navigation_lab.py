@@ -73,12 +73,12 @@ def make_trace():
 def download_apps():
     jar=OUT/"fdroid-index.jar"
     fetch("https://f-droid.org/repo/index-v1.jar",jar,100_000_000)
-    v=subprocess.run(["jarsigner","-verify","-verbose",str(jar)],capture_output=True,text=True,check=True).stdout
-    if not re.search(r"(?m)^sm\s+.*index-v1\.json\s*$",v):raise ValueError("Index entry not signature verified")
-    cert=subprocess.run(["keytool","-printcert","-jarfile",str(jar)],capture_output=True,text=True,check=True).stdout
-    fingerprints=[s.replace(":","").lower() for s in re.findall(r"SHA256:\s*([A-Fa-f0-9:]+)",cert)]
-    if fingerprints!=[FDROID]:raise ValueError("Unexpected F-Droid signer")
-    with zipfile.ZipFile(jar) as z: index=json.loads(z.read("index-v1.json"))
+    # The JDK verifies the actual entry as it is read. No CLI output parsing.
+    verified=OUT/"index-verified.json"
+    verified.unlink(missing_ok=True)
+    subprocess.run(["java",str(ROOT/"tools/VerifyFdroidIndex.java"),str(jar),FDROID,str(verified)],check=True,timeout=90)
+    index=json.loads(verified.read_text())
+    print("LAB_INDEX_VERIFIED",FDROID,flush=True)
     result={}
     for name,pkg in APPS.items():
         try:

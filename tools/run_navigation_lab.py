@@ -13,6 +13,7 @@ def snap(folder,label):
     (folder/(label+".png")).write_bytes(adb("exec-out","screencap","-p"))
     return shell("dumpsys","activity","activities",check=False)
 def ui(folder,label):
+    shell("rm","-f","/sdcard/dm-lab-window.xml",check=False)
     shell("uiautomator","dump","/sdcard/dm-lab-window.xml",check=False,timeout=20)
     raw=adb("exec-out","cat","/sdcard/dm-lab-window.xml",check=False)
     (folder/(label+".xml")).write_bytes(raw)
@@ -51,9 +52,11 @@ def record(folder,package,uri):
     snap(folder,"01-route-request");ui(folder,"01-route-request")
     # Only activate explicitly labelled navigation controls, never accept unknown terms,
     # sign in, report traffic, grant unrelated permissions or bypass onboarding.
-    for i in range(2):
+    for i in range(4):
         if not click_exact(folder,f"prepare-{i}",{"directions","route to","start","start navigation","navigate"}):break
     snap(folder,"02-before-replay");ui(folder,"02-before-replay")
+    # Capture foreground identity as well as the screenshot, not a guessed navigation state.
+    (folder/"foreground-before.txt").write_text(shell("dumpsys","activity","activities",check=False))
     video=folder/"replay.webm";limit=min(600,len(trace["points"])+12)
     rec=adb("emu","screenrecord","start","--time-limit",limit,video,check=False).decode(errors="replace")
     (folder/"recording-start.txt").write_text(rec)
@@ -66,6 +69,7 @@ def record(folder,package,uri):
             snap(folder,f'fix-{p["t"]:04d}')
     adb("emu","screenrecord","stop",check=False)
     snap(folder,"03-arrival");ui(folder,"03-arrival")
+    (folder/"foreground-after.txt").write_text(shell("dumpsys","activity","activities",check=False))
     (folder/"timeline.json").write_text(json.dumps(timeline,indent=2))
     streams=[]
     if video.exists() and video.stat().st_size>0:
@@ -87,7 +91,9 @@ def main():
     for pkg,meta in packages.items():
         folder=E/pkg;folder.mkdir(exist_ok=True)
         results[pkg]={**meta}
-        if meta["status"]!="downloaded":continue
+        if meta["status"]!="downloaded":
+            print("LAB_RESULT",pkg,json.dumps(results[pkg]),flush=True)
+            continue
         try:
             install=adb("install","-g",OUT/(pkg+".apk"),timeout=180,check=False).decode(errors="replace")
             (folder/"install.txt").write_text(install)

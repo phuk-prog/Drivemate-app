@@ -51,6 +51,11 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -no-boot-anim
           script: bash tools/run_navigation_lab.sh
+      - name: Produce evidence-grounded comparison report
+        if: always()
+        run: |
+          python3 tools/report_navigation_lab.py
+          cat navigation-lab/evidence/comparison-report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
