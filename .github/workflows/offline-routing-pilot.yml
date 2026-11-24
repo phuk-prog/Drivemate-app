@@ -1,7 +1,7 @@
 name: Real map on-device offline routing proof
 on:
   push:
-    branches: ['feat/offline-routing-proof-20261124','feat/local-navigation-20261124']
+    branches: ['feat/offline-routing-proof-20261124','feat/local-navigation-20261124','feat/drivemate-own-stack-20261124']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +21,8 @@ jobs:
           gradle-version: '8.9'
       - name: Download checksum-pinned real map source from GitHub and create local graph
         run: python3 tools/prepare_offline_routing_pilot.py
+      - name: Compile original DriveMate map tiles
+        run: python3 tools/prepare_dmtiles_pilot.py
       - name: Verify actual UK PMTiles range access
         run: python3 tools/probe_drive_map_range.py
       - name: Fetch pinned world map

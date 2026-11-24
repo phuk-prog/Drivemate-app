@@ -1416,7 +1416,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
                 "Independent map survey drafts",
                 "Offline routing · UK experimental preview",
-                "Offline visual map · download full UK"
+                "Offline visual map · download full UK",
+                "DriveMate original stack · Wells pilot"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1557,6 +1558,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 26: showSurveyNotes(); break;
                         case 27: showOfflineRouting(); break;
                         case 28: showOfflineDisplay(); break;
+                        case 29: if(!active) DmPilotScreen.show(this); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
