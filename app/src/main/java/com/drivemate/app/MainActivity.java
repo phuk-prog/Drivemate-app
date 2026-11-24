@@ -605,8 +605,10 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        // Version lives in Settings → About; the home header stays clean.
-        TextView subtitle = text("UK NAV", 10, Color.rgb(180, 222, 235), true);
+        // The installed version, read from the package itself so it is always
+        // the one actually running (never a hard-coded label).
+        TextView subtitle = text("UK NAV  ·  v" + installedVersionName(), 10,
+                Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));

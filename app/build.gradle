@@ -9,7 +9,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 100706
-        versionName '1.7.6-rc1'
+        versionName '1.7.6'
     }
     // The map/zoom test variant installs alongside stable DriveMate.
     // The signed release variant retains the established update-compatible ID.
