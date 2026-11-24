@@ -229,9 +229,9 @@ public final class SmoothFollowCamera {
         GeoMath.Point wantedCenter = path.pointAt(
                 clamp(centerAlong + centrePredicted, 0, path.lengthMetres));
         if (GeoMath.distance(center, wantedCenter) > 500) {
-            // After a discontinuity, prefer reinitialisation on the next route
-            // rather than producing multiple seconds of misleading map movement.
-            wantedCenter = center;
+            // Re-anchor only on a recent accepted fix; never fly across a gap.
+            if (gpsConfident && age <= 1.15) center = wantedCenter;
+            else wantedCenter = center;
         }
         double positionFraction = alpha(dt, 0.45);
         center = blend(center, wantedCenter, positionFraction);

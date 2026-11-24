@@ -302,7 +302,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView etaText;
     private TextView speedText;
     private TextView speedLimitText;
-    private TextView laneGuidanceText;
+    private LaneGuidanceView laneGuidanceText;
+    private NavigationMatch navigationMatch;
     private TextView trafficNoticeText;
     private TextView arrivalHintText;
     private Button findParkingButton;
@@ -1093,11 +1094,10 @@ public final class MainActivity extends Activity implements LocationListener {
         junctionPos.topMargin = dp(5);
         turnCard.addView(junctionDiagram, junctionPos);
 
-        laneGuidanceText = text("", 24, CYAN, true);
-        laneGuidanceText.setGravity(Gravity.CENTER);
+        laneGuidanceText = new LaneGuidanceView(this);
         laneGuidanceText.setContentDescription("Verified route lane recommendations");
         laneGuidanceText.setVisibility(View.GONE);
-        LinearLayout.LayoutParams lanePos = new LinearLayout.LayoutParams(-1, -2);
+        LinearLayout.LayoutParams lanePos = new LinearLayout.LayoutParams(-1, dp(48));
         lanePos.topMargin = dp(5);
         turnCard.addView(laneGuidanceText, lanePos);
 
@@ -1718,7 +1718,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (topTurnTitle != null) topTurnTitle.setTextColor(CYAN);
         if (banner != null) banner.setTextColor(
                 night ? CYAN : Color.rgb(0, 96, 130));
-        if (laneGuidanceText != null) laneGuidanceText.setTextColor(CYAN);
+        // LaneGuidanceView uses a fixed high-contrast navy-card palette.
         if (trafficNoticeText != null) trafficNoticeText.setTextColor(
                 night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
         if (topTurnArrow != null) topTurnArrow.setNightMode(true);   // on the navy card
@@ -2327,7 +2327,7 @@ public final class MainActivity extends Activity implements LocationListener {
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
                 velocity, map.getHeight(), headerHeight, bottomPanelHeight,
-                closeZoom);
+                closeZoom || highlightedJunctionIndex >= 0);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
@@ -2529,6 +2529,7 @@ public final class MainActivity extends Activity implements LocationListener {
         lastCameraUpdate = 0;
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
+        navigationMatch = null;
         observedSpeed = 0;
         applyHighDetailPolicy();
         startBackgroundNavigation();
@@ -3019,6 +3020,7 @@ public final class MainActivity extends Activity implements LocationListener {
         offRouteSince = 0;
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
+        navigationMatch = null;
         observedSpeed = 0;
         arrivalPolicy.reset();
         spokenDistanceIndex = -1;
@@ -3101,10 +3103,14 @@ public final class MainActivity extends Activity implements LocationListener {
     private void updateGuidance(Location fix) {
         if (!active || route == null || destination == null) return;
         GeoMath.Point current = gpsPoint(fix);
-        GeoMath.Progress projected = GeoMath.project(route.points, current);
-        lastOffRouteMetres = projected.offRouteMetres;
         long now = SystemClock.elapsedRealtime();
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
+        if (navigationMatch == null) navigationMatch = new NavigationMatch(route.points);
+        NavigationMatch.State matched = navigationMatch.match(current, accuracy,
+                fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearing() ? fix.getBearing() : Double.NaN, fix.getTime());
+        GeoMath.Progress projected = matched.progress;
+        lastOffRouteMetres = projected.offRouteMetres;
 
         // Use precise fixes for detecting a genuine prolonged departure from
         // the route. Do not reroute over one noisy fix or during API failures.
@@ -3125,9 +3131,20 @@ public final class MainActivity extends Activity implements LocationListener {
             offRouteSince = 0;
         }
 
-        double measured = projected.alongMetres;
-        double along = GuidanceLogic.monotonicProgress(stabilizedAlong, measured,
-                projected.offRouteMetres, accuracy);
+        if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {
+            topTurnTitle.setText("POSITION UNCERTAIN · CHECK ROAD SIGNS");
+            topDistanceText.setVisibility(View.GONE);
+            topNextTurnText.setVisibility(View.GONE);
+            if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
+            if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
+            if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
+            clearJunctionHighlight();
+            stopSmoothLoop();
+            smoothFollow = null;
+            lastCameraUpdate = 0;
+            return;
+        }
+        double along = projected.alongMetres;
         stabilizedAlong = along;
         if (fix.hasSpeed() && fix.getSpeed() >= 3) {
             observedSpeed = observedSpeed == 0 ? fix.getSpeed()
@@ -3171,7 +3188,7 @@ public final class MainActivity extends Activity implements LocationListener {
         double[] offsets = new double[route.instructions.size()];
         for (int i = 0; i < route.instructions.size(); i++)
             offsets[i] = route.instructions.get(i).routeOffsetMetres;
-        int next = GuidanceLogic.nextInstructionIndex(offsets, along, previousInstructionIndex);
+        int next = navigationMatch.instruction(offsets, along, previousInstructionIndex);
         if (next < 0) {
             updateRoadIntelligence(fix, along, projected.offRouteMetres,
                     accuracy, Double.POSITIVE_INFINITY);
@@ -3265,13 +3282,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 : "In " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
                 + ", " + direction;
         updateDrivingCamera(fix, projected, step.routeOffsetMetres);
-        if (untilTurn <= 65 && spokenNowIndex != next) {
+        double immediate = NavigationMatch.immediateDistance(speedNow);
+        double approach = NavigationMatch.approachDistance(speedNow);
+        double early = NavigationMatch.earlyDistance(speedNow);
+        if (untilTurn <= immediate && spokenNowIndex != next) {
             spokenNowIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 2)) say(direction);
-        } else if (untilTurn > 65 && untilTurn <= 250 && spokenCloseIndex != next) {
+        } else if (untilTurn > immediate && untilTurn <= approach && spokenCloseIndex != next) {
             spokenCloseIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 1)) say(nextInstruction);
-        } else if (untilTurn > 250 && untilTurn <= 1000 && spokenDistanceIndex != next) {
+        } else if (untilTurn > approach && untilTurn <= early && spokenDistanceIndex != next) {
             spokenDistanceIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 0)) say(nextInstruction);
         }
@@ -3288,14 +3308,12 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean confident = accuracy <= 35 && offRoute <= 30 && age >= 0
                 && age <= 480000 && !gpsLost;
         RouteIntelligence.LaneSection lanes = confident
-                ? RouteIntelligence.approachingLanes(route.laneSections, along,
-                        laneLookAheadMetres(fix.hasSpeed() ? fix.getSpeed() : 0f)) : null;
+                ? RouteIntelligence.lanesForManeuver(route.laneSections, along,
+                        laneLookAheadMetres(fix.hasSpeed() ? fix.getSpeed() : 0f),
+                        along + distanceToTurn) : null;
         if (laneGuidanceText != null) {
-            CharSequence arrows = laneArrows(lanes);
-            laneGuidanceText.setText(arrows);
-            laneGuidanceText.setContentDescription(lanes == null ? ""
-                    : "Lane guidance: " + lanes.display());
-            laneGuidanceText.setVisibility(arrows.length() == 0 ? View.GONE : View.VISIBLE);
+            laneGuidanceText.setSection(lanes);
+            laneGuidanceText.setVisibility(lanes == null ? View.GONE : View.VISIBLE);
         }
         RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
                 route.speedSections, along, offRoute, accuracy, age);
@@ -3356,23 +3374,6 @@ public final class MainActivity extends Activity implements LocationListener {
      * recommended lanes bright cyan and larger, other lanes dimmed. Only
      * TomTom-supplied lanes are shown (LaneSection.trusted()).
      */
-    private CharSequence laneArrows(RouteIntelligence.LaneSection lanes) {
-        if (lanes == null || !lanes.trusted()) return "";
-        android.text.SpannableStringBuilder out = new android.text.SpannableStringBuilder();
-        for (int i = 0; i < lanes.lanes.size(); i++) {
-            RouteIntelligence.Lane lane = lanes.lanes.get(i);
-            if (i > 0) out.append("   ");
-            int start = out.length();
-            out.append(lane.symbol());
-            out.setSpan(new ForegroundColorSpan(lane.recommended
-                    ? CYAN : Color.rgb(96, 120, 132)), start, out.length(), 0);
-            if (lane.recommended)
-                out.setSpan(new android.text.style.RelativeSizeSpan(1.35f),
-                        start, out.length(), 0);
-        }
-        return out;
-    }
-
     /** Show lanes about 200 m ahead in town, up to 600 m at motorway speed. */
     private static double laneLookAheadMetres(float speedMps) {
         double speed = Float.isFinite(speedMps) ? Math.max(0, speedMps) : 0;
@@ -3533,6 +3534,7 @@ public final class MainActivity extends Activity implements LocationListener {
         vehicleFilter.reset();
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
+        navigationMatch = null;
         observedSpeed = 0;
         followLocation = true;
         updateFollowButton();

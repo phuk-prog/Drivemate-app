@@ -276,7 +276,7 @@ public final class TomTomApi {
                         List<RouteIntelligence.Lane> lanes = new ArrayList<>();
                         for (int j = 0; j < sourceLanes.length(); j++) {
                             JSONObject lane = sourceLanes.optJSONObject(j);
-                            if (lane == null) continue;
+                            if (lane == null) { lanes.clear(); break; }
                             String follow = lane.optString("follow", "");
                             JSONArray directions = lane.optJSONArray("directions");
                             // A TomTom recommendation must be one of this
@@ -288,10 +288,12 @@ public final class TomTomApi {
                                     if (follow.equals(directions.optString(d, "")))
                                         confirmedFollow = true;
                             }
-                            String label = confirmedFollow ? follow
-                                    : directions != null && directions.length() == 1
-                                            ? directions.optString(0, "") : "";
-                            lanes.add(new RouteIntelligence.Lane(label, confirmedFollow));
+                            if (directions == null || directions.length() == 0
+                                    || (!follow.isEmpty() && !confirmedFollow)) { lanes.clear(); break; }
+                            List<String> marked = new ArrayList<>();
+                            for (int d=0; d<directions.length(); d++) marked.add(directions.optString(d, ""));
+                            String label = confirmedFollow ? follow : marked.get(0);
+                            lanes.add(new RouteIntelligence.Lane(label, confirmedFollow, marked));
                         }
                         RouteIntelligence.LaneSection candidate =
                                 new RouteIntelligence.LaneSection(from, to, lanes);

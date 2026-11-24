@@ -151,8 +151,8 @@ public final class VectorDriveMap {
         org.maplibre.android.style.layers.Layer blocks = map.getStyle().getLayer("uk-buildings-3d");
         org.maplibre.android.style.layers.Layer flat = map.getStyle().getLayer("uk-buildings");
         if (blocks != null) blocks.setProperties(PropertyFactory.visibility(
-                enabled ? "visible" : "none"));
-        if (flat != null) flat.setMaxZoom(enabled ? 15f : 24f);
+                enabled && !navigationDetail ? "visible" : "none"));
+        if (flat != null) flat.setMaxZoom(enabled && !navigationDetail ? 15f : 24f);
     }
 
     /**
@@ -163,6 +163,7 @@ public final class VectorDriveMap {
     public void setNavigationDetail(boolean navigating) {
         navigationDetail = navigating;
         if (!ready() || map.getStyle() == null) return;
+        setBuildings3D(buildings3d);
         for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops"}) {
             org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer(id);
             if (layer != null) layer.setProperties(PropertyFactory.visibility(
