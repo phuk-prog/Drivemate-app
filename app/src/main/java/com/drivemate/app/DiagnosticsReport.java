@@ -20,6 +20,8 @@ public final class DiagnosticsReport {
         public boolean navigating;
         public boolean gpsLost;
         public String fixSource = "";
+        public String matchReason="";
+        public long fixAgeMs=-1;
         public float accuracyMetres = Float.NaN;
         public int satellitesUsed = -1;
         public float speedMps = Float.NaN;
@@ -41,6 +43,8 @@ public final class DiagnosticsReport {
         line(out, "Navigating", yesNo(s.navigating));
         line(out, "GPS lost", yesNo(s.gpsLost));
         line(out, "Fix source", s.fixSource.isEmpty() ? "—" : s.fixSource);
+        line(out,"Fix age",s.fixAgeMs<0?"—":s.fixAgeMs+" ms");
+        line(out,"Route match",s.matchReason);
         line(out, "Accuracy", metres(s.accuracyMetres));
         line(out, "Satellites used", s.satellitesUsed < 0 ? "—" : String.valueOf(s.satellitesUsed));
         line(out, "Speed", Float.isFinite(s.speedMps)
