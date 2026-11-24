@@ -3,7 +3,6 @@ package com.drivemate.app;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import android.net.Uri;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -352,7 +351,8 @@ public final class TomTomApi {
     }
 
     private static String encode(String value) {
-        return Uri.encode(value);
+        try { return java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20"); }
+        catch (java.io.UnsupportedEncodingException impossible) { throw new AssertionError(impossible); }
     }
 
     private static JSONObject requestJson(String url) throws IOException, JSONException {
