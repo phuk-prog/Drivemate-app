@@ -99,4 +99,15 @@ public final class NavigationCameraTest {
                 north, driver, 175, 275, 13, 1400, 350, 120);
         assertTrue(oneHundred.zoom > threeHundred.zoom + 0.1);
     }
+
+    @Test public void convertsRasterZoomToMapLibreZoom() {
+        // 512 px tiles in dp: one level lower at density 1, plus log2(density).
+        assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, 1.0), 1e-9);
+        assertEquals(14.0, NavigationCamera.toMapLibreZoom(16.0, 2.0), 1e-9);
+        assertEquals(16.0 - 1 - Math.log(2.625) / Math.log(2),
+                NavigationCamera.toMapLibreZoom(16.0, 2.625), 1e-9);
+        // A bad density never produces a wild camera.
+        assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, 0), 1e-9);
+        assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, Double.NaN), 1e-9);
+    }
 }

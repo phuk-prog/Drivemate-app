@@ -1,5 +1,6 @@
 package com.drivemate.app;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** GPS geometry in metres. No Android dependency, so it can be unit tested. */
@@ -65,6 +66,25 @@ public final class GeoMath {
             walked += length;
         }
         return path.get(path.size() - 1);
+    }
+
+    /**
+     * The stretch of a path between two distances along it, keeping every
+     * original vertex in between, so a highlight drawn from it lies exactly on
+     * the route line instead of cutting across curves such as roundabouts.
+     */
+    public static List<Point> slice(List<Point> path, double fromMetres, double toMetres) {
+        List<Point> out = new ArrayList<>();
+        if (path == null || path.size() < 2 || !(toMetres > fromMetres)) return out;
+        out.add(pointAtDistance(path, fromMetres));
+        double walked = 0;
+        for (int i = 1; i < path.size(); i++) {
+            walked += distance(path.get(i - 1), path.get(i));
+            if (walked >= toMetres) break;
+            if (walked > fromMetres) out.add(path.get(i));
+        }
+        out.add(pointAtDistance(path, toMetres));
+        return out;
     }
 
     /** Bearing of the road ahead, clockwise from north (degrees). */

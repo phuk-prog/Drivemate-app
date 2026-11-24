@@ -330,7 +330,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private final VehicleFilter vehicleFilter = new VehicleFilter();
     private int voiceMode = DrivingVoicePolicy.NORMAL;
     private int cameraMode = DrivingDisplayPolicy.CAMERA_AUTO_3D;
-    private int themePreference = DrivingDisplayPolicy.THEME_AUTO;
+    private int themePreference = DrivingDisplayPolicy.DEFAULT_THEME;
     private boolean nightDisplay;
     private boolean themeApplied;
     private boolean hazardWarningEnabled = true;
@@ -457,7 +457,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 : settings.getBoolean("north_up", false)
                         ? DrivingDisplayPolicy.CAMERA_NORTH_2D
                         : DrivingDisplayPolicy.CAMERA_AUTO_3D;
-        themePreference = Math.max(0, Math.min(2, settings.getInt("map_theme", 0)));
+        // Light unless the driver has chosen Dark or Automatic.
+        themePreference = DrivingDisplayPolicy.validTheme(
+                settings.getInt("map_theme", DrivingDisplayPolicy.DEFAULT_THEME));
         hazardWarningEnabled = settings.getBoolean("hazard_voice_alerts", true);
         speedWarningEnabled = settings.getBoolean("speed_voice_alerts", true);
         buildings3d = settings.getBoolean("buildings_3d", true);
@@ -603,8 +605,10 @@ public final class MainActivity extends Activity implements LocationListener {
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
         brandName.setText(brand);
         branding.addView(brandName);
-        // Version lives in Settings → About; the home header stays clean.
-        TextView subtitle = text("UK NAV", 10, Color.rgb(180, 222, 235), true);
+        // The installed version, read from the package itself so it is always
+        // the one actually running (never a hard-coded label).
+        TextView subtitle = text("UK NAV  ·  v" + installedVersionName(), 10,
+                Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
         header.addView(branding, new LinearLayout.LayoutParams(0, -2, 1));
@@ -1644,17 +1648,20 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private String themeModeName() {
-        return new String[]{"Automatic", "Day", "Night"}[themePreference];
+        return DrivingDisplayPolicy.themeName(themePreference);
     }
 
     private void selectThemeMode() {
-        new AlertDialog.Builder(this).setTitle("Navigation map colours")
+        int[] order = DrivingDisplayPolicy.THEME_MENU;
+        int checked = 0;
+        for (int i = 0; i < order.length; i++) if (order[i] == themePreference) checked = i;
+        new AlertDialog.Builder(this).setTitle("Map colours")
                 .setSingleChoiceItems(new String[]{
-                        "Automatic · follow phone appearance", "Day", "Night"
-                }, themePreference, (dialog, which) -> {
-                    themePreference = which;
+                        "Light", "Dark", "Automatic · follow phone light/dark setting"
+                }, checked, (dialog, which) -> {
+                    themePreference = order[which];
                     getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                            .putInt("map_theme", which).apply();
+                            .putInt("map_theme", themePreference).apply();
                     applyTheme();
                     dialog.dismiss();
                 }).setNegativeButton("Cancel", null).show();
@@ -3373,10 +3380,9 @@ public final class MainActivity extends Activity implements LocationListener {
         double from = Math.max(0, instruction.routeOffsetMetres - 110);
         double to = Math.min(index.lengthMetres, instruction.routeOffsetMetres + 130);
         if (to - from < 10) return;
-        List<GeoMath.Point> segment = new ArrayList<>();
-        for (double along = from; along < to; along += 12)
-            segment.add(index.pointAt(along));
-        segment.add(index.pointAt(to));
+        // Follow the route's own vertices so the highlight sits exactly on the
+        // route line (12 m sampling cut across roundabout curves).
+        List<GeoMath.Point> segment = GeoMath.slice(route.points, from, to);
         if (segment.size() < 2) return;
         List<GeoPoint> drawing = new ArrayList<>();
         for (GeoMath.Point point : segment)

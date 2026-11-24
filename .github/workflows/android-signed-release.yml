@@ -127,12 +127,24 @@ jobs:
           EXPECTED="$(sed -nE 's/^[[:space:]]*versionCode[[:space:]]+([0-9]+).*/\1/p' app/build.gradle | head -n 1)"
           echo "$BADGE" | grep -F "name='com.drivemate.android'" >/dev/null
           echo "$BADGE" | grep -F "versionCode='$EXPECTED'" >/dev/null
+          NAME="$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+'([^']+)'.*/\1/p" app/build.gradle | head -n 1)"
+          echo "$BADGE" | grep -F "versionName='$NAME'" >/dev/null
+
+      - name: Name the APK after the app and its version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -nE "s/^[[:space:]]*versionName[[:space:]]+'([^']+)'.*/\1/p" app/build.gradle | head -n 1)"
+          test -n "$VERSION"
+          cp app/build/outputs/apk/release/DriveMate-update.apk "app/build/outputs/apk/release/DriveMate-$VERSION.apk"
+          echo "DRIVEMATE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Signed APK: DriveMate-$VERSION.apk"
 
       - name: Upload privately signed installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: DriveMate-stable-signed-update-APK
-          path: app/build/outputs/apk/release/DriveMate-update.apk
+          name: DriveMate-${{ env.DRIVEMATE_VERSION }}-signed-APK
+          path: app/build/outputs/apk/release/DriveMate-${{ env.DRIVEMATE_VERSION }}.apk
           if-no-files-found: error
           retention-days: 30
 

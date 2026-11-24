@@ -57,4 +57,26 @@ public class GeoMathTest {
                 new GeoMath.Point(53, -2.0),
                 new GeoMath.Point(53, -1.99)), 0.5);
     }
+
+    @Test public void sliceKeepsOriginalCornersBetweenDistances() {
+        // An L-shaped path: 0.001 deg north (~111 m), then 0.001 deg east (~67 m).
+        GeoMath.Point a = new GeoMath.Point(53.000, -2.000);
+        GeoMath.Point corner = new GeoMath.Point(53.001, -2.000);
+        GeoMath.Point c = new GeoMath.Point(53.001, -1.999);
+        java.util.List<GeoMath.Point> path = Arrays.asList(a, corner, c);
+        java.util.List<GeoMath.Point> part = GeoMath.slice(path, 50, 150);
+        assertEquals(3, part.size());
+        // The corner itself is kept, so a highlight follows the route exactly.
+        assertEquals(corner.lat, part.get(1).lat, 1e-12);
+        assertEquals(corner.lon, part.get(1).lon, 1e-12);
+        double sliced = GeoMath.length(part);
+        assertEquals(100, sliced, 0.5);
+    }
+
+    @Test public void sliceOfEmptyOrReversedRangeIsEmpty() {
+        java.util.List<GeoMath.Point> path = Arrays.asList(
+                new GeoMath.Point(53, -2), new GeoMath.Point(53.001, -2));
+        assertTrue(GeoMath.slice(path, 80, 20).isEmpty());
+        assertTrue(GeoMath.slice(null, 0, 10).isEmpty());
+    }
 }
