@@ -61,14 +61,28 @@ public final class DmTileEngine {
     }
     public int cachedTiles(){return cache.size();}
     public DmCellPlanner.Coverage coverage(Route route,double radiusKm,long budget)throws Exception{return planner.coverage(route.points,route.cells,radiusKm,budget);}
-    private Node nearest(GeoMath.Point p,Set<String> allowed)throws Exception{
+    private Node nearest(GeoMath.Point p,Set<String> allowed,boolean origin)throws Exception{
         int y=Math.floorDiv((int)Math.round(p.lat*1e6),CELL),x=Math.floorDiv((int)Math.round(p.lon*1e6),CELL);
         Node best=null;double dist=350;
         if(!catalog.has(key(p.lat,p.lon))||(allowed!=null&&!allowed.contains(key(p.lat,p.lon))))throw new CoverageException("Position outside pilot map");
+        Map<String,Tile> nearby=new HashMap<>();
         for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
             String k=(y+dy)+"_"+(x+dx);if(!catalog.has(k)||(allowed!=null&&!allowed.contains(k)))continue;
-            for(Node n:load(k).nodes.values()){double d=GeoMath.distance(p,n.point);if(d<dist){dist=d;best=n;}}
-        }if(best==null)throw new CoverageException("No nearby road in cached coverage");return best;
+            nearby.put(k,load(k));
+        }
+        Set<Long> incoming=new HashSet<>();
+        if(!origin)for(Tile tile:nearby.values())for(Node n:tile.nodes.values())for(int i=0;i<n.edges.length();i++){
+            JSONArray e=n.edges.getJSONArray(i);if(nearby.containsKey(e.getString(2)))incoming.add(e.getLong(1));
+        }
+        for(Tile tile:nearby.values())for(Node n:tile.nodes.values()){
+            if(origin){
+                boolean hasExit=false;for(int i=0;i<n.edges.length();i++){JSONArray e=n.edges.getJSONArray(i);if(allowed==null||allowed.contains(e.getString(2))){hasExit=true;break;}}
+                if(!hasExit)continue;
+            }else if(!incoming.contains(n.id))continue;
+            double d=GeoMath.distance(p,n.point);if(d<dist||(d==dist&&best!=null&&n.id<best.id)){dist=d;best=n;}
+        }
+        if(best==null)throw new CoverageException("No eligible directed road node nearby");
+        return best;
     }
     static final class State{
         final Node node;final long edge,way,prev;final double cost,distance,priority;final State parent;
@@ -87,7 +101,7 @@ public final class DmTileEngine {
     }
     public Route route(GeoMath.Point start,GeoMath.Point finish)throws Exception{return route(start,finish,null);}
     public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed)throws Exception{
-        long began=SystemClock.elapsedRealtime();Node a=nearest(start,allowed),b=nearest(finish,allowed);
+        long began=SystemClock.elapsedRealtime();Node a=nearest(start,allowed,true),b=nearest(finish,allowed,false);
         Map<String,Long> lower=planner.lowerBounds(b.cell);
         if(a.id==b.id)throw new IOException("Same snapped junction");
         PriorityQueue<State> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));Map<Long,Double> best=new HashMap<>();

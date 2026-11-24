@@ -51,6 +51,20 @@ public class DmTileEngineTest{
             int blue=0;for(int y=0;y<500;y++)for(int x=0;x<500;x++)if(b.getPixel(x,y)==Color.rgb(33,105,220))blue++;
             assertTrue("Route not rendered",blue>20);b.recycle();
         });
+        // Synthetic directed edge: nearest physical node is a sink at origin
+        // and a valid arrival node at destination. Never invent reverse edges.
+        String k="1060_-40";
+        JSONArray sink=new JSONArray().put(1).put(53000000).put(-2000000).put(new JSONArray()).put(new JSONArray());
+        JSONArray edge=new JSONArray().put(1).put(1).put(k).put(100).put(2200).put(200);
+        JSONArray source=new JSONArray().put(2).put(53000020).put(-2000000).put(new JSONArray().put(edge)).put(new JSONArray());
+        JSONObject tile=new JSONObject().put("nodes",new JSONArray().put(sink).put(source)).put("features",new JSONArray()).put("places",new JSONArray());
+        ByteArrayOutputStream bytes=new ByteArrayOutputStream();try(java.util.zip.GZIPOutputStream out=new java.util.zip.GZIPOutputStream(bytes)){out.write(tile.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));}
+        byte[] compressed=bytes.toByteArray();JSONObject meta=new JSONObject().put("name",k+".dmt.gz").put("sha256",DmTileEngine.sha(compressed)).put("bytes",compressed.length);
+        byte[] manifest=new JSONObject().put("format","drivemate-tiles-v1").put("license","ODbL-1.0").put("cell_microdegrees",50000).put("global_rules",new JSONObject()).put("tiles",new JSONObject().put(k,meta)).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        DmTileEngine directed=new DmTileEngine(manifest,DmTileEngine.sha(manifest),name->new ByteArrayInputStream(compressed));
+        DmTileEngine.Route directedRoute=directed.route(new GeoMath.Point(53,-2),new GeoMath.Point(53,-2));
+        assertEquals(53.00002,directedRoute.points.get(0).lat,0.0000001);
+        assertEquals(53,directedRoute.points.get(1).lat,0.0000001);
         DmTileEngine broken=new DmTileEngine(raw,hash,name->new ByteArrayInputStream(new byte[]{1,2,3}));
         try{broken.retainJourney(broken.keys());fail("Accepted broken tile");}catch(IOException expected){}
     }
