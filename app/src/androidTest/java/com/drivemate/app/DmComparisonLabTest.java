@@ -32,7 +32,7 @@ public class DmComparisonLabTest {
         for(int i=0;i<fixes.length();i++){
             JSONObject fix=fixes.getJSONObject(i);
             GeoMath.Point gps=new GeoMath.Point(fix.getDouble("lat"),fix.getDouble("lon"));
-            DmNavigationSession.Update u=session.fix(gps,5,1000L+i*1000L,false);
+            DmNavigationSession.Update u=session.fix(gps,5,fix.getDouble("mps"),1000L+i*1000L,false);
             results.put(new JSONObject().put("t",i).put("status",u.status.name()).put("remaining",Double.isFinite(u.remaining)?u.remaining:JSONObject.NULL).put("event",fix.getString("event")));
             if(i%20==0||i==fixes.length()-1){
                 final int frame=i; final DmNavigationSession.Update update=u;
@@ -48,6 +48,7 @@ public class DmComparisonLabTest {
         }
         try(FileOutputStream file=new FileOutputStream(new File(out,"drivemate-engine-results.json"))){file.write(results.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}
         assertEquals(fixes.length(),results.length());
+        assertEquals("ARRIVAL_PREVIEW",results.getJSONObject(results.length()-1).getString("status"));
         android.util.Log.i("NavigationLab","LAB_DRIVEMATE "+fixes.length()+" fixes; renderer preview captured; no live voice");
     }
 }

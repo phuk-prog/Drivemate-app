@@ -67,6 +67,15 @@ def make_trace():
                 r=(d-cumulative[i-1])/(cumulative[i]-cumulative[i-1])
                 return [line[i-1][j]+r*(line[i][j]-line[i-1][j]) for j in range(2)]
         return list(line[-1])
+    # Record road-node endpoints as the actual destination of this fair comparison.
+    # The original pin was 166m off the road: a different, separate access test.
+    junctions=[]
+    for i in range(1,len(line)-1):
+        def bearing(a,b):
+            return math.degrees(math.atan2((b[1]-a[1])*math.cos(math.radians(a[0])),b[0]-a[0]))
+        angle=(bearing(line[i],line[i+1])-bearing(line[i-1],line[i])+180)%360-180
+        if abs(angle)>=35 and abs(angle)<=150 and metres(line[i-1],line[i])>=4 and metres(line[i],line[i+1])>=4:
+            junctions.append({"metres":cumulative[i],"lat":line[i][0],"lon":line[i][1],"angle":angle,"type":"geometry_turn_candidate"})
     points=[];d=0;stop=False;slow_until=0;hold=0
     for i in range(5):points.append({"t":i,"lat":line[0][0],"lon":line[0][1],"mps":0,"event":"stationary_start"})
     while d<total:
@@ -76,7 +85,10 @@ def make_trace():
         p=at(d);points.append({"t":len(points),"lat":p[0],"lon":p[1],"mps":velocity,"event":event})
         d=min(total,d+velocity)
     for i in range(8):points.append({"t":len(points),"lat":line[-1][0],"lon":line[-1][1],"mps":0,"event":"arrival"})
-    trace={"name":"Wells local road replay","start":start,"finish":end,"snap_start":line[0],"snap_finish":line[-1],"metres":total,"source_sha256":"8cde16000a69096b62f7a75598fb892c2d8eea34b8f2237278a785ddf125ce26","traffic":"stationary and slow vehicle speed only; no injected traffic data","points":points}
+    for j in junctions:
+        j["t"]=min(points,key=lambda p:metres((p["lat"],p["lon"]),(j["lat"],j["lon"])))["t"]
+    capture_times=sorted({0,len(points)-1,*[p["t"] for p in points if p["t"]%20==0],*[max(0,j["t"]+d) for j in junctions for d in (-8,-3,0,3) if j["t"]+d<len(points)]})
+    trace={"name":"Wells local road replay","requested_start":start,"requested_finish":end,"start":line[0],"finish":line[-1],"route_geometry":line,"turn_candidates":junctions,"capture_times":capture_times,"snap_start":line[0],"snap_finish":line[-1],"metres":total,"source_sha256":"8cde16000a69096b62f7a75598fb892c2d8eea34b8f2237278a785ddf125ce26","traffic":"stationary and slow vehicle speed only; no injected traffic data","points":points}
     (OUT/"trace.json").write_text(json.dumps(trace,indent=2))
     (ROOT/"app/src/androidTest/assets/navigation-lab.json").write_text(json.dumps(trace))
     print("LAB_TRACE",len(points),"fixes",round(total),"metres",flush=True)

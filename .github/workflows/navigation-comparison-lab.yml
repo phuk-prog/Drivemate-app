@@ -8,7 +8,7 @@ permissions:
 jobs:
   replay:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -32,7 +32,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y maptool ffmpeg
-          maptool -i offline-pilot-work/wells-places-2026-11-19.osm navigation-lab/navitmap.bin || true
+          python3 -c 'import xml.etree.ElementTree as E; t=E.parse("offline-pilot-work/wells-places-2026-11-19.osm"); E.indent(t); t.write("navigation-lab/wells-normalized.osm",encoding="utf-8",xml_declaration=True)'
+          maptool -i navigation-lab/wells-normalized.osm navigation-lab/navitmap.bin || true
+          ls -lh navigation-lab/navitmap.bin || true
           # Download one official region for OsmAnd, not for redistribution.
           if curl -fL --retry 2 --max-time 240 --max-filesize 500000000 'https://download.osmand.net/download?standard=yes&file=Gb_england_south-west-england_europe_2.obf.zip' -o navigation-lab/osmand.zip; then
             python3 -c 'import zipfile,pathlib; z=zipfile.ZipFile("navigation-lab/osmand.zip"); [z.extract(i,"navigation-lab") for i in z.infolist() if i.filename.endswith(".obf") and "/" not in i.filename and i.file_size<1000000000]' || true
