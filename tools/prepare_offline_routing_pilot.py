@@ -3,7 +3,7 @@
 import sys, json, hashlib, sqlite3, subprocess, urllib.request, xml.etree.ElementTree as ET
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-REF="de73cc9197323d55d2a75c724337090ae6747bcc"
+REF="e4bd8c41a04bf17a319df01cb0ff9579a4393426"
 SOURCE_SHA="8cde16000a69096b62f7a75598fb892c2d8eea34b8f2237278a785ddf125ce26"
 work=ROOT/"offline-pilot-work";work.mkdir(exist_ok=True)
 for path in ("tools/build_uk_roads.py","tools/verify_uk_graph.py","osm/wells-places-2026-11-19.osm"):

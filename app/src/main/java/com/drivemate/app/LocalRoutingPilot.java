@@ -12,6 +12,7 @@ public final class LocalRoutingPilot implements AutoCloseable {
     private final SQLiteDatabase db;
     private static final int MAX_EXPANSIONS=80000;
     private static final long MAX_MS=25000;
+    private static final double SEARCH_WEIGHT=2.2; // approximate bounded search
     public static String sha256(File file)throws Exception{
         MessageDigest d=MessageDigest.getInstance("SHA-256");
         try(InputStream in=new FileInputStream(file)){byte[] b=new byte[65536];int n;while((n=in.read(b))!=-1)d.update(b,0,n);}
@@ -39,12 +40,17 @@ public final class LocalRoutingPilot implements AutoCloseable {
         Result(State s,int e,long ms){List<GeoMath.Point> p=new ArrayList<>();List<Long>w=new ArrayList<>();metres=s.metres;seconds=s.cost;expanded=e;elapsedMs=ms;
             while(s!=null){p.add(s.node.point);if(s.edge!=0)w.add(s.way);s=s.parent;}Collections.reverse(p);Collections.reverse(w);points=Collections.unmodifiableList(p);ways=Collections.unmodifiableList(w);}
     }
-    private Node nearest(GeoMath.Point p)throws IOException{
+    private Node nearest(GeoMath.Point p,boolean requireDeparture)throws IOException{
         double dy=350/111000.0,dx=dy/Math.max(.1,Math.cos(Math.toRadians(p.lat))),best=350;Node result=null;
         try(Cursor c=db.rawQuery("SELECT n.id,n.lat,n.lon FROM nodes n WHERE n.lat BETWEEN ? AND ? AND n.lon BETWEEN ? AND ? AND NOT EXISTS(SELECT 1 FROM blocked b WHERE b.id=n.id)",
             new String[]{""+(p.lat-dy),""+(p.lat+dy),""+(p.lon-dx),""+(p.lon+dx)})){
-            while(c.moveToNext()){Node n=new Node(c.getLong(0),c.getDouble(1),c.getDouble(2));double d=GeoMath.distance(p,n.point);if(d<best){best=d;result=n;}}
+            while(c.moveToNext()){Node n=new Node(c.getLong(0),c.getDouble(1),c.getDouble(2));double d=GeoMath.distance(p,n.point);if(d<best&&(!requireDeparture||hasDeparture(n.id))){best=d;result=n;}}
         }if(result==null)throw new IOException("No nearby downloaded road");return result;
+    }
+    private boolean hasDeparture(long node){
+        try(Cursor c=db.rawQuery("SELECT 1 FROM edges e WHERE e.src=? AND NOT EXISTS(SELECT 1 FROM blocked b WHERE b.id=e.dst) AND NOT EXISTS(SELECT 1 FROM blocked_ways b WHERE b.id=e.way) LIMIT 1",new String[]{""+node})){
+            return c.moveToFirst();
+        }
     }
     private List<long[]> rules(State s){
         List<long[]> r=new ArrayList<>();if(s.edge==0)return r;
@@ -61,7 +67,7 @@ public final class LocalRoutingPilot implements AutoCloseable {
         }return (!only||matched)&&(next!=prev||explicitU);
     }
     public Result route(GeoMath.Point from,GeoMath.Point to)throws IOException{
-        long began=SystemClock.elapsedRealtime();Node start=nearest(from),end=nearest(to);
+        long began=SystemClock.elapsedRealtime();Node start=nearest(from,true),end=nearest(to,false);
         if(start.id==end.id)throw new IOException("Same snapped node");
         PriorityQueue<State> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));Map<Long,Double> best=new HashMap<>();
         q.add(new State(0,0,0,start,0,0,0,null));best.put(0L,0.0);int expanded=0;
@@ -77,7 +83,7 @@ public final class LocalRoutingPilot implements AutoCloseable {
                     if(!Double.isFinite(seconds)||seconds<=0||!Double.isFinite(metres)||metres<=0)continue;
                     double g=s.cost+seconds;if(g+1e-7>=best.getOrDefault(edge,Double.POSITIVE_INFINITY))continue;
                     Node n=new Node(next,c.getDouble(4),c.getDouble(5));best.put(edge,g);
-                    q.add(new State(edge,way,s.node.id,n,g,g+GeoMath.distance(n.point,end.point)*3.6/160,s.metres+metres,s));
+                    q.add(new State(edge,way,s.node.id,n,g,g+SEARCH_WEIGHT*GeoMath.distance(n.point,end.point)*3.6/160,s.metres+metres,s));
                 }
             }
         }throw new IOException("No connected local route within pilot resource bounds");
