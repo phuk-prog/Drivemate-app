@@ -550,7 +550,7 @@ public final class VectorDriveMap {
         if(change)loadStyle();
     }
     private void ensureRegionalCoverage(GeoMath.Point center){
-        if(sharedRouteMap!=null && center!=null && !RouteMapPolicy.insideStockport(center)){
+        if(sharedRouteMap!=null && center!=null && !sharedRouteMap.covers(center)){
             sharedRouteMap=null;loadStyle();
         }
     }

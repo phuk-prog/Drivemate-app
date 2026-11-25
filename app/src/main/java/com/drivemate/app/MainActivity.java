@@ -2942,11 +2942,12 @@ public final class MainActivity extends Activity implements LocationListener {
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
         s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
                 +(route==null?"":" / map: "+RouteMapPolicy.description(route.provider, vectorMap!=null&&vectorMap.hasSharedRouteMap()))
-                +(matchingTomTomMap()?" / raster alignment not measured":vectorMap==null?"":" / visual alignment: "+vectorMap.routeAlignmentDiagnostic());
+                +(showingVector()&&vectorMap!=null?" / visual alignment: "+vectorMap.routeAlignmentDiagnostic():" / raster alignment not measured")
+                +" / base map "+DriveTileServer.MAP_RELEASE;
         s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
-        s.highDetailTiles = matchingTomTomMap(); // same-provider raster for TomTom journeys
+        s.highDetailTiles = false; // vector default; explicit raster fallback remains possible
         s.cameraBearing = lastCameraBearing;
         s.travelBearing = lastTravelBearing;
         Intent share = new Intent(Intent.ACTION_SEND)
@@ -3054,7 +3055,10 @@ public final class MainActivity extends Activity implements LocationListener {
         network.execute(() -> {
             try {
                 TomTomApi.Route calculated = local?new LocalRoutingPack(this).preview(start,end):own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
-                if ("DriveMate".equals(calculated.provider)) calculated.sharedGeometry = DmUnifiedRegion.matchLive(this, calculated);
+                if ("DriveMate".equals(calculated.provider)) {
+                    calculated.sharedGeometry = DmUnifiedRegion.matchLive(this, calculated);
+                    if(calculated.sharedGeometry==null)calculated.sharedGeometry=DriveMateProvider.sharedMap(own,calculated);
+                }
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;

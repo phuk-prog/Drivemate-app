@@ -36,10 +36,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * completely independent of this map-display cache.
  */
 public final class DriveTileServer implements AutoCloseable {
-    public static final String MAP_RELEASE = "tiles-20261122T0943Z";
+    public static final String MAP_RELEASE = "tiles-20261125T0353Z";
     public static final String SOURCE = "https://github.com/phuk-prog/Drivemate-map/releases/download/"
             + MAP_RELEASE + "/united-kingdom.pmtiles";
-    public static final long SOURCE_SIZE = 1_871_405_796L;
+    public static final long SOURCE_SIZE = 1_872_336_554L;
     public static final int MAX_ZOOM = 14;
     public static final long MAX_TILE_CACHE_BYTES = 180L * 1024 * 1024;
     private static final int MAX_TILE_BYTES = 12 * 1024 * 1024;

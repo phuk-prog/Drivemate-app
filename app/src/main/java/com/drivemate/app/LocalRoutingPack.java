@@ -81,7 +81,7 @@ public final class LocalRoutingPack {
         File dir=new File(app.getFilesDir(),"drivemate-map/"+DriveTileServer.MAP_RELEASE);
         if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("Cannot create map storage");
         File dest=new File(dir,"offline-verified.pmtiles"),stage=new File(dir,"offline-download.tmp");
-        final String expected="eb1114fb953e51d17d4fceed387c86a35e9df1d2ea9fa7fbc156f78bf566e8c1";
+        final String expected="a621614b72a64a677684790ece1e51c4cb0931599764e134b8274970488efbfd";
         if(dest.isFile()&&dest.length()==DriveTileServer.SOURCE_SIZE&&expected.equals(LocalRoutingPilot.sha256(dest))){progress.update("UK visual map already verified");return;}
         stage.delete();if(dir.getUsableSpace()<DriveTileServer.SOURCE_SIZE+128_000_000L)throw new IOException("Need approximately 2 GB free for visual map");
         HttpURLConnection c=openUrl(DriveTileServer.SOURCE);MessageDigest md=digest();long count=0,check=0;

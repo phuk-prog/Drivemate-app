@@ -6,8 +6,8 @@ import sys
 import urllib.request
 
 URL = ("https://github.com/phuk-prog/Drivemate-map/releases/download/"
-       "tiles-20261122T0943Z/united-kingdom.pmtiles")
-SIZE = 1_871_405_796
+       "tiles-20261125T0353Z/united-kingdom.pmtiles")
+SIZE = 1_872_336_554
 class RangeRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         if not newurl.startswith("https://"):

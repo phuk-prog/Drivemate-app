@@ -4,11 +4,20 @@ import java.util.List;
 /** Never infer road identity from nearest visible pixels. */
 final class RouteMapPolicy {
     private RouteMapPolicy(){}
-    static boolean useTomTomMap(String provider,boolean keyAvailable){return keyAvailable&&"TomTom".equals(provider);}
+    static boolean useTomTomMap(String provider,boolean keyAvailable){return false; // Map V2 retains vector display; raster remains an explicit preference or startup fallback.}
     static String description(String provider,boolean shared){
-        if("TomTom".equals(provider))return "TomTom map and route (same provider)";
-        return shared?"Stockport shared road geometry":"DriveMate map · road alignment not verified";
+        return shared?"DriveMate shared road geometry":"DriveMate vector map · road alignment not verified";
     }
+    static double[] corridorBounds(List<GeoMath.Point> points){
+        if(points==null||points.size()<2)return null;
+        double west=180,east=-180,south=90,north=-90;
+        for(GeoMath.Point q:points){if(!Double.isFinite(q.lat)||!Double.isFinite(q.lon))return null;west=Math.min(west,q.lon);east=Math.max(east,q.lon);south=Math.min(south,q.lat);north=Math.max(north,q.lat);}
+        // Approx 350 m of context. Reject large or out-of-coverage requests.
+        west-=.006;east+=.006;south-=.004;north+=.004;
+        if(west< -9||east>3||south<49||north>61||east-west>.12||north-south>.12)return null;
+        return new double[]{west,south,east,north};
+    }
+    static boolean insideBounds(GeoMath.Point p,double[] b){return p!=null&&b!=null&&b.length==4&&p.lon>=b[0]&&p.lon<=b[2]&&p.lat>=b[1]&&p.lat<=b[3];}
     static int rasterWidthDp(double zoom){
         if(!Double.isFinite(zoom)||zoom<14)return 4;
         if(zoom<17)return 5;

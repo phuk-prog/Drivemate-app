@@ -58,6 +58,22 @@ public final class DriveMateProvider {
         }catch(Exception ignored){/* No explicit aligned limit: unknown. */}
         return route;
     }
+    /** Optional V2 geometry from the configured trusted routing host; never alters route or instructions. */
+    static DmUnifiedGeometry sharedMap(String endpoint,TomTomApi.Route route){
+        if(!valid(endpoint)||!endpoint.endsWith("/route")||route.geometryWays.isEmpty()||!route.geometrySourceSha.matches("[a-f0-9]{64}"))return null;
+        double[] b=RouteMapPolicy.corridorBounds(route.points);if(b==null)return null;
+        try{
+            String bbox=String.format(Locale.US,"%.8f,%.8f,%.8f,%.8f",b[0],b[1],b[2],b[3]);
+            JSONObject result=json(endpoint.substring(0,endpoint.length()-6)+"/v2/roads?bbox="+bbox+"&source="+route.geometrySourceSha,null);
+            if(!"drivemate-map-v2".equals(result.optString("format"))||result.optInt("coordinate_scale")!=10000000||!route.geometrySourceSha.equals(result.optString("source_sha256")))return null;
+            JSONArray bounds=result.getJSONArray("bounds");if(bounds.length()!=4)return null;
+            for(int i=0;i<4;i++)if(Math.abs(bounds.getDouble(i)-b[i])>1e-7)return null;
+            JSONArray input=result.getJSONArray("features");if(input.length()>6000)return null;
+            List<JSONArray> features=new ArrayList<>();int vertices=0;
+            for(int i=0;i<input.length();i++){JSONArray feature=input.getJSONArray(i);vertices+=feature.getJSONArray(2).length();if(vertices>100000)return null;features.add(feature);}
+            return new DmUnifiedGeometry(features,route.points,route.geometryWays,b);
+        }catch(Exception failure){return null;}
+    }
     /** Require identical encoded vertices and uninterrupted way identity for every segment. */
     static List<Long> exactTraceWays(JSONObject trace, List<GeoMath.Point> route)throws Exception {
         List<GeoMath.Point> shape=decode(trace.getString("shape"));

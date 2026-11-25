@@ -4,7 +4,7 @@ import java.util.Arrays;
 import static org.junit.Assert.*;
 public class RouteMapPolicyTest {
     @Test public void sourceSelectionNeverTreatsIndependentAsTomTom(){
-        assertTrue(RouteMapPolicy.useTomTomMap("TomTom",true));
+        assertFalse(RouteMapPolicy.useTomTomMap("TomTom",true));
         assertFalse(RouteMapPolicy.useTomTomMap("TomTom",false));
         assertFalse(RouteMapPolicy.useTomTomMap("DriveMate",true));
         assertFalse(RouteMapPolicy.useTomTomMap("DriveMate local preview",true));
@@ -23,6 +23,13 @@ public class RouteMapPolicyTest {
         assertTrue(RouteMapPolicy.onSameSegment(a,b,new GeoMath.Point(53.40002,-2.16),b));
         assertFalse(RouteMapPolicy.onSameSegment(a,b,a,c));
         assertFalse(RouteMapPolicy.onSameSegment(b,c,a,c));
+    }
+    @Test public void hostedMapBoundsAreBoundedAndContainRoute(){
+        GeoMath.Point a=new GeoMath.Point(53.4,-2.16),b=new GeoMath.Point(53.41,-2.17);
+        double[] bounds=RouteMapPolicy.corridorBounds(Arrays.asList(a,b));assertNotNull(bounds);
+        assertTrue(RouteMapPolicy.insideBounds(a,bounds));assertTrue(RouteMapPolicy.insideBounds(b,bounds));
+        assertNull(RouteMapPolicy.corridorBounds(Arrays.asList(a,new GeoMath.Point(54,-2.16))));
+        assertFalse(RouteMapPolicy.insideBounds(new GeoMath.Point(54,-2.16),bounds));
     }
     @Test public void routeWidthIsBoundedAndZoomDependent(){
         assertEquals(4,RouteMapPolicy.rasterWidthDp(Double.NaN));

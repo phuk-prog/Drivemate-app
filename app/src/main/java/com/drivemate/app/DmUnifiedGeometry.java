@@ -9,20 +9,27 @@ final class DmUnifiedGeometry {
     final FeatureCollection roads,areas,route;
     final List<GeoMath.Point> points;
     final int checkedEdges;
-    private static Point point(JSONArray c)throws JSONException{
-        return Point.fromLngLat(c.getInt(1)/1e6,c.getInt(0)/1e6);
+    final double[] bounds;
+    private final double coordinateScale;
+    private Point point(JSONArray c)throws JSONException{
+        return Point.fromLngLat(c.getInt(1)/coordinateScale,c.getInt(0)/coordinateScale);
     }
+    boolean covers(GeoMath.Point p){return RouteMapPolicy.insideBounds(p,bounds);}
     private static boolean exact(Point p,GeoMath.Point g){
         return Math.round(p.latitude()*1e6)==Math.round(g.lat*1e6)
             &&Math.round(p.longitude()*1e6)==Math.round(g.lon*1e6);
     }
     DmUnifiedGeometry(List<JSONArray> features,DmTileEngine.Route path)throws Exception{
-        this(features,path.points,path.ways,path);
+        this(features,path.points,path.ways,path,1e6,new double[]{-2.188,53.392,-2.137,53.423});
     }
     DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways)throws Exception{
-        this(features,points,ways,null);
+        this(features,points,ways,null,1e6,new double[]{-2.188,53.392,-2.137,53.423});
     }
-    private DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> routePoints,List<Long> routeWays,DmTileEngine.Route path)throws Exception{
+    DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways,double[] bounds)throws Exception{
+        this(features,points,ways,null,1e7,bounds);
+    }
+    private DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> routePoints,List<Long> routeWays,DmTileEngine.Route path,double scale,double[] bounds)throws Exception{
+        this.coordinateScale=scale;this.bounds=bounds.clone();
         Map<Long,JSONArray> byWay=new HashMap<>();List<Feature> r=new ArrayList<>(),a=new ArrayList<>();
         for(JSONArray f:features){
             if(f.length()!=4||f.getJSONArray(2).length()!=f.getJSONArray(3).length())throw new IOException("Missing shared way identities");
