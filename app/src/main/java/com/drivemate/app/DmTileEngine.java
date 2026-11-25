@@ -89,9 +89,9 @@ public final class DmTileEngine {
         State(Node n,long e,long w,long p,double c,double d,double f,State prevState){node=n;edge=e;way=w;prev=p;cost=c;distance=d;priority=f;parent=prevState;}
     }
     public static final class Route{
-        public final List<GeoMath.Point> points;public final List<Long> ways;public final Set<String> cells;public final double metres,seconds;public final int expansions;public final long ms;
-        Route(State end,int count,long elapsed){List<GeoMath.Point> p=new ArrayList<>();List<Long>w=new ArrayList<>();Set<String> c=new HashSet<>();metres=end.distance;seconds=end.cost;expansions=count;ms=elapsed;
-            for(State s=end;s!=null;s=s.parent){p.add(s.node.point);c.add(s.node.cell);if(s.edge!=0)w.add(s.way);}Collections.reverse(p);Collections.reverse(w);points=Collections.unmodifiableList(p);ways=Collections.unmodifiableList(w);cells=Collections.unmodifiableSet(c);}
+        public final List<GeoMath.Point> points;public final List<Long> ways,nodeIds,edgeIds;public final Set<String> cells;public final double metres,seconds;public final int expansions;public final long ms;
+        Route(State end,int count,long elapsed){List<GeoMath.Point> p=new ArrayList<>();List<Long>w=new ArrayList<>(),n=new ArrayList<>(),e=new ArrayList<>();Set<String> c=new HashSet<>();metres=end.distance;seconds=end.cost;expansions=count;ms=elapsed;
+            for(State s=end;s!=null;s=s.parent){p.add(s.node.point);n.add(s.node.id);c.add(s.node.cell);if(s.edge!=0){w.add(s.way);e.add(s.edge);}}Collections.reverse(p);Collections.reverse(w);Collections.reverse(n);Collections.reverse(e);points=Collections.unmodifiableList(p);ways=Collections.unmodifiableList(w);nodeIds=Collections.unmodifiableList(n);edgeIds=Collections.unmodifiableList(e);cells=Collections.unmodifiableSet(c);}
     }
     private List<long[]> rules(State s)throws JSONException{
         List<long[]> out=new ArrayList<>();JSONArray g=globalRules.optJSONArray(Long.toString(s.way));

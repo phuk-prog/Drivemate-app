@@ -1445,7 +1445,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
                 "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
                 "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
-                "Online close-up map detail · " + (highDetailOnline ? "On" : "Off"),
+                "Full-detail DriveMate · Stockport preview",
                 "Save where I parked",
                 places != null && places.parkedCar() != null
                         ? "Find my parked car" : "Find my parked car · none saved",
@@ -1570,15 +1570,8 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 17: selectRerouteMode(); break;
                         case 18: selectSpeedTolerance(); break;
                         case 19:
-                            highDetailOnline = !highDetailOnline;
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putBoolean("high_detail_online", highDetailOnline).apply();
-                            applyHighDetailPolicy();
-                            Toast.makeText(this, highDetailOnline
-                                    ? "High-detail TomTom tiles at close zoom (internet required). "
-                                            + "Not used while the map rotates during navigation."
-                                    : "Close-up map uses cached local vector streets",
-                                    Toast.LENGTH_LONG).show();
+                            if(!active) startActivity(new Intent(this,DmUnifiedPreviewActivity.class).putExtra("stockport",true));
+                            else Toast.makeText(this,"Stop navigation before opening map preview",Toast.LENGTH_SHORT).show();
                             break;
                         case 20: promptSaveParking(); break;
                         case 21: showParkedCar(); break;
@@ -2738,7 +2731,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private void applyHighDetailPolicy() {
         if (vectorMap == null) return;
         boolean rotating = active && cameraMode != DrivingDisplayPolicy.CAMERA_NORTH_2D;
-        vectorMap.setHighDetailEnabled(highDetailOnline && !active);
+        // Never swap the underlying map at a zoom threshold. Separate explicit map choice remains available.
+        vectorMap.setHighDetailEnabled(false);
         // Same moments decide map clutter: shops, cafés and bus stops hide
         // while navigating; fuel, EV charging, parking and stations stay.
         vectorMap.setBuildings3D(buildings3d);
@@ -2946,8 +2940,7 @@ public final class MainActivity extends Activity implements LocationListener {
         s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
-        s.highDetailTiles = highDetailOnline
-                && !(active && cameraMode != DrivingDisplayPolicy.CAMERA_NORTH_2D);
+        s.highDetailTiles = false; // no automatic raster detail overlay
         s.cameraBearing = lastCameraBearing;
         s.travelBearing = lastTravelBearing;
         Intent share = new Intent(Intent.ACTION_SEND)

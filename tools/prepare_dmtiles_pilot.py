@@ -3,7 +3,7 @@
 import hashlib,subprocess,sys,urllib.request
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-REF="dca11035d8ff6990cd94e9b39f4d544524b9278d"
+REF="7789ca2567ad6a505cd2cf6f8a691e40c836dcc6"
 SHA="8cde16000a69096b62f7a75598fb892c2d8eea34b8f2237278a785ddf125ce26"
 work=ROOT/"dmtiles-work";work.mkdir(exist_ok=True)
 for path in ("tools/compile_dmtiles.py","tools/build_uk_roads.py","osm/wells-places-2026-11-19.osm"):

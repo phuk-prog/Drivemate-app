@@ -1,4 +1,4 @@
-name: DriveMate 2.0.0 RC7 signed independent navigation update APK
+name: DriveMate 2.0.0 RC8 signed independent navigation update APK
 
 # Review-candidate signing only from the exact protected development branch.
 # No pull_request trigger: signing secrets never run for PR-submitted code.
@@ -14,7 +14,7 @@ jobs:
   signed-apk:
     if: github.event_name == 'push' && github.ref == 'refs/heads/feat/drivemate-2-independent-20261124'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +41,10 @@ jobs:
         run: python3 tools/fetch_pinned_map.py
       - name: Compile pinned original DriveMate map pilot
         run: python3 tools/prepare_dmtiles_pilot.py
+      - name: Compile full-detail Stockport region from pinned UK map
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y osmium-tool
+          python3 tools/prepare_stockport_unified_app.py
       - name: Run Android unit tests
         run: gradle --no-daemon :app:testDebugUnitTest
 
@@ -60,7 +64,16 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
-          script: bash tools/run_offline_routing_pilot.sh
+          script: bash tools/run_offline_routing_pilot.sh && bash tools/run_unified_zoom_test.sh
+      - name: Upload shared road zoom evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stockport-shared-geometry-zoom-evidence
+          path: |
+            unified-zoom-results/
+            app/src/main/assets/dmtiles-stockport/alignment-report.json
+          if-no-files-found: warn
       - name: Build unsigned release APK
         run: gradle --no-daemon :app:assembleRelease
 
@@ -71,7 +84,7 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
           test -x "$AAPT"
           "$AAPT" dump badging app/build/outputs/apk/release/app-release-unsigned.apk |
-            grep -F "package: name='com.drivemate.android' versionCode='200006' versionName='2.0.0-rc7'"
+            grep -F "package: name='com.drivemate.android' versionCode='200007' versionName='2.0.0-rc8'"
 
       - name: Decode privately stored signing key
         env:
@@ -99,7 +112,7 @@ jobs:
           bash tools/sign-release.sh \
             app/build/outputs/apk/release/app-release-unsigned.apk \
             "$RUNNER_TEMP/drivemate-private/DriveMate-Signing-Key.p12" \
-            app/build/outputs/apk/release/DriveMate-2.0.0-rc7-signed.apk
+            app/build/outputs/apk/release/DriveMate-2.0.0-rc8-signed.apk
 
       - name: Verify expected DriveMate certificate
         shell: bash
@@ -108,7 +121,7 @@ jobs:
           SIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -x "$SIGNER"
           CERT="$("$SIGNER" verify --print-certs --min-sdk-version 26 \
-            app/build/outputs/apk/release/DriveMate-2.0.0-rc7-signed.apk | \
+            app/build/outputs/apk/release/DriveMate-2.0.0-rc8-signed.apk | \
             sed -nE 's/^(V[0-9.]+ Signer:|Signer #[0-9]+) certificate SHA-256 digest: ([[:xdigit:]]+)$/\2/p' | tr -d '\r' | tr '[:upper:]' '[:lower:]' | sort -u)"
           EXPECTED="9f11804f0c28f61be2588fc6e1663514cfcca6ad4da4e31e19e4186c029b1a38"
           if [[ "$CERT" != "$EXPECTED" ]]; then
@@ -120,8 +133,8 @@ jobs:
       - name: Upload privately signed installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: DriveMate-2.0.0-rc7-independent-privately-signed-APK
-          path: app/build/outputs/apk/release/DriveMate-2.0.0-rc7-signed.apk
+          name: DriveMate-2.0.0-rc8-independent-privately-signed-APK
+          path: app/build/outputs/apk/release/DriveMate-2.0.0-rc8-signed.apk
           if-no-files-found: error
           retention-days: 30
 

@@ -73,7 +73,7 @@ public final class VectorDriveMap {
     private boolean nightMode;
     // True z16–19 online road/label detail above the local PMTiles z14 ceiling.
     // The local vector map remains beneath these tiles if they fail to load.
-    private boolean highDetailEnabled = true;
+    private boolean highDetailEnabled = false;
     /** Extruded building blocks from z15 (Shortbread has outlines only, no heights). */
     private boolean buildings3d = true;
     /** While navigating, general POIs and bus stops are hidden to reduce clutter. */
@@ -129,7 +129,7 @@ public final class VectorDriveMap {
             if (disposed) return;
             map = mapLibreMap;
             map.setMinZoomPreference(2.0);
-            map.setMaxZoomPreference(19.0);
+            map.setMaxZoomPreference(21.0);
             map.addOnCameraMoveStartedListener(reason -> {
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE
                         && onUserGesture != null) onUserGesture.run();
