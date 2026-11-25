@@ -3488,7 +3488,7 @@ public final class MainActivity extends Activity implements LocationListener {
             topTurnArrow.setLayoutParams(iconParams);
         }
         instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)+" · "+direction);
-        boolean compactCard=getResources().getConfiguration().screenHeightDp<560;
+        boolean compactCard=DisplayScreenPolicy.compact(getResources().getConfiguration().screenHeightDp,getResources().getConfiguration().fontScale);
         topDistanceText.setTextSize(compactCard?30:38);
         topInstructionText.setTextSize(compactCard?19:23);
         topRoadText.setTextSize(compactCard?16:18);
