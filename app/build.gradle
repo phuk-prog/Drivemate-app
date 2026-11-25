@@ -36,8 +36,8 @@ dependencies {
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     testImplementation 'junit:junit:4.13.2'
-    testImplementation 'org.json:json:20240303'
+    testImplementation 'org.json:json:20260719'
 }
 
-// Generate and review lockfile in CI before release.
+// Reviewed dependency lockfile is checked into source control.
 dependencyLocking { lockAllConfigurations() }

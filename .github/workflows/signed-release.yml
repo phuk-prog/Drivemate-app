@@ -71,6 +71,7 @@ jobs:
       - name: Validate resolved dependencies before signing
         run: |
           ./gradlew --no-daemon :app:dependencies --write-locks > dependency-report.txt
+          git diff --exit-code -- app/gradle.lockfile
           python3 tools/scan_dependencies.py app/gradle.lockfile
       - name: Run Android unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
