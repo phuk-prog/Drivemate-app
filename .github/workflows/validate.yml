@@ -1,4 +1,4 @@
-name: Build DriveMate Android APK and unsigned release
+name: Validate DriveMate Android
 on:
   push:
     branches: [main, 'feat/**']
@@ -6,6 +6,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,6 +23,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Verify wrapper and release identity
+        run: |
+          echo '498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          python3 tools/check_release_version.py
+          python3 tools/check_map_lock.py
+      - uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/world-z0-6.pmtiles
+          key: world-map-${{ hashFiles('tools/fetch_pinned_map.py') }}
       - name: Verify actual UK road features and style layer compatibility
         run: python3 tools/verify_drive_map_roads.py
       - name: Reject blank map screenshots (regression fixtures)
@@ -29,11 +41,20 @@ jobs:
       - name: Fetch checksum-verified DriveMate world map (45 MB)
         run: python3 tools/fetch_pinned_map.py
       - name: Unit tests
-        run: gradle --no-daemon :app:testDebugUnitTest
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+      - name: Resolve Gradle dependency locks for review
+        run: ./gradlew --no-daemon :app:dependencies --write-locks > dependency-report.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-lock-evidence
+          path: |
+            app/gradle.lockfile
+            dependency-report.txt
+          if-no-files-found: error
       - name: Build signed debug APK
-        run: gradle --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:assembleDebug
       - name: Build unsigned release APK for stable private signing
-        run: gradle --no-daemon :app:assembleRelease
+        run: ./gradlew --no-daemon :app:assembleRelease
       - uses: actions/upload-artifact@v4
         with:
           name: DriveMate-unsigned-release-APK

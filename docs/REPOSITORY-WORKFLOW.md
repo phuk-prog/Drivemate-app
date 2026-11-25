@@ -1,0 +1,13 @@
+# Repository consolidation and release contract
+
+Base c6b6ee6ff7c841f88dcb88f4b995c9a1ea15cbc6 (signed 2.0.1). Candidate 2.0.2 / 200014 preserves ID and owner signing certificate. Main becomes the sole integration branch after review; feature PRs target main. Historical branches are retained, not deleted. The old signing workflows are removed from the consolidated tree; administrators must restrict signing secrets to a protected release environment and archive or disable historical branches to prevent their legacy workflows from accessing the same credentials.
+
+The official release workflow checks a committed version register against the Gradle manifest and all published versioned release manifests; it refuses reuse/downgrades, verifies the real APK and owner certificate, and publishes versioned prerelease assets plus SHA256 and provenance. Existing signed 2.0.1 (run 45689920209) remains available as an Actions artifact and must not be overwritten.
+
+Use Gradle 8.9 wrapper with official distribution/JAR SHA-256. Dependency locks are generated as CI evidence and must be reviewed/committed before treating builds as fully locked. Cache the pinned world map only; verify its digest on every use. Dependabot and dependency review inspect proposed updates. Full recorded navigation replay (Wells fixture), offline and Stockport rendering gates run before release signing; optional six-app reference lab remains manually runnable and is not a competitor performance claim. Its UI replay is a test-only fixture, not road-certified guidance.
+
+The separate older display-overhaul branch is not blindly merged over newer 2.x navigation. Its documentation and compact-screen policy are incorporated; route matching, provider behavior, new guidance and safety gates are retained. Remaining differences (alternate route UI, arrival cards, optional styling) require separate reconciliation and recorded device checks.
+
+Map lock records exact source pins; do not automatically move to a failed nationwide candidate. Local routing is still preview-only. Origin snaps must have usable outgoing edges; weighted A* uses same priority as revised verifier while retaining device resource limits. National acceptance remains pending; no increase in Android limits.
+
+Before road use: recorded roundabout, motorway, GPS-loss, route refresh, reroute, lane, accessibility, day/night, landscape, and real update install test on previous signed APK. Release prereleases are engineering candidates, not safety certification.
