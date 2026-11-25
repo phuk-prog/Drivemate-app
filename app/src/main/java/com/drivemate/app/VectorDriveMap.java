@@ -26,6 +26,7 @@ import org.maplibre.android.style.layers.LineLayer;
 import org.maplibre.android.style.layers.PropertyFactory;
 import org.maplibre.android.style.layers.SymbolLayer;
 import org.maplibre.android.style.sources.GeoJsonSource;
+import org.maplibre.android.style.sources.GeoJsonOptions;
 import org.maplibre.geojson.Feature;
 import org.maplibre.geojson.FeatureCollection;
 import org.maplibre.geojson.LineString;
@@ -54,6 +55,9 @@ public final class VectorDriveMap {
     private GeoJsonSource routeSource;
     private GeoJsonSource remainingRouteSource;
     private double routeLength,confirmedProgress;
+    private RouteRenderGeometry exactGeometry=new RouteRenderGeometry(null);
+    private long lastAlignmentCheck;
+    private String lastAlignment="unmeasured";
     private long lastRoadLabelAt;
     private String roadCandidate="",currentRoad="";
     private int roadCandidateCount;
@@ -106,7 +110,7 @@ public final class VectorDriveMap {
     private final Runnable roadMonitor = new Runnable() {
         @Override public void run() {
             if (disposed) return;
-            if (view.getVisibility() == View.VISIBLE) inspectRoadDisplay();
+            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();}
             view.postDelayed(this, MONITOR_INTERVAL_MS);
         }
     };
@@ -250,6 +254,57 @@ public final class VectorDriveMap {
         }
     }
 
+    /** Local, bounded comparison of route geometry with actually rendered vector streets.
+     * Never changes the route or emits geographic coordinates. A close unrelated road
+     * can mask a discrepancy, so this is a visual diagnostic, not road matching.
+     */
+    private void inspectRouteAlignment(){
+        long now=SystemClock.elapsedRealtime();
+        if(!ready()||!navigationDetail||routeLength<40||map.getCameraPosition().zoom<14
+                ||now-lastAlignmentCheck<5000)return;
+        lastAlignmentCheck=now;
+        try{
+            int w=view.getWidth(),h=view.getHeight();
+            if(w<100||h<100)return;
+            RectF box=new RectF(0,Math.max(0,followTop),w,Math.max(followTop,h-followBottom));
+            if(box.height()<100)return;
+            List<Feature> features=map.queryRenderedFeatures(box,"uk-roads");
+            if(features.isEmpty()||features.size()>180)return;
+            List<List<GeoMath.Point>> roads=new ArrayList<>();
+            int count=0;
+            for(Feature f:features){
+                List<LineString> lines=new ArrayList<>();
+                if(f.geometry() instanceof LineString)lines.add((LineString)f.geometry());
+                else if(f.geometry() instanceof org.maplibre.geojson.MultiLineString){
+                    for(List<Point> part:((org.maplibre.geojson.MultiLineString)f.geometry()).coordinates())
+                        if(part.size()>1)lines.add(LineString.fromLngLats(part));
+                }
+                for(LineString line:lines){
+                    List<GeoMath.Point> road=new ArrayList<>();
+                    for(Point pt:line.coordinates()){
+                        if(++count>12000)return;
+                        road.add(new GeoMath.Point(pt.latitude(),pt.longitude()));
+                    }
+                    if(road.size()>1)roads.add(road);
+                }
+            }
+            if(roads.isEmpty())return;
+            List<Double> gaps=new ArrayList<>();
+            for(int d=15;d<=180;d+=15){
+                double along=confirmedProgress+d;if(along>=routeLength)break;
+                GeoMath.Point q=exactGeometry.at(along);
+                android.graphics.PointF pos=map.getProjection().toScreenLocation(new LatLng(q.lat,q.lon));
+                if(pos!=null&&box.contains(pos.x,pos.y))gaps.add(RouteRenderGeometry.nearestRoadDistance(q,roads));
+            }
+            if(gaps.size()<4)return;
+            java.util.Collections.sort(gaps);
+            double median=gaps.get(gaps.size()/2),max=gaps.get(gaps.size()-1);
+            lastAlignment=String.format(java.util.Locale.ROOT,"samples=%d medianGap=%.1fm maxGap=%.1fm",gaps.size(),median,max);
+            Log.i(LOG_TAG,"Route/base-map visual alignment (nearest visible street, not road identity): "+lastAlignment);
+        }catch(RuntimeException ignored){lastAlignment="unmeasured";}
+    }
+    public String routeAlignmentDiagnostic(){return lastAlignment;}
+
     private static String readAsset(Activity activity, String name) throws Exception {
         try (InputStream in = activity.getAssets().open(name);
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -314,9 +369,13 @@ public final class VectorDriveMap {
         }
     }
 
+    private static GeoJsonSource exactLineSource(String id){
+        // Disable GeoJSON tile simplification as well as app-side simplification.
+        return new GeoJsonSource(id,FeatureCollection.fromFeatures(new Feature[0]),new GeoJsonOptions().withTolerance(0f));
+    }
+
     private void installOverlays(Style style) {
-        routeSource = new GeoJsonSource("dm-route",
-                FeatureCollection.fromFeatures(new Feature[0]));
+        routeSource = exactLineSource("dm-route");
         vehicleSource = new GeoJsonSource("dm-vehicle",
                 FeatureCollection.fromFeatures(new Feature[0]));
         destinationSource = new GeoJsonSource("dm-destination",
@@ -326,14 +385,13 @@ public final class VectorDriveMap {
         parkedSource = new GeoJsonSource("dm-parked",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(routeSource);
-        remainingRouteSource=new GeoJsonSource("dm-remaining-route",FeatureCollection.fromFeatures(new Feature[0]));
+        remainingRouteSource=exactLineSource("dm-remaining-route");
         roadNameSource=new GeoJsonSource("dm-current-road",FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(remainingRouteSource);style.addSource(roadNameSource);
         style.addImage("dm-shield-blue",shieldBitmap(0xff164d94));
         style.addImage("dm-shield-green",shieldBitmap(0xff285a48));
         style.addImage("dm-shield-white",shieldBitmap(0xfff4f8fa));
-        junctionSource = new GeoJsonSource("dm-junction",
-                FeatureCollection.fromFeatures(new Feature[0]));
+        junctionSource = exactLineSource("dm-junction");
         style.addSource(junctionSource);
         style.addSource(destinationSource);
         style.addSource(entranceSource);
@@ -444,26 +502,28 @@ public final class VectorDriveMap {
     }
 
     public void setRoute(List<GeoMath.Point> path) {
-        pendingRoute=path;routeLength=path==null?0:GeoMath.length(path);
+        exactGeometry=new RouteRenderGeometry(path);pendingRoute=exactGeometry.full();routeLength=exactGeometry.length;
+        lastAlignment="unmeasured";lastAlignmentCheck=0;
         confirmedProgress=0;clearCurrentRoad();renderRoute();renderRemaining();
     }
     private void geometry(GeoJsonSource source,List<GeoMath.Point> path){
         if(!ready()||source==null)return;
         if(path==null||path.size()<2){source.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;}
         List<Point> points=new ArrayList<>();
-        for(GeoMath.Point p:DisplayPolyline.simplify(path,1.5))points.add(Point.fromLngLat(p.lon,p.lat));
+        for(GeoMath.Point p:path)points.add(Point.fromLngLat(p.lon,p.lat));
         if(points.size()<2){source.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;}
         source.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(points)));
     }
     private void renderRoute(){geometry(routeSource,pendingRoute);}
     private void renderRemaining(){
         if(pendingRoute==null||confirmedProgress<=0){geometry(remainingRouteSource,pendingRoute);return;}
-        geometry(remainingRouteSource,GeoMath.slice(pendingRoute,confirmedProgress,routeLength));
+        geometry(remainingRouteSource,exactGeometry.remaining(confirmedProgress));
     }
     public void setConfirmedRouteProgress(double along){
         if(!navigationDetail||!Double.isFinite(along)||routeLength<=0)return;
         double next=Math.max(0,Math.min(routeLength,along));
         if(Math.abs(next-confirmedProgress)<8&&next<routeLength)return;
+        if(next==confirmedProgress)return;
         confirmedProgress=next;renderRemaining();
     }
     public void clearCurrentRoad(){

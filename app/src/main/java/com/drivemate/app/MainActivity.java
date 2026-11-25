@@ -2941,7 +2941,8 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         s.satellitesUsed = satellitesUsed;
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
-        s.matchReason=joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason;
+        s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
+                +(vectorMap==null?"":" / visual alignment: "+vectorMap.routeAlignmentDiagnostic());
         s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
@@ -3219,10 +3220,8 @@ public final class MainActivity extends Activity implements LocationListener {
         clearJunctionHighlight();
         if (routeLine != null) map.getOverlays().remove(routeLine);
         routeLine = new Polyline();
-        // Draw fewer vertices without changing the full route used by GPS,
-        // distances, roundabouts, and manoeuvre selection.
-        List<GeoMath.Point> displayPoints = DisplayPolyline.simplify(
-                calculated.points, 1.5);
+        // Preserve every supplied road vertex on the raster fallback too.
+        List<GeoMath.Point> displayPoints = calculated.points;
         List<GeoPoint> geometry = new ArrayList<>(displayPoints.size());
         for (GeoMath.Point point : displayPoints)
             geometry.add(new GeoPoint(point.lat, point.lon));
