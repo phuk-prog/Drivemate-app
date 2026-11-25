@@ -20,7 +20,7 @@ public final class DmUnifiedPreviewActivity extends Activity {
         super.onCreate(state);stockport=getIntent().getBooleanExtra("stockport",true);
         MapLibre.getInstance(getApplicationContext());
         // The instrumentation live-renderer host must not start a second regional loader or MapView.
-        if(BuildConfig.DEBUG&&getIntent().getBooleanExtra("live_renderer_test_host",false)){setContentView(new FrameLayout(this));return;}
+        if((getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0&&getPackageName().endsWith(".mapzoom")&&getIntent().getBooleanExtra("live_renderer_test_host",false)){setContentView(new FrameLayout(this));return;}
         LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setBackgroundColor(0xff0a273b);
         status=new TextView(this);status.setTextColor(Color.WHITE);status.setTextSize(16);status.setPadding(18,14,18,14);
         status.setText("Loading shared roads · preview only");body.addView(status);
