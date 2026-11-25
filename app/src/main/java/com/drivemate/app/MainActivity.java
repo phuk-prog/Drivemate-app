@@ -126,6 +126,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 tripDetailText.setText("Journey estimate · traffic not current");
                 if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
             }
+            dismissStoppedDetailsIfUnsafe();
             refreshDrivingStatus();
             gpsHandler.postDelayed(this, 5000);
         }
@@ -272,6 +273,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private Button compassButton, previewRoutesButton, recentToggle;
     private ScrollView recentScroll;
     private boolean recentExpanded = true, compactDisplay, tightDisplay, vehicleUncertain;
+    private AlertDialog stoppedDetailsDialog;
     private Polyline routeCasing, alternateLine;
     private final List<Marker> routeChevrons = new ArrayList<>();
     private double lastDrawnProgress = -1;
@@ -2262,6 +2264,7 @@ public final class MainActivity extends Activity implements LocationListener {
             }
         }
         currentLocation = fix;
+        dismissStoppedDetailsIfUnsafe();
         // The faster-route chip must disappear on its own as soon as the
         // offered geometry starts too far behind the moving car or goes stale.
         if (pendingRoute != null && (pendingRouteOrigin == null
@@ -2784,10 +2787,10 @@ public final class MainActivity extends Activity implements LocationListener {
                             || GeoMath.distance(destination.point, searchedFor.point) > 2
                             || !canInspectWhileStopped()) return;
                     if (results.isEmpty()) {
-                        new AlertDialog.Builder(this).setTitle("Nearby parking")
+                        showStoppedDetails(new AlertDialog.Builder(this).setTitle("Nearby parking")
                                 .setMessage("TomTom returned no verified nearby parking POIs. "
                                         + "Parking availability and access are not guaranteed.")
-                                .setPositiveButton("OK", null).show();
+                                .setPositiveButton("OK", null));
                         return;
                     }
                     String[] names = new String[results.size()];
@@ -2796,12 +2799,12 @@ public final class MainActivity extends Activity implements LocationListener {
                         names[i] = item.title + " · " + NavigationUnits.displayDistance(
                                 GeoMath.distance(item.point, searchedFor.point), metricUnits) + " direct";
                     }
-                    new AlertDialog.Builder(this)
+                    showStoppedDetails(new AlertDialog.Builder(this)
                             .setTitle("Map-listed parking · availability unknown")
                             .setItems(names, (dialog, which) -> {
                                 if (!canInspectWhileStopped()) { Toast.makeText(this, "Stop safely to choose parking", Toast.LENGTH_SHORT).show(); return; }
                                 TomTomApi.Destination chosen = results.get(which);
-                                new AlertDialog.Builder(this)
+                                showStoppedDetails(new AlertDialog.Builder(this)
                                         .setTitle("Preview route to " + chosen.title + "?")
                                         .setMessage("This will replace your current destination. "
                                                 + "Parking capacity, pricing and vehicle access "
@@ -2810,9 +2813,9 @@ public final class MainActivity extends Activity implements LocationListener {
                                             if (canInspectWhileStopped() && destination != null && GeoMath.distance(destination.point, searchedFor.point) <= 2) selectDestination(chosen);
                                             else Toast.makeText(this, "Stop safely and reopen parking", Toast.LENGTH_SHORT).show();
                                         })
-                                        .setNegativeButton("Keep destination", null).show();
+                                        .setNegativeButton("Keep destination", null));
                             })
-                            .setNegativeButton("Cancel", null).show();
+                            .setNegativeButton("Cancel", null));
                 });
             } catch (Exception error) {
                 runOnUiThread(() -> {
@@ -2825,10 +2828,32 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private boolean canInspectWhileStopped() {
-        return currentLocation != null && currentLocation.hasSpeed() && currentLocation.hasAccuracy()
+        return foreground && currentLocation != null && currentLocation.hasSpeed() && currentLocation.hasAccuracy()
                 && !gpsLost && !vehicleUncertain
                 && DrivingDisplayPolicy.guidanceFixTrusted(currentLocation.getAccuracy(), System.currentTimeMillis() - currentLocation.getTime())
                 && DrivingDisplayPolicy.canInspectManoeuvres(currentLocation.getSpeed(), System.currentTimeMillis() - currentLocation.getTime());
+    }
+
+    /** Keep details visible only while a current, stationary fix is trustworthy. */
+    private void dismissStoppedDetails() {
+        AlertDialog dialog = stoppedDetailsDialog;
+        stoppedDetailsDialog = null;
+        if (dialog != null && dialog.isShowing()) dialog.dismiss();
+    }
+
+    private void dismissStoppedDetailsIfUnsafe() {
+        if (stoppedDetailsDialog != null && !canInspectWhileStopped()) dismissStoppedDetails();
+    }
+
+    private void showStoppedDetails(AlertDialog.Builder builder) {
+        if (!canInspectWhileStopped() || isFinishing()) return;
+        dismissStoppedDetails();
+        AlertDialog dialog = builder.create();
+        stoppedDetailsDialog = dialog;
+        dialog.setOnDismissListener(ignored -> {
+            if (stoppedDetailsDialog == dialog) stoppedDetailsDialog = null;
+        });
+        dialog.show();
     }
 
     private void offerSaveParkedCar() {
@@ -3515,10 +3540,10 @@ public final class MainActivity extends Activity implements LocationListener {
             if (++count >= 5) break;
         }
         if (count == 0) timeline.append("No route-positioned incidents reported.");
-        new AlertDialog.Builder(this).setTitle("Upcoming traffic · TomTom")
+        showStoppedDetails(new AlertDialog.Builder(this).setTitle("Upcoming traffic · TomTom")
                 .setMessage(timeline.toString()
                         + "\nTraffic conditions can change. Follow road signs.")
-                .setPositiveButton("Close", null).show();
+                .setPositiveButton("Close", null));
     }
 
     /**
@@ -3593,6 +3618,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (topTurnTitle == null) return;
         cardRouteProgress = -1;
         if (!"CONTINUE".equals(title)) {
+            dismissStoppedDetails();
             if ("GPS UNCERTAIN".equals(title) || "GPS SIGNAL LOST".equals(title)) { speedText.setText("—"); speedText.setContentDescription("Speed unavailable"); }
             setVehicleUncertain(true);
             invalidateJourney();
@@ -3615,10 +3641,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void showUpcomingManoeuvres() {
-        if (!active || route == null || currentLocation == null || cardRouteProgress < 0
-                || gpsLost || !currentLocation.hasSpeed()
-                || !DrivingDisplayPolicy.canInspectManoeuvres(currentLocation.getSpeed(),
-                    System.currentTimeMillis() - currentLocation.getTime())) {
+        if (!active || route == null || cardRouteProgress < 0 || !canInspectWhileStopped()) {
             Toast.makeText(this, "Stop safely with GPS available to view upcoming turns",
                     Toast.LENGTH_SHORT).show();
             return;
@@ -3638,12 +3661,13 @@ public final class MainActivity extends Activity implements LocationListener {
                     Math.max(0, step.routeOffsetMetres - cardRouteProgress), metricUnits))
                     .append(" · ").append(direction);
         }
-        new AlertDialog.Builder(this).setTitle("Upcoming manoeuvres")
+        showStoppedDetails(new AlertDialog.Builder(this).setTitle("Upcoming manoeuvres")
                 .setMessage(list.length() == 0 ? "No further instructions." : list.toString())
-                .setPositiveButton("Close", null).show();
+                .setPositiveButton("Close", null));
     }
 
     private void stopNavigation(boolean arrived) {
+        dismissStoppedDetails();
         boolean offerParkedCar = arrived && currentLocation != null
                 && ArrivalPolicy.canSaveParking(
                         currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
@@ -3881,12 +3905,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (GeoMath.distance(gpsPoint(currentLocation), previewOrigin) > 110) { planRoute(true); return; }
         String[] labels = new String[previewRoutes.size()];
         for (int i=0;i<labels.length;i++) labels[i] = (i==0 ? "Recommended · " : "Alternative " + i + " · ") + previewDetails(previewRoutes.get(i));
-        new AlertDialog.Builder(this).setTitle("Choose a calculated route").setSingleChoiceItems(labels, previewRoutes.indexOf(route), (d, which) -> {
+        showStoppedDetails(new AlertDialog.Builder(this).setTitle("Choose a calculated route").setSingleChoiceItems(labels, previewRoutes.indexOf(route), (d, which) -> {
             if (active || routing || which >= previewRoutes.size() || !canInspectWhileStopped() || previewOrigin == null || GeoMath.distance(gpsPoint(currentLocation), previewOrigin) > 110) { d.dismiss(); return; }
             route = previewRoutes.get(which); showRoute(route,true); showPreview(route);
             for (TomTomApi.Route alternative : previewRoutes) if (alternative != route) { drawAlternative(alternative.points); break; }
             d.dismiss();
-        }).setNegativeButton("Close", null).show();
+        }).setNegativeButton("Close", null));
     }
 
     private void updateDisplayBudget(FrameLayout frame, FrameLayout.LayoutParams compassPos) {
@@ -3995,6 +4019,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override public void onPause() {
         foreground = false;
+        dismissStoppedDetails();
         stopSmoothLoop();
         gpsHandler.removeCallbacks(deadReckonTick);
         if (active) {
@@ -4016,6 +4041,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     @Override public void onDestroy() {
+        dismissStoppedDetails();
         // The app is closing: the background-navigation notification must go too.
         NavigationService.stop(this);
         if (locationManager != null) {
