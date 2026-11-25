@@ -102,7 +102,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
-                    if (topTurnTitle != null) topTurnTitle.setText("GPS LOST · WAIT FOR SIGNAL");
+                    showGuidanceUnavailable("GPS SIGNAL LOST", "Waiting for a fresh GPS fix");
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
                     if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
@@ -245,8 +245,9 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean hasJunction = highlightedJunctionIndex >= 0;
         // Roundabouts always show the drawn roundabout in the card (it replaces
         // the exit number). Other junctions only when the map is panned away.
-        junctionDiagram.setVisibility(hasJunction && active
-                && (highlightedRoundabout || !followLocation) ? View.VISIBLE : View.GONE);
+        junctionDiagram.setVisibility(hasJunction && active && !gpsLost && !followLocation
+                && (laneGuidanceText == null || laneGuidanceText.getVisibility() != View.VISIBLE)
+                ? View.VISIBLE : View.GONE);
     }
 
     private MapView map;
@@ -302,7 +303,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView etaText;
     private TextView speedText;
     private TextView speedLimitText;
-    private TextView laneGuidanceText;
+    private LaneGuidanceView laneGuidanceText;
+    private TextView topRoadText;
+    private double cardRouteProgress = -1;
     private TextView trafficNoticeText;
     private TextView arrivalHintText;
     private Button findParkingButton;
@@ -1033,14 +1036,15 @@ public final class MainActivity extends Activity implements LocationListener {
 
         LinearLayout turnCard = new LinearLayout(this);
         turnCard.setOrientation(LinearLayout.VERTICAL);
-        turnCard.setPadding(dp(12), dp(9), dp(12), dp(10));
+        turnCard.setPadding(dp(14), dp(8), dp(14), dp(10));
+        turnCard.setOnClickListener(v -> showUpcomingManoeuvres());
         turnCard.setBackground(rounded(Color.rgb(14, 47, 66), 14));
         drivingTurnCard = turnCard;
         LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
         turnCardPos.topMargin = dp(6);
         container.addView(turnCard, turnCardPos);
 
-        topTurnTitle = text("NEXT TURN", 10, CYAN, true);
+        topTurnTitle = text("NEXT TURN", 12, CYAN, true);
         topTurnTitle.setLetterSpacing(0.08f);
         topTurnTitle.setSingleLine(true);
         topTurnTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1050,34 +1054,42 @@ public final class MainActivity extends Activity implements LocationListener {
         content.setOrientation(LinearLayout.HORIZONTAL);
         content.setGravity(Gravity.CENTER_VERTICAL);
         topTurnArrow = new TurnArrowView(this);
-        LinearLayout.LayoutParams arrow = new LinearLayout.LayoutParams(dp(54), dp(55));
+        LinearLayout.LayoutParams arrow = new LinearLayout.LayoutParams(dp(64), dp(64));
         arrow.rightMargin = dp(11);
         content.addView(topTurnArrow, arrow);
         // Distance first and largest, then the road or action on its own line
         // so the road name is not cut off behind a long sentence.
         LinearLayout words = new LinearLayout(this);
         words.setOrientation(LinearLayout.VERTICAL);
-        topDistanceText = text("", 30, Color.WHITE, true);
+        topDistanceText = text("", 34, Color.WHITE, true);
         topDistanceText.setSingleLine(true);
         topDistanceText.setVisibility(View.GONE);
         words.addView(topDistanceText);
-        topInstructionText = text("Preparing next instruction…", 18, Color.WHITE, true);
+        topInstructionText = text("Preparing next instruction…", 20, Color.WHITE, true);
         topInstructionText.setMaxLines(2);
         topInstructionText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         words.addView(topInstructionText);
+        topRoadText = text("", 16, Color.rgb(201, 231, 239), true);
+        topRoadText.setMaxLines(2);
+        topRoadText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        topRoadText.setVisibility(View.GONE);
+        words.addView(topRoadText);
         content.addView(words, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams contentPos = new LinearLayout.LayoutParams(-1, -2);
         contentPos.topMargin = dp(2);
         turnCard.addView(content, contentPos);
 
-        topNextTurnText = text("", 12, Color.rgb(201, 231, 239), false);
-        topNextTurnText.setSingleLine(true);
+        topNextTurnText = text("", 15, Color.rgb(201, 231, 239), true);
+        topNextTurnText.setMaxLines(2);
+        topNextTurnText.setPadding(0, dp(4), 0, 0);
         topNextTurnText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams thenPos = new LinearLayout.LayoutParams(-1, -2);
         thenPos.topMargin = dp(1);
         turnCard.addView(topNextTurnText, thenPos);
-        verifiedJunctionRoad = text("", 12, CYAN, true);
-        verifiedJunctionRoad.setSingleLine(true);
+        verifiedJunctionRoad = text("", 15, CYAN, true);
+        verifiedJunctionRoad.setMaxLines(2);
+        verifiedJunctionRoad.setPadding(dp(8), dp(4), dp(8), dp(4));
+        verifiedJunctionRoad.setBackground(rounded(Color.rgb(22, 65, 77), 8));
         verifiedJunctionRoad.setEllipsize(android.text.TextUtils.TruncateAt.END);
         verifiedJunctionRoad.setVisibility(View.GONE);
         verifiedJunctionRoad.setContentDescription("TomTom mapped junction signpost or exit road");
@@ -1089,15 +1101,14 @@ public final class MainActivity extends Activity implements LocationListener {
         junctionDiagram = new JunctionManeuverView(this);
         junctionDiagram.setContentDescription("Calculated route path at the upcoming junction");
         junctionDiagram.setVisibility(View.GONE);
-        LinearLayout.LayoutParams junctionPos = new LinearLayout.LayoutParams(-1, dp(84));
+        LinearLayout.LayoutParams junctionPos = new LinearLayout.LayoutParams(-1, dp(108));
         junctionPos.topMargin = dp(5);
         turnCard.addView(junctionDiagram, junctionPos);
 
-        laneGuidanceText = text("", 24, CYAN, true);
-        laneGuidanceText.setGravity(Gravity.CENTER);
+        laneGuidanceText = new LaneGuidanceView(this);
         laneGuidanceText.setContentDescription("Verified route lane recommendations");
         laneGuidanceText.setVisibility(View.GONE);
-        LinearLayout.LayoutParams lanePos = new LinearLayout.LayoutParams(-1, -2);
+        LinearLayout.LayoutParams lanePos = new LinearLayout.LayoutParams(-1, dp(48));
         lanePos.topMargin = dp(5);
         turnCard.addView(laneGuidanceText, lanePos);
 
@@ -1718,7 +1729,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (topTurnTitle != null) topTurnTitle.setTextColor(CYAN);
         if (banner != null) banner.setTextColor(
                 night ? CYAN : Color.rgb(0, 96, 130));
-        if (laneGuidanceText != null) laneGuidanceText.setTextColor(CYAN);
+        // LaneGuidanceView uses its own fixed contrast palette.
         if (trafficNoticeText != null) trafficNoticeText.setTextColor(
                 night ? Color.rgb(245, 200, 116) : Color.rgb(132, 65, 0));
         if (topTurnArrow != null) topTurnArrow.setNightMode(true);   // on the navy card
@@ -2468,6 +2479,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void showPreview(TomTomApi.Route calculated) {
         active = false;
+        cardRouteProgress = -1;
         applyHighDetailPolicy();
         NavigationService.stop(this);
         resubscribeLocationForMode();
@@ -3105,6 +3117,10 @@ public final class MainActivity extends Activity implements LocationListener {
         lastOffRouteMetres = projected.offRouteMetres;
         long now = SystemClock.elapsedRealtime();
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
+        if (!DrivingDisplayPolicy.guidanceFixTrusted(accuracy, System.currentTimeMillis() - fix.getTime())) {
+            showGuidanceUnavailable("GPS UNCERTAIN", "Check road signs · waiting for accurate GPS");
+            return;
+        }
 
         // Use precise fixes for detecting a genuine prolonged departure from
         // the route. Do not reroute over one noisy fix or during API failures.
@@ -3116,6 +3132,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     && !routing) {
                 offRouteSince = 0;
                 lastRerouteAttempt = now;
+                showGuidanceUnavailable("OFF ROUTE", "Recalculating your route…");
                 setStatus("Off route · recalculating safely…");
                 say("Recalculating your route.");
                 planRoute(false);
@@ -3125,10 +3142,15 @@ public final class MainActivity extends Activity implements LocationListener {
             offRouteSince = 0;
         }
 
+        if (!Double.isFinite(projected.offRouteMetres) || projected.offRouteMetres > 80) {
+            showGuidanceUnavailable("OFF ROUTE", "Check road signs · route position uncertain");
+            return;
+        }
         double measured = projected.alongMetres;
         double along = GuidanceLogic.monotonicProgress(stabilizedAlong, measured,
                 projected.offRouteMetres, accuracy);
         stabilizedAlong = along;
+        cardRouteProgress = along;
         if (fix.hasSpeed() && fix.getSpeed() >= 3) {
             observedSpeed = observedSpeed == 0 ? fix.getSpeed()
                     : 0.88 * observedSpeed + 0.12 * fix.getSpeed();
@@ -3175,10 +3197,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (next < 0) {
             updateRoadIntelligence(fix, along, projected.offRouteMetres,
                     accuracy, Double.POSITIVE_INFINITY);
-            topDistanceText.setVisibility(View.GONE);
-            topInstructionText.setText("Continue along the highlighted route");
-            topNextTurnText.setVisibility(View.GONE);
-            clearJunctionHighlight();
+            showGuidanceUnavailable("CONTINUE", "Follow the highlighted route");
             return;
         }
         previousInstructionIndex = next;
@@ -3201,20 +3220,10 @@ public final class MainActivity extends Activity implements LocationListener {
         topTurnArrow.update(glyph, shownExit);
         boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
         String road = step.street == null ? "" : step.street.trim();
-        if (verifiedJunctionRoad != null) {
-            // The exit road is now the card's main line, so this extra line only
-            // appears when TomTom supplies signpost text, which adds information.
-            String sign = step.signpost == null ? "" : step.signpost.trim();
-            String guidance = !sign.isEmpty() ? "SIGNS · " + sign : "";
-            verifiedJunctionRoad.setText(guidance);
-            verifiedJunctionRoad.setVisibility((roundabout || fork) && !guidance.isEmpty()
-                    ? View.VISIBLE : View.GONE);
-        }
-        topTurnTitle.setText(fix.hasAccuracy() && fix.getAccuracy() > 55
-                ? "GPS UNCERTAIN · CHECK ROAD SIGNS"
-                : roundabout ? "ROUNDABOUT"
-                        : fork ? "ROAD FORK · FOLLOW ARROW" : "NEXT TURN");
-        int iconSide = dp(roundabout || fork ? 70 : 54);
+        topTurnArrow.setVisibility(View.VISIBLE);
+        topTurnTitle.setText(roundabout ? "ROUNDABOUT" : fork ? "ROAD FORK" : "NEXT TURN");
+        topTurnTitle.setTextColor(CYAN);
+        int iconSide = dp(roundabout || fork ? 78 : 64);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
             android.view.ViewGroup.LayoutParams iconParams = topTurnArrow.getLayoutParams();
             iconParams.width = iconSide;
@@ -3222,7 +3231,14 @@ public final class MainActivity extends Activity implements LocationListener {
             topTurnArrow.setLayoutParams(iconParams);
         }
         updateJunctionHighlight(next,
-                DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn));
+                DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn, speedNow));
+        if (verifiedJunctionRoad != null) {
+            String sign = step.signpost == null ? "" : step.signpost.trim();
+            verifiedJunctionRoad.setText("SIGNS · " + sign);
+            verifiedJunctionRoad.setVisibility(!sign.isEmpty()
+                    && untilTurn <= DrivingDisplayPolicy.signpostHorizon(speedNow)
+                    ? View.VISIBLE : View.GONE);
+        }
         String nextTurnLabel = NavigationUnits.displayDistance(untilTurn, metricUnits)
                 + " · " + direction;
         instructionText.setText(nextTurnLabel);
@@ -3230,7 +3246,10 @@ public final class MainActivity extends Activity implements LocationListener {
         topDistanceText.setVisibility(View.VISIBLE);
         // Roundabouts and forks already show the exit in the title and icon,
         // so the road name alone is enough. Other turns keep the full action.
-        topInstructionText.setText((roundabout || fork) && !road.isEmpty() ? road : direction);
+        String action = DrivingDisplayPolicy.cardAction(direction, road, roundabout, fork, glyph);
+        topInstructionText.setText(action);
+        topRoadText.setText(road);
+        topRoadText.setVisibility(DrivingDisplayPolicy.showSeparateRoad(action, road) ? View.VISIBLE : View.GONE);
         topInstructionText.setContentDescription(
                 "Next turn in " + NavigationUnits.spokenDistance(untilTurn, metricUnits)
                 + ": " + direction);
@@ -3250,7 +3269,10 @@ public final class MainActivity extends Activity implements LocationListener {
                     + NavigationUnits.displayDistance(afterTurn, metricUnits)
                     + " later · " + followUp;
             nextTurnText.setText(followingTurn);
-            boolean showThen = DrivingDisplayPolicy.showFollowingTurn(untilTurn, afterTurn);
+            boolean showThen = DrivingDisplayPolicy.showFollowingTurn(untilTurn, afterTurn, speedNow)
+                    && laneGuidanceText.getVisibility() != View.VISIBLE
+                    && verifiedJunctionRoad.getVisibility() != View.VISIBLE
+                    && junctionDiagram.getVisibility() != View.VISIBLE;
             topNextTurnText.setText(showThen ? followingTurn : "");
             topNextTurnText.setVisibility(showThen ? View.VISIBLE : View.GONE);
             nextTurnText.setVisibility(View.GONE);
@@ -3291,11 +3313,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? RouteIntelligence.approachingLanes(route.laneSections, along,
                         laneLookAheadMetres(fix.hasSpeed() ? fix.getSpeed() : 0f)) : null;
         if (laneGuidanceText != null) {
-            CharSequence arrows = laneArrows(lanes);
-            laneGuidanceText.setText(arrows);
-            laneGuidanceText.setContentDescription(lanes == null ? ""
-                    : "Lane guidance: " + lanes.display());
-            laneGuidanceText.setVisibility(arrows.length() == 0 ? View.GONE : View.VISIBLE);
+            laneGuidanceText.setLanes(lanes);
+            updateJunctionDiagramVisibility();
         }
         RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
                 route.speedSections, along, offRoute, accuracy, age);
@@ -3349,28 +3368,6 @@ public final class MainActivity extends Activity implements LocationListener {
             sayVerifiedAlert(traffic.label() + " reported ahead. Check road conditions.",
                     false);
         }
-    }
-
-    /**
-     * Lane guidance as arrows, quicker to read at a glance than text:
-     * recommended lanes bright cyan and larger, other lanes dimmed. Only
-     * TomTom-supplied lanes are shown (LaneSection.trusted()).
-     */
-    private CharSequence laneArrows(RouteIntelligence.LaneSection lanes) {
-        if (lanes == null || !lanes.trusted()) return "";
-        android.text.SpannableStringBuilder out = new android.text.SpannableStringBuilder();
-        for (int i = 0; i < lanes.lanes.size(); i++) {
-            RouteIntelligence.Lane lane = lanes.lanes.get(i);
-            if (i > 0) out.append("   ");
-            int start = out.length();
-            out.append(lane.symbol());
-            out.setSpan(new ForegroundColorSpan(lane.recommended
-                    ? CYAN : Color.rgb(96, 120, 132)), start, out.length(), 0);
-            if (lane.recommended)
-                out.setSpan(new android.text.style.RelativeSizeSpan(1.35f),
-                        start, out.length(), 0);
-        }
-        return out;
     }
 
     /** Show lanes about 200 m ahead in town, up to 600 m at motorway speed. */
@@ -3449,6 +3446,8 @@ public final class MainActivity extends Activity implements LocationListener {
         // Draw the real roundabout from the route geometry, without an exit count.
         if (junctionDiagram != null)
             junctionDiagram.setRoute(segment, highlightedRoundabout, 0);
+        if (topTurnArrow != null && highlightedRoundabout)
+            topTurnArrow.setGeometry(segment);
         highlightedJunctionIndex = instructionIndex;
         updateJunctionDiagramVisibility();
         if (!showingVector()) map.invalidate();
@@ -3465,11 +3464,60 @@ public final class MainActivity extends Activity implements LocationListener {
             junctionHaloLine = null;
         }
         if (junctionDiagram != null) junctionDiagram.setRoute(null, false, 0);
+        if (topTurnArrow != null) topTurnArrow.setGeometry(null);
         if (verifiedJunctionRoad != null) verifiedJunctionRoad.setVisibility(View.GONE);
         if (highlightedJunctionIndex >= 0 && vectorMap != null)
             vectorMap.setJunctionPreview(null);
         highlightedJunctionIndex = -1;
         highlightedRoundabout = false;
+    }
+
+    /** Do not display stale turn distance, lane guidance or direction as live. */
+    private void showGuidanceUnavailable(String title, String message) {
+        if (topTurnTitle == null) return;
+        cardRouteProgress = -1;
+        topTurnTitle.setText(title);
+        topTurnTitle.setTextColor(Color.rgb(245, 200, 116));
+        topInstructionText.setText(message);
+        topInstructionText.setContentDescription(title + ". " + message);
+        topDistanceText.setVisibility(View.GONE);
+        topRoadText.setVisibility(View.GONE);
+        topTurnArrow.setVisibility(View.GONE);
+        topNextTurnText.setVisibility(View.GONE);
+        if (laneGuidanceText != null) laneGuidanceText.setLanes(null);
+        if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
+        if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
+        nextInstruction = "";
+        clearJunctionHighlight();
+    }
+
+    private void showUpcomingManoeuvres() {
+        if (!active || route == null || currentLocation == null || cardRouteProgress < 0
+                || gpsLost || !currentLocation.hasSpeed()
+                || !DrivingDisplayPolicy.canInspectManoeuvres(currentLocation.getSpeed(),
+                    System.currentTimeMillis() - currentLocation.getTime())) {
+            Toast.makeText(this, "Stop safely with GPS available to view upcoming turns",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        StringBuilder list = new StringBuilder();
+        int count = 0;
+        for (int i = Math.max(0, previousInstructionIndex);
+                i < route.instructions.size() && count < 8; i++) {
+            TomTomApi.Instruction step = route.instructions.get(i);
+            boolean roundabout = "↻".equals(GuidanceLogic.symbol(
+                    step.maneuver, step.junctionType, step.turnAngleDegrees));
+            String direction = roundabout
+                    ? GuidanceLogic.roundaboutLine(step.street, step.message)
+                    : GuidanceLogic.actionLine(step.message, step.junctionType, step.exitNumber);
+            if (count++ > 0) list.append("\n\n");
+            list.append(NavigationUnits.displayDistance(
+                    Math.max(0, step.routeOffsetMetres - cardRouteProgress), metricUnits))
+                    .append(" · ").append(direction);
+        }
+        new AlertDialog.Builder(this).setTitle("Upcoming manoeuvres")
+                .setMessage(list.length() == 0 ? "No further instructions." : list.toString())
+                .setPositiveButton("Close", null).show();
     }
 
     private void stopNavigation(boolean arrived) {

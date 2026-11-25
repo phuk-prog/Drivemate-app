@@ -13,6 +13,34 @@ public class DrivingDisplayPolicyTest {
         assertFalse(DrivingDisplayPolicy.showFollowingTurn(Double.NaN, 5));
     }
 
+    @Test public void followingTurnAdaptsToSpeed() {
+        assertTrue(DrivingDisplayPolicy.showFollowingTurn(200, 70, 5));
+        assertFalse(DrivingDisplayPolicy.showFollowingTurn(200, 250, 5));
+        assertTrue(DrivingDisplayPolicy.showFollowingTurn(700, 250, 30));
+        assertFalse(DrivingDisplayPolicy.showFollowingTurn(700, 250, 5));
+        assertFalse(DrivingDisplayPolicy.showFollowingTurn(100, -1, 30));
+        assertFalse(DrivingDisplayPolicy.showFollowingTurn(Double.NaN, 20, 30));
+    }
+
+    @Test public void uncertainFixAndMovingInspectionAreRejected() {
+        assertTrue(DrivingDisplayPolicy.guidanceFixTrusted(55, 15000));
+        assertFalse(DrivingDisplayPolicy.guidanceFixTrusted(56, 100));
+        assertFalse(DrivingDisplayPolicy.guidanceFixTrusted(10, 15001));
+        assertFalse(DrivingDisplayPolicy.guidanceFixTrusted(Double.NaN, 100));
+        assertTrue(DrivingDisplayPolicy.canInspectManoeuvres(0, 100));
+        assertFalse(DrivingDisplayPolicy.canInspectManoeuvres(1, 100));
+        assertFalse(DrivingDisplayPolicy.canInspectManoeuvres(0, 7001));
+    }
+
+    @Test public void cardKeepsProviderTextAndSplitsExactRoad() {
+        assertEquals("Turn left", DrivingDisplayPolicy.cardAction("Turn left onto A61", "A61", false, false, "↰"));
+        assertEquals("Exit onto", DrivingDisplayPolicy.cardAction("At the roundabout take the exit onto A61", "A61", true, false, "↻"));
+        assertEquals("Keep left", DrivingDisplayPolicy.cardAction("Keep left onto M1", "M1", false, true, "↖"));
+        assertEquals("Take exit 33 towards Sheffield", DrivingDisplayPolicy.cardAction("Take exit 33 towards Sheffield", "M1", false, false, "↰"));
+        assertFalse(DrivingDisplayPolicy.showSeparateRoad("Continue on A61", "A61"));
+        assertTrue(DrivingDisplayPolicy.showSeparateRoad("Turn left", "A61"));
+    }
+
     @Test public void twoDModesNeverTilt() {
         assertEquals(38, DrivingDisplayPolicy.tilt(38, DrivingDisplayPolicy.CAMERA_AUTO_3D), 0.01);
         assertEquals(0, DrivingDisplayPolicy.tilt(38, DrivingDisplayPolicy.CAMERA_HEADING_2D), 0.01);

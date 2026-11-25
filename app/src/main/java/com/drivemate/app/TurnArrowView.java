@@ -13,6 +13,12 @@ public final class TurnArrowView extends View {
     private enum Arrow { STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, UTURN, ROUNDABOUT, ARRIVE }
     private Arrow arrow = Arrow.STRAIGHT;
     private int roundaboutExit;
+    private java.util.List<GeoMath.Point> geometry = java.util.Collections.emptyList();
+
+    public void setGeometry(java.util.List<GeoMath.Point> route) {
+        geometry = route == null ? java.util.Collections.emptyList() : new java.util.ArrayList<>(route);
+        invalidate();
+    }
     private int accentColor = Color.rgb(7, 214, 235);
     private int exitTextColor = Color.WHITE;
 
@@ -45,6 +51,51 @@ public final class TurnArrowView extends View {
         invalidate();
     }
 
+    /** Draw the actual calculated path, rotated approach-up, with an exit-direction arrow. */
+    private boolean drawGeometry(Canvas canvas) {
+        if (geometry.size() < 3) return false;
+        GeoMath.Point origin = geometry.get(0);
+        GeoMath.Point approach = geometry.get(Math.min(geometry.size() - 1, 4));
+        double bearing = Math.toRadians(GeoMath.bearingDegrees(origin, approach));
+        double co = Math.cos(bearing), si = Math.sin(bearing);
+        double latScale = Math.max(0.1, Math.cos(Math.toRadians(origin.lat)));
+        float[] xs = new float[geometry.size()], ys = new float[geometry.size()];
+        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
+        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < geometry.size(); i++) {
+            GeoMath.Point point = geometry.get(i);
+            double east = (point.lon - origin.lon) * 111320 * latScale;
+            double north = (point.lat - origin.lat) * 111320;
+            xs[i] = (float) (east * co - north * si);
+            ys[i] = (float) -(east * si + north * co);
+            minX = Math.min(minX, xs[i]); maxX = Math.max(maxX, xs[i]);
+            minY = Math.min(minY, ys[i]); maxY = Math.max(maxY, ys[i]);
+        }
+        float span = Math.max(maxX - minX, maxY - minY);
+        if (!Float.isFinite(span) || span < 10) return false;
+        float scale = 44f / span;
+        Path route = new Path();
+        for (int i = 0; i < xs.length; i++) {
+            xs[i] = 32 + (xs[i] - (minX + maxX) / 2) * scale;
+            ys[i] = 32 + (ys[i] - (minY + maxY) / 2) * scale;
+            if (i == 0) route.moveTo(xs[i], ys[i]); else route.lineTo(xs[i], ys[i]);
+        }
+        canvas.drawPath(route, paint);
+        int last = xs.length - 1, prev = last - 1;
+        while (prev > 0 && Math.hypot(xs[last] - xs[prev], ys[last] - ys[prev]) < 4) prev--;
+        double dx = xs[last] - xs[prev], dy = ys[last] - ys[prev];
+        double length = Math.hypot(dx, dy);
+        if (length > 0.1) {
+            dx /= length; dy /= length;
+            Path tip = new Path();
+            tip.moveTo((float)(xs[last] - dx * 9 - dy * 6), (float)(ys[last] - dy * 9 + dx * 6));
+            tip.lineTo(xs[last], ys[last]);
+            tip.lineTo((float)(xs[last] - dx * 9 + dy * 6), (float)(ys[last] - dy * 9 - dx * 6));
+            canvas.drawPath(tip, paint);
+        }
+        return true;
+    }
+
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         int state = canvas.save();
@@ -58,6 +109,10 @@ public final class TurnArrowView extends View {
         paint.setStrokeJoin(Paint.Join.ROUND);
         Path path = new Path();
         Path head = new Path();
+        if (arrow == Arrow.ROUNDABOUT && drawGeometry(canvas)) {
+            canvas.restoreToCount(state);
+            return;
+        }
         switch (arrow) {
             case LEFT:
                 path.moveTo(33, 53); path.lineTo(33, 30); path.quadTo(33, 22, 25, 22);

@@ -92,6 +92,19 @@ public final class JunctionManeuverView extends View {
         paint.setStrokeWidth(dp(4.5f));
         paint.setColor(night ? Color.rgb(37, 236, 210) : Color.rgb(0, 123, 160));
         canvas.drawPath(actualRoute, paint);
+        // Mark the route direction, not guessed side roads or junction exits.
+        int last = route.size() - 1, previous = last - 1;
+        while (previous > 0 && Math.hypot(xs[last] - xs[previous], ys[last] - ys[previous]) * scale < dp(8)) previous--;
+        float endX = left + xPad + (xs[last] - lowX) * scale;
+        float endY = top + yPad + (highY - ys[last]) * scale;
+        double angle = Math.atan2(-(ys[last] - ys[previous]), xs[last] - xs[previous]);
+        if (Math.hypot(xs[last] - xs[previous], ys[last] - ys[previous]) > 0.1) {
+            Path tip = new Path();
+            tip.moveTo(endX - dp(9) * (float)Math.cos(angle - 0.6), endY - dp(9) * (float)Math.sin(angle - 0.6));
+            tip.lineTo(endX, endY);
+            tip.lineTo(endX - dp(9) * (float)Math.cos(angle + 0.6), endY - dp(9) * (float)Math.sin(angle + 0.6));
+            canvas.drawPath(tip, paint);
+        }
         paint.setStyle(Paint.Style.FILL);
         paint.setColor(Color.WHITE);
         canvas.drawCircle(startX, startY, dp(5.0f), paint);
