@@ -29,3 +29,8 @@ for file in ("dm_unified_day.json","dm_unified_night.json"):
     assert "height_m" in str(by["buildings-3d"]["paint"])
     for id in ("regional-bridge-fill","regional-tunnel","regional-oneway","regional-driving-pois","regional-exits","regional-addresses","regional-entrances","regional-building-labels"):assert id in by
     print("PASS",file,"regional map detail contract")
+
+for file in ("drivemate_vector_style.json","drivemate_vector_style_night.json"):
+    s=json.loads((root/file).read_text());by={l["id"]:l for l in s["layers"]}
+    for id in ("uk-road-casing","uk-roads","uk-road-links"):assert "bridge" in str(by[id]["filter"])
+    assert by["tomtom-traffic-flow"]["layout"]["visibility"]=="none"

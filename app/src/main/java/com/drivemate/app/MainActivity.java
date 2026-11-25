@@ -1433,12 +1433,12 @@ public final class MainActivity extends Activity implements LocationListener {
                 voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
                 "Voice guidance · " + voiceModeName(),
                 "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
-                trafficEnabled ? "Hide live traffic overlay" : "Show live traffic overlay",
+                trafficEnabled ? "Hide provider-matched live traffic" : "Show provider-matched live traffic",
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 "Camera · " + cameraModeName(),
                 closeZoom ? "Junction detail zoom · On" : "Junction detail zoom · Off",
                 matchingTomTomMap() ? "Map · TomTom route-matched provider (journey)" : autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
-                        : useLocalMap ? "Map · DriveMate local vector"
+                        : useLocalMap ? "Map · "+(vectorMap!=null?vectorMap.geometryDescription():"DriveMate local vector")
                         : "Map · TomTom online raster",
                 "Nearby map cache & Wi-Fi prefetch",
                 "Set or change Home",
@@ -2941,7 +2941,7 @@ public final class MainActivity extends Activity implements LocationListener {
         s.satellitesUsed = satellitesUsed;
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
         s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
-                +(route==null?"":" / map: "+RouteMapPolicy.description(route.provider, vectorMap!=null&&vectorMap.hasSharedRouteMap()))
+                +(route==null?"":" / map: "+(vectorMap!=null&&showingVector()?vectorMap.geometryDescription():RouteMapPolicy.description(route.provider,false)))
                 +(showingVector()&&vectorMap!=null?" / visual alignment: "+vectorMap.routeAlignmentDiagnostic():" / raster alignment not measured")
                 +" / base map "+DriveTileServer.MAP_RELEASE;
         s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
@@ -3251,7 +3251,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         map.invalidate();
         if (vectorMap != null) {
-            vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points);
+            vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points, calculated.provider);
             if (preview) {
                 // Fit once the preview panel has laid out, so the whole route
                 // sits between the search bar and the bottom panel.

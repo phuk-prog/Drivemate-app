@@ -608,31 +608,73 @@
       "filter": [
         "all",
         [
-          "!",
+          "all",
           [
-            "in",
+            "!",
             [
-              "get",
-              "kind"
-            ],
-            [
-              "literal",
+              "in",
               [
-                "footway",
-                "path",
-                "cycleway",
-                "steps",
-                "pedestrian",
-                "bridleway",
-                "rail",
-                "light_rail",
-                "tram",
-                "subway",
-                "narrow_gauge",
-                "funicular",
-                "monorail",
-                "disused",
-                "platform"
+                "get",
+                "kind"
+              ],
+              [
+                "literal",
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps",
+                  "pedestrian",
+                  "bridleway",
+                  "rail",
+                  "light_rail",
+                  "tram",
+                  "subway",
+                  "narrow_gauge",
+                  "funicular",
+                  "monorail",
+                  "disused",
+                  "platform"
+                ]
+              ]
+            ]
+          ],
+          [
+            "!",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "link"
+                  ],
+                  false
+                ],
+                true
+              ],
+              [
+                "in",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "kind"
+                  ],
+                  ""
+                ],
+                [
+                  "literal",
+                  [
+                    "motorway_link",
+                    "trunk_link",
+                    "primary_link",
+                    "secondary_link",
+                    "tertiary_link"
+                  ]
+                ]
               ]
             ]
           ]
@@ -640,40 +682,16 @@
         [
           "!",
           [
-            "any",
+            "==",
             [
-              "==",
+              "coalesce",
               [
-                "coalesce",
-                [
-                  "get",
-                  "link"
-                ],
-                false
+                "get",
+                "bridge"
               ],
-              true
+              false
             ],
-            [
-              "in",
-              [
-                "coalesce",
-                [
-                  "get",
-                  "kind"
-                ],
-                ""
-              ],
-              [
-                "literal",
-                [
-                  "motorway_link",
-                  "trunk_link",
-                  "primary_link",
-                  "secondary_link",
-                  "tertiary_link"
-                ]
-              ]
-            ]
+            true
           ]
         ]
       ]
@@ -744,31 +762,73 @@
       "filter": [
         "all",
         [
-          "!",
+          "all",
           [
-            "in",
+            "!",
             [
-              "get",
-              "kind"
-            ],
-            [
-              "literal",
+              "in",
               [
-                "footway",
-                "path",
-                "cycleway",
-                "steps",
-                "pedestrian",
-                "bridleway",
-                "rail",
-                "light_rail",
-                "tram",
-                "subway",
-                "narrow_gauge",
-                "funicular",
-                "monorail",
-                "disused",
-                "platform"
+                "get",
+                "kind"
+              ],
+              [
+                "literal",
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps",
+                  "pedestrian",
+                  "bridleway",
+                  "rail",
+                  "light_rail",
+                  "tram",
+                  "subway",
+                  "narrow_gauge",
+                  "funicular",
+                  "monorail",
+                  "disused",
+                  "platform"
+                ]
+              ]
+            ]
+          ],
+          [
+            "!",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "link"
+                  ],
+                  false
+                ],
+                true
+              ],
+              [
+                "in",
+                [
+                  "coalesce",
+                  [
+                    "get",
+                    "kind"
+                  ],
+                  ""
+                ],
+                [
+                  "literal",
+                  [
+                    "motorway_link",
+                    "trunk_link",
+                    "primary_link",
+                    "secondary_link",
+                    "tertiary_link"
+                  ]
+                ]
               ]
             ]
           ]
@@ -776,40 +836,16 @@
         [
           "!",
           [
-            "any",
+            "==",
             [
-              "==",
+              "coalesce",
               [
-                "coalesce",
-                [
-                  "get",
-                  "link"
-                ],
-                false
+                "get",
+                "bridge"
               ],
-              true
+              false
             ],
-            [
-              "in",
-              [
-                "coalesce",
-                [
-                  "get",
-                  "kind"
-                ],
-                ""
-              ],
-              [
-                "literal",
-                [
-                  "motorway_link",
-                  "trunk_link",
-                  "primary_link",
-                  "secondary_link",
-                  "tertiary_link"
-                ]
-              ]
-            ]
+            true
           ]
         ]
       ]
@@ -823,61 +859,79 @@
       "filter": [
         "all",
         [
-          "any",
-          [
-            "==",
-            [
-              "get",
-              "kind"
-            ],
-            "secondary"
-          ],
-          [
-            "==",
-            [
-              "get",
-              "kind"
-            ],
-            "tertiary"
-          ]
-        ],
-        [
-          "!",
+          "all",
           [
             "any",
             [
               "==",
               [
-                "coalesce",
-                [
-                  "get",
-                  "link"
-                ],
-                false
+                "get",
+                "kind"
               ],
-              true
+              "secondary"
             ],
             [
-              "in",
+              "==",
               [
-                "coalesce",
+                "get",
+                "kind"
+              ],
+              "tertiary"
+            ]
+          ],
+          [
+            "!",
+            [
+              "any",
+              [
+                "==",
                 [
-                  "get",
-                  "kind"
+                  "coalesce",
+                  [
+                    "get",
+                    "link"
+                  ],
+                  false
                 ],
-                ""
+                true
               ],
               [
-                "literal",
+                "in",
                 [
-                  "motorway_link",
-                  "trunk_link",
-                  "primary_link",
-                  "secondary_link",
-                  "tertiary_link"
+                  "coalesce",
+                  [
+                    "get",
+                    "kind"
+                  ],
+                  ""
+                ],
+                [
+                  "literal",
+                  [
+                    "motorway_link",
+                    "trunk_link",
+                    "primary_link",
+                    "secondary_link",
+                    "tertiary_link"
+                  ]
                 ]
               ]
             ]
+          ]
+        ],
+        [
+          "!",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "bridge"
+              ],
+              false
+            ],
+            true
           ]
         ]
       ],
@@ -932,69 +986,87 @@
       "filter": [
         "all",
         [
-          "any",
-          [
-            "==",
-            [
-              "get",
-              "kind"
-            ],
-            "motorway"
-          ],
-          [
-            "==",
-            [
-              "get",
-              "kind"
-            ],
-            "trunk"
-          ],
-          [
-            "==",
-            [
-              "get",
-              "kind"
-            ],
-            "primary"
-          ]
-        ],
-        [
-          "!",
+          "all",
           [
             "any",
             [
               "==",
               [
-                "coalesce",
-                [
-                  "get",
-                  "link"
-                ],
-                false
+                "get",
+                "kind"
               ],
-              true
+              "motorway"
             ],
             [
-              "in",
+              "==",
               [
-                "coalesce",
+                "get",
+                "kind"
+              ],
+              "trunk"
+            ],
+            [
+              "==",
+              [
+                "get",
+                "kind"
+              ],
+              "primary"
+            ]
+          ],
+          [
+            "!",
+            [
+              "any",
+              [
+                "==",
                 [
-                  "get",
-                  "kind"
+                  "coalesce",
+                  [
+                    "get",
+                    "link"
+                  ],
+                  false
                 ],
-                ""
+                true
               ],
               [
-                "literal",
+                "in",
                 [
-                  "motorway_link",
-                  "trunk_link",
-                  "primary_link",
-                  "secondary_link",
-                  "tertiary_link"
+                  "coalesce",
+                  [
+                    "get",
+                    "kind"
+                  ],
+                  ""
+                ],
+                [
+                  "literal",
+                  [
+                    "motorway_link",
+                    "trunk_link",
+                    "primary_link",
+                    "secondary_link",
+                    "tertiary_link"
+                  ]
                 ]
               ]
             ]
+          ]
+        ],
+        [
+          "!",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "bridge"
+              ],
+              false
+            ],
+            true
           ]
         ]
       ],
@@ -1091,38 +1163,56 @@
       "source-layer": "streets",
       "minzoom": 12,
       "filter": [
-        "any",
+        "all",
         [
-          "==",
+          "any",
           [
-            "coalesce",
+            "==",
             [
-              "get",
-              "link"
+              "coalesce",
+              [
+                "get",
+                "link"
+              ],
+              false
             ],
-            false
+            true
           ],
-          true
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "motorway_link",
+                "trunk_link",
+                "primary_link",
+                "secondary_link",
+                "tertiary_link"
+              ]
+            ]
+          ]
         ],
         [
-          "in",
+          "!",
           [
-            "coalesce",
+            "==",
             [
-              "get",
-              "kind"
+              "coalesce",
+              [
+                "get",
+                "bridge"
+              ],
+              false
             ],
-            ""
-          ],
-          [
-            "literal",
-            [
-              "motorway_link",
-              "trunk_link",
-              "primary_link",
-              "secondary_link",
-              "tertiary_link"
-            ]
+            true
           ]
         ]
       ],
@@ -1175,38 +1265,56 @@
       "source-layer": "streets",
       "minzoom": 12,
       "filter": [
-        "any",
+        "all",
         [
-          "==",
+          "any",
           [
-            "coalesce",
+            "==",
             [
-              "get",
-              "link"
+              "coalesce",
+              [
+                "get",
+                "link"
+              ],
+              false
             ],
-            false
+            true
           ],
-          true
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "motorway_link",
+                "trunk_link",
+                "primary_link",
+                "secondary_link",
+                "tertiary_link"
+              ]
+            ]
+          ]
         ],
         [
-          "in",
+          "!",
           [
-            "coalesce",
+            "==",
             [
-              "get",
-              "kind"
+              "coalesce",
+              [
+                "get",
+                "bridge"
+              ],
+              false
             ],
-            ""
-          ],
-          [
-            "literal",
-            [
-              "motorway_link",
-              "trunk_link",
-              "primary_link",
-              "secondary_link",
-              "tertiary_link"
-            ]
+            true
           ]
         ]
       ],

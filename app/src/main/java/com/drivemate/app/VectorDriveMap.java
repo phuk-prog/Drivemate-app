@@ -54,6 +54,13 @@ public final class VectorDriveMap {
     private MapLibreMap map;
     private GeoJsonSource routeSource;
     private DmUnifiedGeometry sharedRouteMap;
+    private String routeProvider="";
+    private boolean providerStyle,providerStylePending,providerStyleFailed;
+    private GeoJsonSource signalSource;
+    private MappedSignals signals;
+    private boolean signalsAttempted;
+    private double lastSignalLat=Double.NaN,lastSignalLon=Double.NaN,lastSignalZoom=Double.NaN;
+    private String[] providerRoadLayers=new String[0];
     private int styleGeneration;
     private int[] pendingPreviewPadding;
     private GeoJsonSource remainingRouteSource;
@@ -113,7 +120,7 @@ public final class VectorDriveMap {
     private final Runnable roadMonitor = new Runnable() {
         @Override public void run() {
             if (disposed) return;
-            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();}
+            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();}
             view.postDelayed(this, MONITOR_INTERVAL_MS);
         }
     };
@@ -137,6 +144,7 @@ public final class VectorDriveMap {
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE
                         && onUserGesture != null) onUserGesture.run();
             });
+            map.addOnCameraIdleListener(()->updateSignals());
             loadStyle();
         });
         // A successfully downloaded tile can be empty or fail to render.
@@ -221,7 +229,7 @@ public final class VectorDriveMap {
 
     /** Checks the actual MapLibre street layers in the on-screen viewport. */
     private void inspectRoadDisplay() {
-        if (disposed) return;
+        if (disposed || providerStylePending) return;
         // When the user pans or pinches manually, examine the *actual*
         // onscreen camera, not the last GPS-follow position.
         GeoMath.Point target = pendingCamera;
@@ -241,13 +249,14 @@ public final class VectorDriveMap {
                 RectF middle = new RectF(view.getWidth() * 0.08f,
                         view.getHeight() * 0.08f, view.getWidth() * 0.92f,
                         view.getHeight() * 0.92f);
-                visible = map.queryRenderedFeatures(middle, "uk-roads").size();
+                visible = providerStyle ? (providerRoadLayers.length==0?0:map.queryRenderedFeatures(middle,providerRoadLayers).size()) : map.queryRenderedFeatures(middle,"uk-roads","uk-road-links","uk-bridge-road","regional-bridge-fill").size();
             } catch (RuntimeException error) {
                 Log.w(LOG_TAG, "MapLibre rendered road query failed", error);
             }
         }
         RoadDisplayHealth.State outcome = roadHealth.check(
                 SystemClock.elapsedRealtime(), target.lat, target.lon, zoom, ready(), visible);
+        if(outcome==RoadDisplayHealth.State.FAILED&&providerStyle){providerStyleFailed=true;providerStyle=false;loadStyle();return;}
         if (outcome != previouslyReported) {
             previouslyReported = outcome;
             if (outcome == RoadDisplayHealth.State.READY
@@ -273,7 +282,7 @@ public final class VectorDriveMap {
             if(w<100||h<100)return;
             RectF box=new RectF(0,Math.max(0,followTop),w,Math.max(followTop,h-followBottom));
             if(box.height()<100)return;
-            List<Feature> features=map.queryRenderedFeatures(box,"uk-roads");
+            List<Feature> features=providerStyle?(providerRoadLayers.length==0?java.util.Collections.emptyList():map.queryRenderedFeatures(box,providerRoadLayers)):map.queryRenderedFeatures(box,"uk-roads","uk-road-links","uk-bridge-road","regional-bridge-fill");
             if(features.isEmpty()||features.size()>180)return;
             List<List<GeoMath.Point>> roads=new ArrayList<>();
             int count=0;
@@ -309,6 +318,9 @@ public final class VectorDriveMap {
         }catch(RuntimeException ignored){lastAlignment="unmeasured";}
     }
     public String routeAlignmentDiagnostic(){return lastAlignment;}
+    String geometryDescription(){return providerStyle?"TomTom vector roads and routing (same provider; geometry not independently verified)":providerStyleFailed?"Independent vector fallback · road alignment not verified":RouteMapPolicy.description(routeProvider,hasSharedRouteMap());}
+    private boolean requestProviderStyle(){return sharedRouteMap==null&&!providerStyleFailed&&RouteMapPolicy.useTomTomVector(routeProvider,!tomtomKey.isEmpty());}
+    private String providerStyleUrl(){return "https://api.tomtom.com/style/1/style/20.3.4-6?key="+android.net.Uri.encode(tomtomKey)+"&map="+(nightMode?"basic_night":"basic_main")+"&poi=poi_main"+(trafficEnabled?"&traffic_flow="+(nightMode?"flow_relative0-dark":"flow_relative0"):"");}
     boolean hasSharedRouteMap(){return sharedRouteMap!=null&&ready();}
     /** Instrumentation checks the same road and route layers used by live guidance. */
     boolean sharedRouteRendered(double zoom){
@@ -330,7 +342,7 @@ public final class VectorDriveMap {
     public void setTomTomKey(String key) {
         String newKey = key == null ? "" : key;
         if (newKey.equals(tomtomKey)) return;
-        tomtomKey = newKey;
+        tomtomKey = newKey;providerStyleFailed=false;
         if (map != null) loadStyle();
     }
 
@@ -342,6 +354,7 @@ public final class VectorDriveMap {
         previouslyReported = RoadDisplayHealth.State.NOT_APPLICABLE;
         final int generation=++styleGeneration;
         final DmUnifiedGeometry shared=sharedRouteMap;
+        final boolean remote=requestProviderStyle();providerStylePending=remote;providerStyle=false;providerRoadLayers=new String[0];
         try {
             String json = readAsset(activity, nightMode
                     ? "drivemate_vector_style_night.json"
@@ -373,8 +386,12 @@ public final class VectorDriveMap {
             lastRenderedBearing = Double.NaN;
             lastRenderedTilt = Double.NaN;
             lastRenderedVehicleAngle = Double.NaN;
-            map.setStyle(new Style.Builder().fromJson(json), style -> {
+            Style.Builder builder=remote?new Style.Builder().fromUri(providerStyleUrl()):new Style.Builder().fromJson(json);
+            if(remote)view.postDelayed(()->{if(!disposed&&generation==styleGeneration&&providerStylePending){providerStyleFailed=true;providerStylePending=false;loadStyle();}},18000);
+            map.setStyle(builder, style -> {
                 if (disposed || generation!=styleGeneration) return;
+                providerStylePending=false;providerStyle=remote;
+                if(remote){List<String> ids=new ArrayList<>();for(org.maplibre.android.style.layers.Layer layer:style.getLayers()){String id=layer.getId().toLowerCase(java.util.Locale.ROOT);if(layer instanceof LineLayer&&(id.contains("road")||id.contains("street")||id.contains("motorway")||id.contains("highway"))&&!id.contains("traffic")&&!id.contains("label")&&!id.contains("rail"))ids.add(layer.getId());}providerRoadLayers=ids.toArray(new String[0]);}
                 if(shared!=null){
                     GeoJsonSource roads=style.getSourceAs("unified-roads"),areas=style.getSourceAs("unified-areas");
                     if(roads==null||areas==null){sharedRouteMap=null;loadStyle();return;}
@@ -383,6 +400,7 @@ public final class VectorDriveMap {
                 }
                 installOverlays(style);
                 styleReady = true;
+                updateSignals();
                 setHighDetailEnabled(highDetailEnabled);
                 setBuildings3D(buildings3d);
                 setNavigationDetail(navigationDetail);
@@ -399,7 +417,8 @@ public final class VectorDriveMap {
                 if(!navigationDetail&&pendingPreviewPadding!=null){int[] pad=pendingPreviewPadding;pendingPreviewPadding=null;previewRoute(pendingRoute,pad[0],pad[1],pad[2]);}
             });
         } catch (Exception error) {
-            Log.e(LOG_TAG, "Unable to load DriveMate MapLibre style", error);
+            Log.e(LOG_TAG, "Unable to load DriveMate MapLibre style");
+            if(remote){providerStyleFailed=true;providerStylePending=false;loadStyle();}
             // The health check will trigger a visible, timed fallback when
             // no UK roads are rendered. Never silently treat a style as ready.
         }
@@ -458,6 +477,7 @@ public final class VectorDriveMap {
                 PropertyFactory.lineWidth(routeWidth(0.7f,1f,2f)),PropertyFactory.lineOpacity(.72f),
                 PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(gleam);
+        installSignalOverlay(style);
         // This stroke traces the real calculated route through an approaching
         // roundabout. It never attempts to deduce geometry from an exit count.
         LineLayer junctionHalo = new LineLayer("dm-junction-casing", "dm-junction");
@@ -508,6 +528,29 @@ public final class VectorDriveMap {
         style.addLayer(currentRoadLayer);
     }
 
+    private void installSignalOverlay(Style style){
+        signalSource=new GeoJsonSource("dm-static-signals",FeatureCollection.fromFeatures(new Feature[0]));style.addSource(signalSource);
+        Bitmap b=Bitmap.createBitmap(28,42,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(Color.WHITE);c.drawRoundRect(new RectF(1,1,27,41),6,6,p);p.setColor(0xff213142);c.drawRoundRect(new RectF(3,3,25,39),5,5,p);
+        // Three coloured lenses denote a mapped traffic light, never the current phase.
+        int[] colors={0xffd95358,0xffe5b73b,0xff48a77a};for(int i=0;i<3;i++){p.setColor(colors[i]);c.drawCircle(14,10+i*11,4.1f,p);}
+        style.addImage("dm-mapped-traffic-light",b);
+        SymbolLayer l=new SymbolLayer("dm-traffic-light-locations","dm-static-signals");
+        l.setMinZoom(15f);l.setProperties(PropertyFactory.iconImage("dm-mapped-traffic-light"),PropertyFactory.iconSize(.75f),PropertyFactory.iconAllowOverlap(false),PropertyFactory.iconIgnorePlacement(false));style.addLayer(l);
+        lastSignalLat=lastSignalLon=lastSignalZoom=Double.NaN;
+    }
+    private void updateSignals(){
+        if(!ready()||signalSource==null||map.getCameraPosition().target==null)return;
+        double z=map.getCameraPosition().zoom;LatLng at=map.getCameraPosition().target;
+        double lat=at.getLatitude(),lon=at.getLongitude();
+        if(z<15){if(!Double.isNaN(lastSignalZoom)){signalSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));lastSignalZoom=Double.NaN;}return;}
+        if(!signalsAttempted){signalsAttempted=true;try{signals=MappedSignals.load(activity);}catch(Exception ignored){return;}}
+        if(signals==null)return;
+        double span=Math.min(.055, .035*Math.pow(2,15-z));span=Math.max(.0015,span);
+        if(Double.isFinite(lastSignalZoom)&&Math.abs(z-lastSignalZoom)<.4&&Math.abs(lat-lastSignalLat)<span*.18&&Math.abs(lon-lastSignalLon)<span*.18)return;
+        lastSignalLat=lat;lastSignalLon=lon;lastSignalZoom=z;
+        signalSource.setGeoJson(signals.features(lat-span,lon-span,lat+span,lon+span));
+    }
     static void installDetailIcons(Style style){
         style.addImage("dm-shield-blue",shieldBitmap(0xff164d94));style.addImage("dm-shield-green",shieldBitmap(0xff285a48));style.addImage("dm-shield-white",shieldBitmap(0xfff4f8fa));
         String[][] icons={{"fuel","F"},{"ev","EV"},{"parking","P"},{"hospital","+"},{"food","R"},{"shop","S"},{"services","MS"},{"hotel","H"},{"garage","G"},{"airport","A"},{"ferry","FE"},{"station","T"},{"place","•"}};
@@ -548,9 +591,13 @@ public final class VectorDriveMap {
         }
     }
 
-    public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path){
-        boolean change=sharedRouteMap!=shared;
-        sharedRouteMap=shared;pendingPreviewPadding=null;
+    public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path){setSharedRoute(shared,path,"");}
+    public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path,String provider){
+        String next=provider==null||path==null?"":provider;
+        boolean changedProvider=!next.equals(routeProvider);
+        boolean change=sharedRouteMap!=shared||changedProvider;
+        if(changedProvider)providerStyleFailed=false;
+        routeProvider=next;sharedRouteMap=shared;pendingPreviewPadding=null;
         setRoute(path);
         if(change)loadStyle();
     }
@@ -815,14 +862,14 @@ public final class VectorDriveMap {
     }
 
     public void setTraffic(boolean visible) {
-        trafficEnabled = visible;
+        boolean changed=trafficEnabled!=visible;trafficEnabled = visible;
+        if(changed&&requestProviderStyle()){loadStyle();return;}
         if (!ready()) return;
         org.maplibre.android.style.layers.Layer layer =
                 map.getStyle() == null ? null :
                         map.getStyle().getLayer("tomtom-traffic-flow");
         if (layer != null) layer.setProperties(
-                PropertyFactory.visibility(visible && !tomtomKey.isEmpty()
-                        ? "visible" : "none"));
+                PropertyFactory.visibility("none"));
     }
 
     public void prefetch(GeoMath.Point point) {
