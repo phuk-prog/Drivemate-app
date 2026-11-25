@@ -68,6 +68,10 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y osmium-tool
           python3 tools/prepare_stockport_unified_app.py
+      - name: Validate resolved dependencies before signing
+        run: |
+          ./gradlew --no-daemon :app:dependencies --write-locks > dependency-report.txt
+          python3 tools/scan_dependencies.py app/gradle.lockfile
       - name: Run Android unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
 
