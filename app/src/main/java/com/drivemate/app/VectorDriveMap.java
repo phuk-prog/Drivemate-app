@@ -73,7 +73,6 @@ public final class VectorDriveMap {
     private int roadCandidateCount;
     private String pendingRoadName="";
     private GeoJsonSource roadNameSource;
-    private GeoJsonSource junctionSource;
     private GeoJsonSource vehicleSource;
     private GeoJsonSource destinationSource;
     private GeoJsonSource entranceSource;
@@ -95,7 +94,7 @@ public final class VectorDriveMap {
     private GeoMath.Point pendingEntrance;
     private GeoMath.Point pendingParked;
     private List<GeoMath.Point> pendingRoute;
-    private List<GeoMath.Point> pendingJunctionRoute;
+    private List<GeoMath.Point> junctionFramePoints=java.util.Collections.emptyList();
     private GeoMath.Point pendingCamera;
     private GeoMath.Point lastRenderedCamera;
     private GeoMath.Point lastRenderedVehicle;
@@ -189,11 +188,14 @@ public final class VectorDriveMap {
     public void setNavigationDetail(boolean navigating) {
         navigationDetail = navigating;
         if(navigating)pendingPreviewPadding=null;
-        if (!navigating) { framingZoomOut=0; followJunction=null; }
+        if (!navigating) { framingZoomOut=0; followJunction=null; junctionFramePoints=java.util.Collections.emptyList(); }
         if (!ready() || map.getStyle() == null) return;
         setBuildings3D(buildings3d);
         setHighDetailEnabled(highDetailEnabled);
         if(!navigating)clearCurrentRoad();
+        if(providerStyle)for(org.maplibre.android.style.layers.Layer layer:map.getStyle().getLayers()){
+            if(layer instanceof SymbolLayer&&JunctionFraming.nonDrivingPoi(layer.getId()))layer.setProperties(PropertyFactory.visibility(navigating?"none":"visible"));
+        }
         for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops", "uk-browse-poi-icons", "regional-browse-pois", "regional-addresses", "regional-entrances", "regional-building-labels", "regional-road-context"}) {
             org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer(id);
             if (layer != null) layer.setProperties(PropertyFactory.visibility(
@@ -411,7 +413,6 @@ public final class VectorDriveMap {
                 setParkedCar(pendingParked);
                 if (pendingRoute != null) {renderRoute();renderRemaining();}
                 publishRoadName();
-                if (pendingJunctionRoute != null) setJunctionPreview(pendingJunctionRoute);
                 if (pendingCamera != null) setCamera(pendingCamera,
                         pendingZoom, pendingBearing);
                 if(!navigationDetail&&pendingPreviewPadding!=null){int[] pad=pendingPreviewPadding;pendingPreviewPadding=null;previewRoute(pendingRoute,pad[0],pad[1],pad[2]);}
@@ -451,8 +452,6 @@ public final class VectorDriveMap {
         roadNameSource=new GeoJsonSource("dm-current-road",FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(remainingRouteSource);style.addSource(roadNameSource);
         installDetailIcons(style);
-        junctionSource = exactLineSource("dm-junction");
-        style.addSource(junctionSource);
         style.addSource(destinationSource);
         style.addSource(entranceSource);
         style.addSource(parkedSource);
@@ -478,18 +477,6 @@ public final class VectorDriveMap {
                 PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(gleam);
         installSignalOverlay(style);
-        // This stroke traces the real calculated route through an approaching
-        // roundabout. It never attempts to deduce geometry from an exit count.
-        LineLayer junctionHalo = new LineLayer("dm-junction-casing", "dm-junction");
-        junctionHalo.setProperties(
-                PropertyFactory.lineColor(nightMode ? "#0D2030" : "#FFFFFF"),
-                PropertyFactory.lineWidth(13f), PropertyFactory.lineOpacity(0.98f));
-        style.addLayer(junctionHalo);
-        LineLayer junctionLayer = new LineLayer("dm-junction-highlight", "dm-junction");
-        junctionLayer.setProperties(PropertyFactory.lineColor("#12DFC7"),
-                PropertyFactory.lineWidth(8f),
-                PropertyFactory.lineOpacity(0.95f));
-        style.addLayer(junctionLayer);
         CircleLayer dest = new CircleLayer("dm-dest-dot", "dm-destination");
         dest.setProperties(PropertyFactory.circleColor("#E14343"),
                 PropertyFactory.circleRadius(8f),
@@ -662,18 +649,7 @@ public final class VectorDriveMap {
         if(++roadCandidateCount>=2){currentRoad=candidate;pendingRoadName=currentRoad;publishRoadName();}
     }
 
-    public void setJunctionPreview(List<GeoMath.Point> segment) {
-        pendingJunctionRoute = segment;
-        if (!ready() || junctionSource == null) return;
-        if (segment == null || segment.size() < 2) {
-            junctionSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
-            return;
-        }
-        List<Point> geometry = new ArrayList<>();
-        for (GeoMath.Point point : segment)
-            geometry.add(Point.fromLngLat(point.lon, point.lat));
-        junctionSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geometry)));
-    }
+    public void clearJunctionFraming(){junctionFramePoints=java.util.Collections.emptyList();followJunction=null;}
 
     public void setVehicle(GeoMath.Point point) {
         pendingGps = point;
@@ -752,8 +728,9 @@ public final class VectorDriveMap {
      * restarted 650ms animation. Android's frame clock runs independently
      * from the GPS (normally 1Hz) and samples a time-based smooth controller.
      */
-    public void setFollowViewport(int top, int bottom, GeoMath.Point junction) {
-        followTop=Math.max(0,top); followBottom=Math.max(0,bottom); followJunction=junction;
+    public void setFollowViewport(int top, int bottom, GeoMath.Point junction,List<GeoMath.Point> context) {
+        followTop=Math.max(0,top);followBottom=Math.max(0,bottom);followJunction=junction;
+        junctionFramePoints=context==null?java.util.Collections.emptyList():context;
     }
 
     // Check the actual projection at a low cadence, rather than assuming the
@@ -774,8 +751,12 @@ public final class VectorDriveMap {
                 || (turn!=null && outside(turn,w,followTop,bottom,16));
         boolean safelyInside=!outside(car,w,followTop,bottom,48)
                 && (turn==null || !outside(turn,w,followTop,bottom,48));
-        if(clipped)framingZoomOut=Math.min(1.3,framingZoomOut+.12);
-        else if(safelyInside)framingZoomOut=Math.max(0,framingZoomOut-.06);
+        // Check every bounded junction envelope vertex as well as the car and turn.
+        for(GeoMath.Point p:junctionFramePoints){android.graphics.PointF q=map.getProjection().toScreenLocation(new LatLng(p.lat,p.lon));
+            clipped|=outside(q,w,followTop,bottom,20);safelyInside&=!outside(q,w,followTop,bottom,56);
+        }
+        if(clipped)framingZoomOut=Math.min(junctionFramePoints.isEmpty()?1.3:2.5,framingZoomOut+.20);
+        else if(safelyInside)framingZoomOut=Math.max(0,framingZoomOut-.08);
         return framingZoomOut;
     }
     private static boolean outside(android.graphics.PointF point,int width,int top,int bottom,int margin){
