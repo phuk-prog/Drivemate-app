@@ -99,6 +99,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean gpsLost;
     private final Runnable gpsWatchdog = new Runnable() {
         @Override public void run() {
+            if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
             if (active && currentLocation != null
                     && System.currentTimeMillis() - currentLocation.getTime() > 15000) {
                 if (!gpsLost) {
@@ -274,6 +275,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private String spokenLanePrompt = "";
     private int traceInstructionIndex = -1;
     private float[] currentRoundaboutTrace;
+    private AlertDialog upcomingDialog;
+    private int reassuranceIndex=-1;
     /** Large distance to the next manoeuvre, on its own line above the road. */
     private TextView topDistanceText;
     private TextView topTurnTitle;
@@ -1057,6 +1060,7 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout turnCard = new LinearLayout(this);
         turnCard.setOrientation(LinearLayout.VERTICAL);
         turnCard.setPadding(dp(12), dp(8), dp(12), dp(8));
+        turnCard.setOnClickListener(v -> showUpcomingManoeuvres());
         turnCard.setBackground(drivingCard(18));
         drivingTurnCard = turnCard;
         LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
@@ -2319,6 +2323,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
+        if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
         // The faster-route chip must disappear on its own as soon as the
         // offered geometry starts too far behind the moving car or goes stale.
         if (pendingRoute != null && (pendingRouteOrigin == null
@@ -3195,11 +3200,12 @@ public final class MainActivity extends Activity implements LocationListener {
         lastRoutePrefetchAt = -1;
         observedSpeed = 0;
         arrivalPolicy.reset();
+        dismissUpcoming();
         spokenDistanceIndex = -1;
         spokenCloseIndex = -1;
         spokenNowIndex = -1;
         spokenLaneIndex = -1; spokenLanePrompt = ""; currentLanePrompt = "";
-        traceInstructionIndex = -1; currentRoundaboutTrace = null;
+        traceInstructionIndex = -1; currentRoundaboutTrace = null; reassuranceIndex=-1;
         lastTrafficWarningStart = -1;
         lastTrafficWarningAt = 0;
         lastSpeedWarningAt = 0;
@@ -3277,6 +3283,7 @@ public final class MainActivity extends Activity implements LocationListener {
         joiningRoute=false;
         guidancePositionConfirmed=false;nextInstruction="";
         setTripMetricLabels(false);
+        dismissUpcoming();
         if(wasConfirmed&&speech!=null)speech.stop();
         if(vectorMap!=null)vectorMap.clearCurrentRoad();
         if(repeatButton!=null)repeatButton.setEnabled(false);
@@ -3454,15 +3461,18 @@ public final class MainActivity extends Activity implements LocationListener {
         int shownExit = roundabout ? JunctionFraming.reportedExit(step.exitNumber) : 0;
         String direction = IntelligentGuidance.direction(step, glyph, shownExit);
         String action = IntelligentGuidance.action(step, glyph, shownExit);
-        String road = IntelligentGuidance.roadLine(action, step.street);
+        String road = IntelligentGuidance.roadLine(action, step);
         maneuverIcon.update(glyph, shownExit);
         maneuverIcon.setVisibility(View.VISIBLE);
         topTurnArrow.update(glyph, shownExit);
         boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
+        int roundaboutDirection=roundabout?IntelligentGuidance.roundaboutDirection(step):0;
+        topTurnArrow.setRoundaboutDirection(roundaboutDirection,step.drivingSide);
         if(traceInstructionIndex!=next) {
             double previous=next>0?route.instructions.get(next-1).routeOffsetMetres:Double.NEGATIVE_INFINITY;
             double following=next+1<route.instructions.size()?route.instructions.get(next+1).routeOffsetMetres:Double.POSITIVE_INFINITY;
             currentRoundaboutTrace=roundabout?IntelligentGuidance.roundaboutTrace(route.points,step.routeOffsetMetres,previous,following):null;
+            if(!IntelligentGuidance.traceAgrees(currentRoundaboutTrace,roundaboutDirection))currentRoundaboutTrace=null;
             traceInstructionIndex=next;
         }
         topTurnArrow.setRouteTrace(currentRoundaboutTrace);
@@ -3470,7 +3480,7 @@ public final class MainActivity extends Activity implements LocationListener {
         String sign=step.signpost==null?"":step.signpost.trim();
         verifiedJunctionRoad.setText("SIGNS · "+sign);
         verifiedJunctionRoad.setVisibility(!sign.isEmpty() && untilTurn<=DrivingDisplayPolicy.signpostHorizon(speedNow)?View.VISIBLE:View.GONE);
-        topTurnTitle.setText(roundabout ? "ROUNDABOUT" : fork ? "ROAD FORK" : "NEXT TURN");
+        topTurnTitle.setText(roundabout ? "ROUNDABOUT" : !IntelligentGuidance.highwayExit(step).isEmpty()?"MOTORWAY EXIT":fork ? "ROAD FORK" : "NEXT TURN");
         int iconSide = dp(getResources().getConfiguration().screenWidthDp<360 ? 60 : 68);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
             android.view.ViewGroup.LayoutParams iconParams = topTurnArrow.getLayoutParams();
@@ -3478,6 +3488,11 @@ public final class MainActivity extends Activity implements LocationListener {
             topTurnArrow.setLayoutParams(iconParams);
         }
         instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)+" · "+direction);
+        boolean compactCard=getResources().getConfiguration().screenHeightDp<560;
+        topDistanceText.setTextSize(compactCard?30:38);
+        topInstructionText.setTextSize(compactCard?19:23);
+        topRoadText.setTextSize(compactCard?16:18);
+        topRoadText.setMaxLines(compactCard?1:2);
         topDistanceText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits));
         topDistanceText.setVisibility(View.VISIBLE);
         topInstructionText.setText(DrivingRoadLabel.highlight(action));
@@ -3534,6 +3549,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 && DrivingVoicePolicy.turn(voiceMode,1)) {
             spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;
             say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,""));
+        } else if (voiceMode==DrivingVoicePolicy.FULL && untilTurn>Math.max(2400,early*2) && reassuranceIndex!=next && speedNow>3) {
+            reassuranceIndex=next;
+            say("Continue along the highlighted route for "+NavigationUnits.spokenDistance(untilTurn,metricUnits));
         }
     }
 
@@ -3622,6 +3640,34 @@ public final class MainActivity extends Activity implements LocationListener {
         return Math.max(220, Math.min(850, 150 + speed * 22));
     }
 
+    private boolean canInspectGuidance(){
+        if(!active||route==null||!guidancePositionConfirmed||gpsLost||currentLocation==null||stabilizedAlong<0)return false;
+        Location fix=currentLocation;
+        long age=System.currentTimeMillis()-fix.getTime();
+        return age>=0&&age<5000&&fix.hasAccuracy()&&fix.getAccuracy()<=25&&fix.hasSpeed()&&fix.getSpeed()<0.5f;
+    }
+
+    private void dismissUpcoming(){
+        if(upcomingDialog!=null){upcomingDialog.dismiss();upcomingDialog=null;}
+    }
+
+    private void showUpcomingManoeuvres(){
+        if(!canInspectGuidance()){
+            Toast.makeText(this,"Stop safely with a fresh GPS fix to view turns",Toast.LENGTH_SHORT).show();return;
+        }
+        dismissUpcoming();
+        StringBuilder list=new StringBuilder();
+        for(int i=Math.max(0,previousInstructionIndex);i<route.instructions.size()&&i<previousInstructionIndex+8;i++){
+            TomTomApi.Instruction step=route.instructions.get(i);
+            String glyph=GuidanceLogic.symbol(step.maneuver,step.junctionType,step.turnAngleDegrees);
+            int exit="↻".equals(glyph)?JunctionFraming.reportedExit(step.exitNumber):0;
+            if(list.length()>0)list.append("\n\n");
+            list.append(NavigationUnits.displayDistance(Math.max(0,step.routeOffsetMetres-stabilizedAlong),metricUnits)).append(" · ").append(IntelligentGuidance.direction(step,glyph,exit));
+        }
+        upcomingDialog=new AlertDialog.Builder(this).setTitle("Upcoming manoeuvres").setMessage(list.length()==0?"No further instructions":list.toString()).setPositiveButton("Close",null).create();
+        upcomingDialog.show();
+    }
+
     private void showTrafficTimeline() {
         if (!active || route == null || currentLocation == null) return;
         if (System.currentTimeMillis() - route.fetchedAtMs > 480000) {
@@ -3666,6 +3712,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void stopNavigation(boolean arrived) {
+        dismissUpcoming();
         boolean reviewAvailable=active&&!mapReview.snapshot().isEmpty();
         reviewGeneration++;comparisonBusy=false;comparisonRoute=null;
         boolean offerParkedCar = arrived && currentLocation != null
@@ -3841,6 +3888,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     @Override public void onPause() {
+        dismissUpcoming();
         foreground = false;
         stopSmoothLoop();
         gpsHandler.removeCallbacks(deadReckonTick);

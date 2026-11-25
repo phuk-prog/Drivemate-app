@@ -16,6 +16,8 @@ public final class GuidanceLogic {
         if ("BIFURCATION".equals(j))
             return angle < 0 ? "↖" : angle > 0 ? "↗" : "↑";
         if (m.contains("UTURN") || m.contains("U_TURN")) return "⤺";
+        if ("KEEP_LEFT".equals(m)||"BEAR_LEFT".equals(m)||"MOTORWAY_EXIT_LEFT".equals(m)) return "↖";
+        if ("KEEP_RIGHT".equals(m)||"BEAR_RIGHT".equals(m)||"MOTORWAY_EXIT_RIGHT".equals(m)) return "↗";
         if (m.contains("ARRIVE") || m.contains("DESTINATION")) return "⚑";
         if (m.contains("LEFT") || (m.contains("TURN") && angle < -20)) return "↰";
         if (m.contains("RIGHT") || (m.contains("TURN") && angle > 20)) return "↱";

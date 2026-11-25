@@ -17,6 +17,21 @@ public class IntelligentGuidanceTest {
         String a=IntelligentGuidance.action(s,"↰",0);
         assertEquals("Take exit 33",a);assertEquals("A630",IntelligentGuidance.roadLine(a,"A630"));
     }
+    @Test public void structuredRoadAndHighwayExit(){
+        TomTomApi.Instruction s=new TomTomApi.Instruction(100,"Take exit","MOTORWAY_EXIT_LEFT","REGULAR",0,-10,"Sheffield Road","Sheffield","33","A630","LEFT");
+        assertEquals("Take left exit 33",IntelligentGuidance.action(s,"↖",0));
+        assertEquals("A630 · Sheffield Road",IntelligentGuidance.roadLine("Take left exit 33",s));
+        assertEquals("↖",GuidanceLogic.symbol(s.maneuver,s.junctionType,s.turnAngleDegrees));
+        assertEquals("Take left exit 33 onto A630 · Sheffield Road towards Sheffield",IntelligentGuidance.direction(s,"↖",0));
+    }
+    @Test public void explicitRoundaboutDirectionDoesNotInventNumber(){
+        TomTomApi.Instruction s=step("Go left","ROUNDABOUT_LEFT","ROUNDABOUT",0,"A61");
+        assertEquals(-1,IntelligentGuidance.roundaboutDirection(s));
+        assertEquals("Take exit on the left",IntelligentGuidance.action(s,"↻",0));
+        assertFalse(IntelligentGuidance.traceAgrees(new float[]{0,1,1,1,10,1},-1));
+        assertTrue(IntelligentGuidance.traceAgrees(new float[]{0,1,1,1,10,1},1));
+        assertFalse(IntelligentGuidance.traceAgrees(null,1));
+    }
     @Test public void trustedLanePromptAndNoGuess(){
         RouteIntelligence.LaneSection section=new RouteIntelligence.LaneSection(0,100,Arrays.asList(
             new RouteIntelligence.Lane("LEFT",true),new RouteIntelligence.Lane("STRAIGHT",false)));

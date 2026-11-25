@@ -14,6 +14,9 @@ public final class TurnArrowView extends View {
     private Arrow arrow = Arrow.STRAIGHT;
     private int roundaboutExit;
     private float[] routeTrace;
+    private int roundaboutDirection;
+    private String drivingSide="";
+    public void setRoundaboutDirection(int direction,String side){roundaboutDirection=direction;drivingSide=side==null?"":side;invalidate();}
     public void setRouteTrace(float[] points) { routeTrace=points; invalidate(); }
     private int accentColor = Color.rgb(7, 214, 235);
     private int exitTextColor = Color.WHITE;
@@ -40,7 +43,7 @@ public final class TurnArrowView extends View {
         else if ("↱".equals(symbol)) arrow = Arrow.RIGHT;
         else arrow = Arrow.STRAIGHT;
         roundaboutExit = Math.max(0, exit);
-        routeTrace=null;
+        routeTrace=null; roundaboutDirection=0; drivingSide="";
         String label = arrow == Arrow.ROUNDABOUT
                 ? "Roundabout" + (roundaboutExit > 0 ? ", exit " + roundaboutExit : "")
                 : arrow.name().replace('_', ' ').toLowerCase();
@@ -96,6 +99,25 @@ public final class TurnArrowView extends View {
                     float x=routeTrace[n-2],y=routeTrace[n-1],dx=x-routeTrace[n-4],dy=y-routeTrace[n-3];
                     float len=(float)Math.hypot(dx,dy);
                     if(len>0.1f){dx/=len;dy/=len;head.moveTo(x-8*dx-5*dy,y-8*dy+5*dx);head.lineTo(x,y);head.lineTo(x-8*dx+5*dy,y-8*dy-5*dx);}
+                    break;
+                }
+                // Schematic direction only if explicitly returned by the route provider.
+                // The arc mirrors traffic handedness; no other exits are drawn.
+                if(roundaboutDirection!=0 && ("LEFT".equals(drivingSide)||"RIGHT".equals(drivingSide))) {
+                    boolean clockwise="LEFT".equals(drivingSide);
+                    double theta=roundaboutDirection==-1?180:roundaboutDirection==1?0:roundaboutDirection==2?270:90;
+                    double sweep=clockwise?(theta-90+360)%360:-((90-theta+360)%360);
+                    if(roundaboutDirection==3)sweep=clockwise?330:-330;
+                    path.moveTo(32,60); path.lineTo(32,47);
+                    path.arcTo(17,17,47,47,90,(float)sweep,false);
+                    double rad=Math.toRadians(90+sweep);
+                    float x=32+15*(float)Math.cos(rad),y=32+15*(float)Math.sin(rad);
+                    // The declared exit direction, rather than ordinal, defines the exit.
+                    float dx=roundaboutDirection==-1?-1:roundaboutDirection==1?1:0;
+                    float dy=roundaboutDirection==2?-1:roundaboutDirection==3?1:0;
+                    float tx=x+dx*12,ty=y+dy*12;
+                    path.lineTo(tx,ty);
+                    head.moveTo(tx-dx*7-dy*5,ty-dy*7+dx*5);head.lineTo(tx,ty);head.lineTo(tx-dx*7+dy*5,ty-dy*7-dx*5);
                     break;
                 }
                 // Generic symbol if the route shape cannot establish a trustworthy trace.
