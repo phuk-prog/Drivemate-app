@@ -7,12 +7,29 @@ import org.maplibre.geojson.*;
 /** Shared road geometry, verified against every selected route segment. */
 final class DmUnifiedGeometry {
     final FeatureCollection roads,areas,route;
+    FeatureCollection mappedPoints=FeatureCollection.fromFeatures(new Feature[0]);
     final List<GeoMath.Point> points;
     final int checkedEdges;
     final double[] bounds;
     private final double coordinateScale;
     private Point point(JSONArray c)throws JSONException{
         return Point.fromLngLat(c.getInt(1)/coordinateScale,c.getInt(0)/coordinateScale);
+    }
+    private static void retainTags(Feature f,JSONObject tags){
+        Iterator<String> keys=tags.keys();while(keys.hasNext()){String k=keys.next();if(!k.equals("kind"))f.addStringProperty(k,tags.optString(k,""));}
+    }
+    private static boolean affirmative(String value){return !value.isEmpty()&&!"no".equals(value)&&!"false".equals(value)&&!"0".equals(value);}
+    private static void roadTags(Feature f,JSONObject tags){
+        retainTags(f,tags);String one=tags.optString("oneway");
+        boolean reverse="-1".equals(one);boolean direct=reverse||"yes".equals(one)||"true".equals(one)||"1".equals(one)||one.isEmpty()&&"roundabout".equals(tags.optString("junction"));
+        f.addBooleanProperty("oneway",direct);f.addBooleanProperty("oneway_reverse",reverse);
+        f.addBooleanProperty("bridge",affirmative(tags.optString("bridge")));f.addBooleanProperty("tunnel",affirmative(tags.optString("tunnel"))||"yes".equals(tags.optString("covered")));
+    }
+    private static String areaKind(JSONObject t){if(t.has("landuse"))return t.optString("landuse");if(t.has("leisure"))return t.optString("leisure");if(t.has("amenity"))return t.optString("amenity");return t.optString("natural");}
+    void setMappedPoints(JSONArray input)throws Exception{
+        if(input.length()>6000)throw new IOException("Too many mapped points");List<Feature> result=new ArrayList<>();
+        for(int i=0;i<input.length();i++){JSONArray row=input.getJSONArray(i);double lat=row.getLong(1)/coordinateScale,lon=row.getLong(2)/coordinateScale;if(!covers(new GeoMath.Point(lat,lon)))continue;Feature f=Feature.fromGeometry(Point.fromLngLat(lon,lat));retainTags(f,row.getJSONObject(3));f.addStringProperty("osm_id",Long.toString(row.getLong(0)));result.add(f);}
+        mappedPoints=FeatureCollection.fromFeatures(result.toArray(new Feature[0]));
     }
     boolean covers(GeoMath.Point p){return RouteMapPolicy.insideBounds(p,bounds);}
     private static boolean exact(Point p,GeoMath.Point g){
@@ -38,16 +55,20 @@ final class DmUnifiedGeometry {
             for(int i=0;i<coords.length();i++)line.add(point(coords.getJSONArray(i)));
             if(line.size()<2)continue;
             String kind=tags.optString("highway","");
-            if((!kind.isEmpty()&&!"yes".equals(tags.optString("area")))||"ferry".equals(tags.optString("route"))||tags.has("waterway")){
+            boolean linear=!kind.isEmpty()&&!"yes".equals(tags.optString("area"))||"ferry".equals(tags.optString("route"))||tags.has("waterway")||tags.has("railway")||tags.has("aerialway")||tags.has("boundary")||Arrays.asList("pier","breakwater","groyne").contains(tags.optString("man_made"));
+            if(linear){
                 Feature item=Feature.fromGeometry(LineString.fromLngLats(line));
-                item.addStringProperty("kind",!kind.isEmpty()?kind:tags.has("waterway")?"waterway":"ferry");
+                roadTags(item,tags);item.addStringProperty("osm_id",Long.toString(f.getLong(0)));
+                item.addStringProperty("kind",!kind.isEmpty()?kind:tags.has("waterway")?("dam".equals(tags.optString("waterway"))?"dam":"waterway"):tags.has("railway")?"railway":tags.has("aerialway")?"aerialway":tags.has("boundary")?"boundary":tags.has("man_made")?"pier":"ferry");
                 item.addStringProperty("name",tags.optString("name",""));item.addStringProperty("ref",tags.optString("ref",""));
                 r.add(item);
             }else if(line.size()>=4&&line.get(0).equals(line.get(line.size()-1))){
-                String type=tags.has("building")?"building":"water".equals(tags.optString("natural"))?"water":tags.has("landuse")||tags.has("leisure")?"land":"";
+                String type=tags.has("building")&&!"no".equals(tags.optString("building"))?"building":"water".equals(tags.optString("natural"))?"water":!areaKind(tags).isEmpty()?"land":"";
                 if(!type.isEmpty()){
                     Feature item=Feature.fromGeometry(Polygon.fromLngLats(Collections.singletonList(line)));
-                    item.addStringProperty("kind",type);a.add(item);
+                    retainTags(item,tags);item.addStringProperty("kind",type);item.addStringProperty("land_kind",areaKind(tags));
+                    if("building".equals(type)){double height=MapDetailPolicy.heightMetres(tags.optString("height"),tags.optString("building:levels"));double min=MapDetailPolicy.explicitMetres(tags.optString("min_height"));item.addNumberProperty("height_m",height);item.addNumberProperty("min_height_m",min>=0&&min<height?min:0);}
+                    a.add(item);
                 }
             }
         }

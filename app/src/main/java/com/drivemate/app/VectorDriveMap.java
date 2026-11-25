@@ -186,7 +186,7 @@ public final class VectorDriveMap {
         setBuildings3D(buildings3d);
         setHighDetailEnabled(highDetailEnabled);
         if(!navigating)clearCurrentRoad();
-        for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops"}) {
+        for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops", "uk-browse-poi-icons", "regional-browse-pois", "regional-addresses", "regional-entrances", "regional-building-labels", "regional-road-context"}) {
             org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer(id);
             if (layer != null) layer.setProperties(PropertyFactory.visibility(
                     navigating ? "none" : "visible"));
@@ -379,6 +379,7 @@ public final class VectorDriveMap {
                     GeoJsonSource roads=style.getSourceAs("unified-roads"),areas=style.getSourceAs("unified-areas");
                     if(roads==null||areas==null){sharedRouteMap=null;loadStyle();return;}
                     roads.setGeoJson(shared.roads);areas.setGeoJson(shared.areas);
+                    GeoJsonSource mapped=style.getSourceAs("unified-points");if(mapped!=null)mapped.setGeoJson(shared.mappedPoints);
                 }
                 installOverlays(style);
                 styleReady = true;
@@ -430,9 +431,7 @@ public final class VectorDriveMap {
         remainingRouteSource=exactLineSource("dm-remaining-route");
         roadNameSource=new GeoJsonSource("dm-current-road",FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(remainingRouteSource);style.addSource(roadNameSource);
-        style.addImage("dm-shield-blue",shieldBitmap(0xff164d94));
-        style.addImage("dm-shield-green",shieldBitmap(0xff285a48));
-        style.addImage("dm-shield-white",shieldBitmap(0xfff4f8fa));
+        installDetailIcons(style);
         junctionSource = exactLineSource("dm-junction");
         style.addSource(junctionSource);
         style.addSource(destinationSource);
@@ -509,6 +508,12 @@ public final class VectorDriveMap {
         style.addLayer(currentRoadLayer);
     }
 
+    static void installDetailIcons(Style style){
+        style.addImage("dm-shield-blue",shieldBitmap(0xff164d94));style.addImage("dm-shield-green",shieldBitmap(0xff285a48));style.addImage("dm-shield-white",shieldBitmap(0xfff4f8fa));
+        String[][] icons={{"fuel","F"},{"ev","EV"},{"parking","P"},{"hospital","+"},{"food","R"},{"shop","S"},{"services","MS"},{"hotel","H"},{"garage","G"},{"airport","A"},{"ferry","FE"},{"station","T"},{"place","•"}};
+        int[] colors={0xffa76319,0xff167b6e,0xff245c9a,0xffa63d45,0xff8d5739,0xff596c9b,0xff386985,0xff795b91,0xff65747a,0xff4b7596,0xff347d9c,0xff4b5972,0xff6a8390};
+        for(int i=0;i<icons.length;i++){Bitmap b=Bitmap.createBitmap(40,40,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setColor(Color.WHITE);c.drawRoundRect(new RectF(1,1,39,39),9,9,p);p.setColor(colors[i]);c.drawRoundRect(new RectF(3,3,37,37),7,7,p);p.setColor(Color.WHITE);p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);p.setTextAlign(Paint.Align.CENTER);p.setTextSize(icons[i][1].length()>1?17:23);c.drawText(icons[i][1],20,20-(p.ascent()+p.descent())/2,p);style.addImage("dm-poi-"+icons[i][0],b);}
+    }
     private static Bitmap shieldBitmap(int color){
         Bitmap bitmap=Bitmap.createBitmap(36,25,Bitmap.Config.ARGB_8888);Canvas canvas=new Canvas(bitmap);
         Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setColor(Color.WHITE);

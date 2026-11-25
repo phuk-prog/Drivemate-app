@@ -49,6 +49,7 @@ public final class DmUnifiedPreviewActivity extends Activity {
                 GeoJsonSource roads=s.getSourceAs("unified-roads"),areas=s.getSourceAs("unified-areas"),line=s.getSourceAs("unified-route");
                 if(roads==null||areas==null||line==null){status.setText("Map sources unavailable");return;}
                 roads.setGeoJson(geometry.roads);areas.setGeoJson(geometry.areas);line.setGeoJson(geometry.route);
+                GeoJsonSource points=s.getSourceAs("unified-points");if(points!=null)points.setGeoJson(geometry.mappedPoints);VectorDriveMap.installDetailIcons(s);
                 ready=true;view.post(()->position(15.8));
             });
         }catch(Exception e){status.setText("Style unavailable: "+e.getMessage());}

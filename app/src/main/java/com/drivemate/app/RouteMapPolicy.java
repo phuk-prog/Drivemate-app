@@ -4,7 +4,7 @@ import java.util.List;
 /** Never infer road identity from nearest visible pixels. */
 final class RouteMapPolicy {
     private RouteMapPolicy(){}
-    static boolean useTomTomMap(String provider,boolean keyAvailable){return false; // Map V2 retains vector display; raster remains an explicit preference or startup fallback.}
+    static boolean useTomTomMap(String provider,boolean keyAvailable){return false;} // Vector display by default; raster remains an explicit preference or startup fallback.
     static String description(String provider,boolean shared){
         return shared?"DriveMate shared road geometry":"DriveMate vector map · road alignment not verified";
     }

@@ -71,7 +71,9 @@ public final class DriveMateProvider {
             JSONArray input=result.getJSONArray("features");if(input.length()>6000)return null;
             List<JSONArray> features=new ArrayList<>();int vertices=0;
             for(int i=0;i<input.length();i++){JSONArray feature=input.getJSONArray(i);vertices+=feature.getJSONArray(2).length();if(vertices>100000)return null;features.add(feature);}
-            return new DmUnifiedGeometry(features,route.points,route.geometryWays,b);
+            DmUnifiedGeometry geometry=new DmUnifiedGeometry(features,route.points,route.geometryWays,b);
+            JSONArray mapped=result.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
+            return geometry;
         }catch(Exception failure){return null;}
     }
     /** Require identical encoded vertices and uninterrupted way identity for every segment. */

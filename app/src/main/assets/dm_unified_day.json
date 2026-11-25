@@ -29,6 +29,15 @@
       },
       "maxzoom": 21,
       "tolerance": 0
+    },
+    "unified-points": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": []
+      },
+      "maxzoom": 21,
+      "tolerance": 0
     }
   },
   "layers": [
@@ -52,7 +61,70 @@
         "land"
       ],
       "paint": {
-        "fill-color": "#bad3aa"
+        "fill-color": [
+          "match",
+          [
+            "get",
+            "land_kind"
+          ],
+          [
+            "forest",
+            "wood"
+          ],
+          "#a9cba3",
+          [
+            "grass",
+            "meadow",
+            "grassland",
+            "park",
+            "garden",
+            "golf_course",
+            "recreation_ground",
+            "village_green",
+            "playground"
+          ],
+          "#c8dfad",
+          [
+            "farmland",
+            "farmyard",
+            "orchard",
+            "vineyard",
+            "allotments"
+          ],
+          "#e9e3c9",
+          [
+            "residential",
+            "garages"
+          ],
+          "#e4dfd8",
+          [
+            "industrial",
+            "railway",
+            "commercial",
+            "retail",
+            "quarry"
+          ],
+          "#c8c7d2",
+          [
+            "school",
+            "college",
+            "university"
+          ],
+          "#ded1e3",
+          "hospital",
+          "#edd1c6",
+          [
+            "parking",
+            "bicycle_parking"
+          ],
+          "#d6dceb",
+          [
+            "construction",
+            "brownfield"
+          ],
+          "#dbc9a7",
+          "#e0ead8"
+        ]
       }
     },
     {
@@ -134,9 +206,172 @@
           15,
           0,
           16,
-          6
+          [
+            "coalesce",
+            [
+              "get",
+              "height_m"
+            ],
+            6
+          ]
         ],
-        "fill-extrusion-opacity": 0.85
+        "fill-extrusion-opacity": 0.85,
+        "fill-extrusion-base": [
+          "coalesce",
+          [
+            "get",
+            "min_height_m"
+          ],
+          0
+        ]
+      }
+    },
+    {
+      "id": "regional-ferry",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "in",
+        [
+          "coalesce",
+          [
+            "get",
+            "kind"
+          ],
+          ""
+        ],
+        [
+          "literal",
+          [
+            "ferry"
+          ]
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#437da3",
+        "line-width": 2,
+        "line-dasharray": [
+          3,
+          2
+        ]
+      }
+    },
+    {
+      "id": "regional-rail",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "in",
+        [
+          "coalesce",
+          [
+            "get",
+            "kind"
+          ],
+          ""
+        ],
+        [
+          "literal",
+          [
+            "railway"
+          ]
+        ]
+      ],
+      "minzoom": 12,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a6b2b8",
+        "line-width": 2,
+        "line-dasharray": [
+          3,
+          1
+        ]
+      }
+    },
+    {
+      "id": "regional-path",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "in",
+        [
+          "coalesce",
+          [
+            "get",
+            "kind"
+          ],
+          ""
+        ],
+        [
+          "literal",
+          [
+            "footway",
+            "path",
+            "cycleway",
+            "steps",
+            "pedestrian",
+            "bridleway"
+          ]
+        ]
+      ],
+      "minzoom": 15,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a6b2b8",
+        "line-width": 1.4,
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "regional-structures",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "in",
+        [
+          "coalesce",
+          [
+            "get",
+            "kind"
+          ],
+          ""
+        ],
+        [
+          "literal",
+          [
+            "aerialway",
+            "pier",
+            "dam",
+            "boundary"
+          ]
+        ]
+      ],
+      "minzoom": 13,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a6b2b8",
+        "line-width": 2,
+        "line-dasharray": [
+          3,
+          2
+        ]
       }
     },
     {
@@ -144,12 +379,54 @@
       "type": "line",
       "source": "unified-roads",
       "filter": [
-        "!=",
+        "all",
         [
-          "get",
-          "kind"
+          "!",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "waterway",
+                "railway",
+                "aerialway",
+                "pier",
+                "dam",
+                "boundary",
+                "ferry",
+                "footway",
+                "path",
+                "cycleway",
+                "steps",
+                "pedestrian",
+                "bridleway"
+              ]
+            ]
+          ]
         ],
-        "waterway"
+        [
+          "!",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "bridge"
+              ],
+              false
+            ],
+            true
+          ]
+        ]
       ],
       "layout": {
         "line-cap": "round",
@@ -345,6 +622,23 @@
             ],
             3
           ]
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "tunnel"
+              ],
+              false
+            ],
+            true
+          ],
+          0.4,
+          1
         ]
       }
     },
@@ -353,12 +647,54 @@
       "type": "line",
       "source": "unified-roads",
       "filter": [
-        "!=",
+        "all",
         [
-          "get",
-          "kind"
+          "!",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "waterway",
+                "railway",
+                "aerialway",
+                "pier",
+                "dam",
+                "boundary",
+                "ferry",
+                "footway",
+                "path",
+                "cycleway",
+                "steps",
+                "pedestrian",
+                "bridleway"
+              ]
+            ]
+          ]
         ],
-        "waterway"
+        [
+          "!",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "bridge"
+              ],
+              false
+            ],
+            true
+          ]
+        ]
       ],
       "layout": {
         "line-cap": "round",
@@ -563,8 +899,704 @@
               1
             ]
           ]
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "tunnel"
+              ],
+              false
+            ],
+            true
+          ],
+          0.4,
+          1
         ]
       }
+    },
+    {
+      "id": "regional-tunnel",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "==",
+        [
+          "coalesce",
+          [
+            "get",
+            "tunnel"
+          ],
+          false
+        ],
+        true
+      ],
+      "minzoom": 14,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#9aa7b0",
+        "line-width": 3,
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "regional-unpaved",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "in",
+        [
+          "coalesce",
+          [
+            "get",
+            "surface"
+          ],
+          ""
+        ],
+        [
+          "literal",
+          [
+            "unpaved",
+            "gravel",
+            "dirt",
+            "ground",
+            "earth",
+            "sand",
+            "mud",
+            "compacted"
+          ]
+        ]
+      ],
+      "minzoom": 16,
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#9e8259",
+        "line-width": 2,
+        "line-dasharray": [
+          2,
+          2
+        ]
+      }
+    },
+    {
+      "id": "regional-bridge-casing",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "coalesce",
+            [
+              "get",
+              "bridge"
+            ],
+            false
+          ],
+          true
+        ],
+        [
+          "!",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "tunnel"
+              ],
+              false
+            ],
+            true
+          ]
+        ],
+        [
+          "!",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "waterway",
+                "railway",
+                "aerialway",
+                "pier",
+                "dam",
+                "boundary",
+                "ferry"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#f5f8f2",
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          11,
+          [
+            "+",
+            [
+              "*",
+              2,
+              [
+                "match",
+                [
+                  "get",
+                  "kind"
+                ],
+                [
+                  "motorway",
+                  "trunk"
+                ],
+                1.65,
+                [
+                  "primary",
+                  "secondary",
+                  "motorway_link",
+                  "trunk_link"
+                ],
+                1.25,
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps"
+                ],
+                0.3,
+                1
+              ]
+            ],
+            3
+          ],
+          14,
+          [
+            "+",
+            [
+              "*",
+              7,
+              [
+                "match",
+                [
+                  "get",
+                  "kind"
+                ],
+                [
+                  "motorway",
+                  "trunk"
+                ],
+                1.65,
+                [
+                  "primary",
+                  "secondary",
+                  "motorway_link",
+                  "trunk_link"
+                ],
+                1.25,
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps"
+                ],
+                0.3,
+                1
+              ]
+            ],
+            3
+          ],
+          17,
+          [
+            "+",
+            [
+              "*",
+              18,
+              [
+                "match",
+                [
+                  "get",
+                  "kind"
+                ],
+                [
+                  "motorway",
+                  "trunk"
+                ],
+                1.65,
+                [
+                  "primary",
+                  "secondary",
+                  "motorway_link",
+                  "trunk_link"
+                ],
+                1.25,
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps"
+                ],
+                0.3,
+                1
+              ]
+            ],
+            3
+          ],
+          19,
+          [
+            "+",
+            [
+              "*",
+              33,
+              [
+                "match",
+                [
+                  "get",
+                  "kind"
+                ],
+                [
+                  "motorway",
+                  "trunk"
+                ],
+                1.65,
+                [
+                  "primary",
+                  "secondary",
+                  "motorway_link",
+                  "trunk_link"
+                ],
+                1.25,
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps"
+                ],
+                0.3,
+                1
+              ]
+            ],
+            3
+          ],
+          21,
+          [
+            "+",
+            [
+              "*",
+              55,
+              [
+                "match",
+                [
+                  "get",
+                  "kind"
+                ],
+                [
+                  "motorway",
+                  "trunk"
+                ],
+                1.65,
+                [
+                  "primary",
+                  "secondary",
+                  "motorway_link",
+                  "trunk_link"
+                ],
+                1.25,
+                [
+                  "footway",
+                  "path",
+                  "cycleway",
+                  "steps"
+                ],
+                0.3,
+                1
+              ]
+            ],
+            3
+          ]
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "tunnel"
+              ],
+              false
+            ],
+            true
+          ],
+          0.4,
+          1
+        ]
+      }
+    },
+    {
+      "id": "regional-bridge-fill",
+      "type": "line",
+      "source": "unified-roads",
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "coalesce",
+            [
+              "get",
+              "bridge"
+            ],
+            false
+          ],
+          true
+        ],
+        [
+          "!",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "tunnel"
+              ],
+              false
+            ],
+            true
+          ]
+        ],
+        [
+          "!",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "waterway",
+                "railway",
+                "aerialway",
+                "pier",
+                "dam",
+                "boundary",
+                "ferry"
+              ]
+            ]
+          ]
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": [
+          "match",
+          [
+            "get",
+            "kind"
+          ],
+          [
+            "motorway",
+            "motorway_link"
+          ],
+          "#9b8cc5",
+          [
+            "trunk",
+            "trunk_link"
+          ],
+          "#85b39a",
+          [
+            "primary",
+            "primary_link"
+          ],
+          "#c4ae85",
+          [
+            "service",
+            "footway",
+            "path",
+            "cycleway"
+          ],
+          "#b8c4c6",
+          "#a6b2b8"
+        ],
+        "line-width": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          11,
+          [
+            "*",
+            2,
+            [
+              "match",
+              [
+                "get",
+                "kind"
+              ],
+              [
+                "motorway",
+                "trunk"
+              ],
+              1.65,
+              [
+                "primary",
+                "secondary",
+                "motorway_link",
+                "trunk_link"
+              ],
+              1.25,
+              [
+                "footway",
+                "path",
+                "cycleway",
+                "steps"
+              ],
+              0.3,
+              1
+            ]
+          ],
+          14,
+          [
+            "*",
+            7,
+            [
+              "match",
+              [
+                "get",
+                "kind"
+              ],
+              [
+                "motorway",
+                "trunk"
+              ],
+              1.65,
+              [
+                "primary",
+                "secondary",
+                "motorway_link",
+                "trunk_link"
+              ],
+              1.25,
+              [
+                "footway",
+                "path",
+                "cycleway",
+                "steps"
+              ],
+              0.3,
+              1
+            ]
+          ],
+          17,
+          [
+            "*",
+            18,
+            [
+              "match",
+              [
+                "get",
+                "kind"
+              ],
+              [
+                "motorway",
+                "trunk"
+              ],
+              1.65,
+              [
+                "primary",
+                "secondary",
+                "motorway_link",
+                "trunk_link"
+              ],
+              1.25,
+              [
+                "footway",
+                "path",
+                "cycleway",
+                "steps"
+              ],
+              0.3,
+              1
+            ]
+          ],
+          19,
+          [
+            "*",
+            33,
+            [
+              "match",
+              [
+                "get",
+                "kind"
+              ],
+              [
+                "motorway",
+                "trunk"
+              ],
+              1.65,
+              [
+                "primary",
+                "secondary",
+                "motorway_link",
+                "trunk_link"
+              ],
+              1.25,
+              [
+                "footway",
+                "path",
+                "cycleway",
+                "steps"
+              ],
+              0.3,
+              1
+            ]
+          ],
+          21,
+          [
+            "*",
+            55,
+            [
+              "match",
+              [
+                "get",
+                "kind"
+              ],
+              [
+                "motorway",
+                "trunk"
+              ],
+              1.65,
+              [
+                "primary",
+                "secondary",
+                "motorway_link",
+                "trunk_link"
+              ],
+              1.25,
+              [
+                "footway",
+                "path",
+                "cycleway",
+                "steps"
+              ],
+              0.3,
+              1
+            ]
+          ]
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "tunnel"
+              ],
+              false
+            ],
+            true
+          ],
+          0.4,
+          1
+        ]
+      }
+    },
+    {
+      "id": "regional-oneway",
+      "type": "symbol",
+      "source": "unified-roads",
+      "minzoom": 17,
+      "layout": {
+        "symbol-placement": "line",
+        "symbol-spacing": 95,
+        "text-field": [
+          "case",
+          [
+            "==",
+            [
+              "coalesce",
+              [
+                "get",
+                "oneway_reverse"
+              ],
+              false
+            ],
+            true
+          ],
+          "←",
+          "→"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 13,
+        "text-rotation-alignment": "map",
+        "text-keep-upright": false
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "==",
+        [
+          "coalesce",
+          [
+            "get",
+            "oneway"
+          ],
+          false
+        ],
+        true
+      ]
     },
     {
       "id": "route-halo",
@@ -690,6 +1722,703 @@
         "text-halo-color": "#f5f8f2",
         "text-halo-width": 2
       }
+    },
+    {
+      "id": "regional-driving-pois",
+      "type": "symbol",
+      "source": "unified-points",
+      "minzoom": 14,
+      "layout": {
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "amenity"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "fuel"
+              ]
+            ]
+          ],
+          "dm-poi-fuel",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "amenity"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "charging_station"
+              ]
+            ]
+          ],
+          "dm-poi-ev",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "amenity"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "parking"
+              ]
+            ]
+          ],
+          "dm-poi-parking",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "amenity"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "hospital",
+                "clinic",
+                "doctors"
+              ]
+            ]
+          ],
+          "dm-poi-hospital",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "highway"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "services",
+                "rest_area"
+              ]
+            ]
+          ],
+          "dm-poi-services",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "shop"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "car_repair",
+                "tyres"
+              ]
+            ]
+          ],
+          "dm-poi-garage",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "amenity"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "ferry_terminal"
+              ]
+            ]
+          ],
+          "dm-poi-ferry",
+          "dm-poi-place"
+        ],
+        "icon-size": 0.8,
+        "text-field": [
+          "get",
+          "name"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 10,
+        "text-optional": true,
+        "text-offset": [
+          0,
+          1.1
+        ],
+        "text-anchor": "top"
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "any",
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "amenity"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "fuel"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "amenity"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "charging_station"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "amenity"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "parking"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "amenity"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "hospital",
+              "clinic",
+              "doctors"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "highway"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "services",
+              "rest_area"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "shop"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "car_repair",
+              "tyres"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "amenity"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "ferry_terminal"
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "regional-browse-pois",
+      "type": "symbol",
+      "source": "unified-points",
+      "minzoom": 16,
+      "layout": {
+        "icon-image": [
+          "case",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "amenity"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "restaurant",
+                "fast_food",
+                "cafe",
+                "food_court"
+              ]
+            ]
+          ],
+          "dm-poi-food",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "shop"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "supermarket",
+                "convenience",
+                "mall"
+              ]
+            ]
+          ],
+          "dm-poi-shop",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "tourism"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "hotel",
+                "motel",
+                "guest_house"
+              ]
+            ]
+          ],
+          "dm-poi-hotel",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "aeroway"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "aerodrome"
+              ]
+            ]
+          ],
+          "dm-poi-airport",
+          [
+            "in",
+            [
+              "coalesce",
+              [
+                "get",
+                "kind"
+              ],
+              ""
+            ],
+            [
+              "literal",
+              [
+                "station",
+                "halt",
+                "tram_stop"
+              ]
+            ]
+          ],
+          "dm-poi-station",
+          "dm-poi-place"
+        ],
+        "icon-size": 0.8,
+        "text-field": [
+          "get",
+          "name"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 10,
+        "text-optional": true,
+        "text-offset": [
+          0,
+          1.1
+        ],
+        "text-anchor": "top"
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "any",
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "amenity"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "restaurant",
+              "fast_food",
+              "cafe",
+              "food_court"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "shop"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "supermarket",
+              "convenience",
+              "mall"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "tourism"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "hotel",
+              "motel",
+              "guest_house"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "aeroway"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "aerodrome"
+            ]
+          ]
+        ],
+        [
+          "in",
+          [
+            "coalesce",
+            [
+              "get",
+              "kind"
+            ],
+            ""
+          ],
+          [
+            "literal",
+            [
+              "station",
+              "halt",
+              "tram_stop"
+            ]
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "regional-exits",
+      "type": "symbol",
+      "source": "unified-points",
+      "minzoom": 12,
+      "layout": {
+        "text-field": [
+          "concat",
+          "J",
+          [
+            "get",
+            "ref"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 12,
+        "icon-image": "dm-shield-blue",
+        "icon-text-fit": "both"
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "highway"
+          ],
+          "motorway_junction"
+        ],
+        [
+          "has",
+          "ref"
+        ]
+      ]
+    },
+    {
+      "id": "regional-addresses",
+      "type": "symbol",
+      "source": "unified-points",
+      "minzoom": 17,
+      "layout": {
+        "text-field": [
+          "get",
+          "addr:housenumber"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 10
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "has",
+        "addr:housenumber"
+      ]
+    },
+    {
+      "id": "regional-entrances",
+      "type": "symbol",
+      "source": "unified-points",
+      "minzoom": 18,
+      "layout": {
+        "text-field": "E",
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 10
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "has",
+        "entrance"
+      ]
+    },
+    {
+      "id": "regional-building-labels",
+      "type": "symbol",
+      "source": "unified-areas",
+      "minzoom": 17,
+      "layout": {
+        "text-field": [
+          "get",
+          "name"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 11
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "all",
+        [
+          "==",
+          [
+            "get",
+            "kind"
+          ],
+          "building"
+        ],
+        [
+          "all",
+          [
+            "has",
+            "name"
+          ],
+          [
+            "!=",
+            [
+              "get",
+              "name"
+            ],
+            ""
+          ]
+        ]
+      ]
+    },
+    {
+      "id": "regional-road-context",
+      "type": "symbol",
+      "source": "unified-points",
+      "minzoom": 18,
+      "layout": {
+        "text-field": [
+          "case",
+          [
+            "==",
+            [
+              "get",
+              "highway"
+            ],
+            "traffic_signals"
+          ],
+          "●",
+          "▴"
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": 11
+      },
+      "paint": {
+        "text-color": "#344e60",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
+      },
+      "filter": [
+        "any",
+        [
+          "==",
+          [
+            "get",
+            "highway"
+          ],
+          "traffic_signals"
+        ],
+        [
+          "has",
+          "traffic_calming"
+        ]
+      ]
     }
   ]
 }
