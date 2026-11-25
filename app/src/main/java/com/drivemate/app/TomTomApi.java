@@ -76,6 +76,10 @@ public final class TomTomApi {
         public final int trafficDelaySeconds;
         public final long fetchedAtMs;
         public final String provider;
+        // Optional proof from the exact hosted routing graph; never changes guidance.
+        String geometrySourceSha = "";
+        List<Long> geometryWays = java.util.Collections.emptyList();
+        DmUnifiedGeometry sharedGeometry;
         public final List<RouteIntelligence.LaneSection> laneSections;
         public final List<RouteIntelligence.SpeedSection> speedSections;
         public final List<RouteIntelligence.TrafficSection> trafficSections;

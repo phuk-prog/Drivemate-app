@@ -53,8 +53,22 @@ public final class DriveMateProvider {
             }
             if(!source.equals(json(root+"/v1/graph-source",null).optString("source_sha256")))return route;
             route.speedSections.addAll(verifiedSpeedSections(traced,route.points,tags));
+            List<Long> verifiedWays = exactTraceWays(traced, route.points);
+            if (!verifiedWays.isEmpty()) { route.geometrySourceSha=source; route.geometryWays=verifiedWays; }
         }catch(Exception ignored){/* No explicit aligned limit: unknown. */}
         return route;
+    }
+    /** Require identical encoded vertices and uninterrupted way identity for every segment. */
+    static List<Long> exactTraceWays(JSONObject trace, List<GeoMath.Point> route)throws Exception {
+        List<GeoMath.Point> shape=decode(trace.getString("shape"));
+        if(!RouteMapPolicy.samePoints(shape,route))return Collections.emptyList();
+        List<Long> ways=new ArrayList<>(); JSONArray edges=trace.getJSONArray("edges"); int next=0;
+        for(int i=0;i<edges.length();i++){
+            JSONObject e=edges.getJSONObject(i); int a=e.optInt("begin_shape_index",-1),b=e.optInt("end_shape_index",-1); long id=e.optLong("way_id",0);
+            if(id<=0||a!=next||b<=a||b>=shape.size())return Collections.emptyList();
+            while(next<b){ways.add(id);next++;}
+        }
+        return next==shape.size()-1?Collections.unmodifiableList(ways):Collections.emptyList();
     }
     static List<GeoMath.Point> decode(String s)throws IOException{
         List<GeoMath.Point> out=new ArrayList<>();int i=0;long lat=0,lon=0;

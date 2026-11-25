@@ -53,6 +53,9 @@ public final class VectorDriveMap {
     private final DriveTileServer tiles;
     private MapLibreMap map;
     private GeoJsonSource routeSource;
+    private DmUnifiedGeometry sharedRouteMap;
+    private int styleGeneration;
+    private int[] pendingPreviewPadding;
     private GeoJsonSource remainingRouteSource;
     private double routeLength,confirmedProgress;
     private RouteRenderGeometry exactGeometry=new RouteRenderGeometry(null);
@@ -177,6 +180,7 @@ public final class VectorDriveMap {
      */
     public void setNavigationDetail(boolean navigating) {
         navigationDetail = navigating;
+        if(navigating)pendingPreviewPadding=null;
         if (!navigating) { framingZoomOut=0; followJunction=null; }
         if (!ready() || map.getStyle() == null) return;
         setBuildings3D(buildings3d);
@@ -228,6 +232,7 @@ public final class VectorDriveMap {
             zoom = map.getCameraPosition().zoom;
         }
         if (target == null) return;
+        if(ready())ensureRegionalCoverage(target);
         int visible = 0;
         if (ready() && view.getWidth() > 80 && view.getHeight() > 80) {
             try {
@@ -304,6 +309,13 @@ public final class VectorDriveMap {
         }catch(RuntimeException ignored){lastAlignment="unmeasured";}
     }
     public String routeAlignmentDiagnostic(){return lastAlignment;}
+    boolean hasSharedRouteMap(){return sharedRouteMap!=null&&ready();}
+    /** Instrumentation checks the same road and route layers used by live guidance. */
+    boolean sharedRouteRendered(double zoom){
+        if(!hasSharedRouteMap()||view.getWidth()<100||view.getHeight()<100||Math.abs(currentZoom()-zoom)>.2)return false;
+        RectF box=new RectF(0,0,view.getWidth(),view.getHeight());
+        try{return !map.queryRenderedFeatures(box,"uk-roads").isEmpty()&&!map.queryRenderedFeatures(box,"dm-route-line").isEmpty();}catch(RuntimeException failure){return false;}
+    }
 
     private static String readAsset(Activity activity, String name) throws Exception {
         try (InputStream in = activity.getAssets().open(name);
@@ -328,6 +340,8 @@ public final class VectorDriveMap {
         // READY report must not prove the new style has rendered anything.
         roadHealth.reset();
         previouslyReported = RoadDisplayHealth.State.NOT_APPLICABLE;
+        final int generation=++styleGeneration;
+        final DmUnifiedGeometry shared=sharedRouteMap;
         try {
             String json = readAsset(activity, nightMode
                     ? "drivemate_vector_style_night.json"
@@ -335,6 +349,21 @@ public final class VectorDriveMap {
                     .replace("__TILE_URL__", tiles.tilesUrl())
                     .replace("__TOMTOM_STYLE__", nightMode ? "night" : "main")
                     .replace("__TOMTOM_KEY__", android.net.Uri.encode(tomtomKey));
+            // Use full-detail regional streets only after route identity proof. The main route overlay is still used.
+            if(shared!=null){
+                JSONObject local=new JSONObject(readAsset(activity,nightMode?"dm_unified_night.json":"dm_unified_day.json"));
+                org.json.JSONArray layers=local.getJSONArray("layers"), filtered=new org.json.JSONArray();
+                for(int i=0;i<layers.length();i++){
+                    JSONObject layer=layers.getJSONObject(i);
+                    if("unified-route".equals(layer.optString("source")))continue;
+                    String id=layer.getString("id");
+                    if("road-fill".equals(id))layer.put("id","uk-roads");
+                    if("buildings-flat".equals(id))layer.put("id","uk-buildings");
+                    if("buildings-3d".equals(id))layer.put("id","uk-buildings-3d");
+                    filtered.put(layer);
+                }
+                local.put("layers",filtered);json=local.toString();
+            }
             // Parse first so invalid style substitutions don't leave a half-loaded map.
             new JSONObject(json);
             styleReady = false;
@@ -345,7 +374,12 @@ public final class VectorDriveMap {
             lastRenderedTilt = Double.NaN;
             lastRenderedVehicleAngle = Double.NaN;
             map.setStyle(new Style.Builder().fromJson(json), style -> {
-                if (disposed) return;
+                if (disposed || generation!=styleGeneration) return;
+                if(shared!=null){
+                    GeoJsonSource roads=style.getSourceAs("unified-roads"),areas=style.getSourceAs("unified-areas");
+                    if(roads==null||areas==null){sharedRouteMap=null;loadStyle();return;}
+                    roads.setGeoJson(shared.roads);areas.setGeoJson(shared.areas);
+                }
                 installOverlays(style);
                 styleReady = true;
                 setHighDetailEnabled(highDetailEnabled);
@@ -361,6 +395,7 @@ public final class VectorDriveMap {
                 if (pendingJunctionRoute != null) setJunctionPreview(pendingJunctionRoute);
                 if (pendingCamera != null) setCamera(pendingCamera,
                         pendingZoom, pendingBearing);
+                if(!navigationDetail&&pendingPreviewPadding!=null){int[] pad=pendingPreviewPadding;pendingPreviewPadding=null;previewRoute(pendingRoute,pad[0],pad[1],pad[2]);}
             });
         } catch (Exception error) {
             Log.e(LOG_TAG, "Unable to load DriveMate MapLibre style", error);
@@ -371,9 +406,16 @@ public final class VectorDriveMap {
 
     private static GeoJsonSource exactLineSource(String id){
         // Disable GeoJSON tile simplification as well as app-side simplification.
-        return new GeoJsonSource(id,FeatureCollection.fromFeatures(new Feature[0]),new GeoJsonOptions().withTolerance(0f));
+        return new GeoJsonSource(id,FeatureCollection.fromFeatures(new Feature[0]),new GeoJsonOptions().withTolerance(0f).withMaxZoom(21));
     }
 
+    private static org.maplibre.android.style.expressions.Expression routeWidth(float low,float middle,float high){
+        return org.maplibre.android.style.expressions.Expression.interpolate(
+                org.maplibre.android.style.expressions.Expression.linear(),org.maplibre.android.style.expressions.Expression.zoom(),
+                org.maplibre.android.style.expressions.Expression.stop(10,low),
+                org.maplibre.android.style.expressions.Expression.stop(16,middle),
+                org.maplibre.android.style.expressions.Expression.stop(20,high));
+    }
     private void installOverlays(Style style) {
         routeSource = exactLineSource("dm-route");
         vehicleSource = new GeoJsonSource("dm-vehicle",
@@ -405,16 +447,16 @@ public final class VectorDriveMap {
         style.addLayer(travelled);
         LineLayer routeHalo = new LineLayer("dm-route-halo", "dm-remaining-route");
         routeHalo.setProperties(PropertyFactory.lineColor(nightMode?"#12374e":"#154b78"),
-                PropertyFactory.lineWidth(19f),PropertyFactory.lineOpacity(.96f),
+                PropertyFactory.lineWidth(routeWidth(5f,9f,15f)),PropertyFactory.lineOpacity(.96f),
                 PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(routeHalo);
         LineLayer routeLayer = new LineLayer("dm-route-line", "dm-remaining-route");
         routeLayer.setProperties(PropertyFactory.lineColor(nightMode?"#24d9f5":"#007dbb"),
-                PropertyFactory.lineWidth(14f),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+                PropertyFactory.lineWidth(routeWidth(3f,6f,11f)),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(routeLayer);
         LineLayer gleam=new LineLayer("dm-route-centre","dm-remaining-route");
         gleam.setProperties(PropertyFactory.lineColor(nightMode?"#b2f6ff":"#57e5ff"),
-                PropertyFactory.lineWidth(2.0f),PropertyFactory.lineOpacity(.72f),
+                PropertyFactory.lineWidth(routeWidth(0.7f,1f,2f)),PropertyFactory.lineOpacity(.72f),
                 PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(gleam);
         // This stroke traces the real calculated route through an approaching
@@ -501,6 +543,17 @@ public final class VectorDriveMap {
         }
     }
 
+    public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path){
+        boolean change=sharedRouteMap!=shared;
+        sharedRouteMap=shared;pendingPreviewPadding=null;
+        setRoute(path);
+        if(change)loadStyle();
+    }
+    private void ensureRegionalCoverage(GeoMath.Point center){
+        if(sharedRouteMap!=null && center!=null && !RouteMapPolicy.insideStockport(center)){
+            sharedRouteMap=null;loadStyle();
+        }
+    }
     public void setRoute(List<GeoMath.Point> path) {
         exactGeometry=new RouteRenderGeometry(path);pendingRoute=exactGeometry.full();routeLength=exactGeometry.length;
         lastAlignment="unmeasured";lastAlignmentCheck=0;
@@ -616,6 +669,7 @@ public final class VectorDriveMap {
         pendingCamera = center;
         pendingZoom = zoom;
         pendingBearing = bearing;
+        ensureRegionalCoverage(center);
         if (!ready() || center == null) return;
         // The GPU map follows directly; GPS camera updates do not restart
         // a long animation on every position fix.
@@ -686,6 +740,7 @@ public final class VectorDriveMap {
         pendingZoom = mapZoom;
         pendingBearing = frame.bearing;
         pendingGps = frame.vehicle;
+        ensureRegionalCoverage(frame.center);
         if (!ready()) return;
         setVehicle(frame.vehicle);
         setVehicleHeading(CameraHeadingPolicy.screenDegrees(
@@ -719,7 +774,9 @@ public final class VectorDriveMap {
      */
     public void previewRoute(List<GeoMath.Point> path, int padTop, int padBottom, int padSide) {
         setRoute(path);
-        if (!ready() || path == null || path.isEmpty()) return;
+        if(path==null||path.isEmpty())return;
+        if(!ready()){pendingPreviewPadding=new int[]{padTop,padBottom,padSide};return;}
+        pendingPreviewPadding=null;
         double minLat = 90, maxLat = -90, minLon = 180, maxLon = -180;
         for (GeoMath.Point p : path) {
             minLat = Math.min(minLat, p.lat);

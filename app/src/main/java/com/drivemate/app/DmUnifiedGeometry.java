@@ -17,6 +17,12 @@ final class DmUnifiedGeometry {
             &&Math.round(p.longitude()*1e6)==Math.round(g.lon*1e6);
     }
     DmUnifiedGeometry(List<JSONArray> features,DmTileEngine.Route path)throws Exception{
+        this(features,path.points,path.ways,path);
+    }
+    DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways)throws Exception{
+        this(features,points,ways,null);
+    }
+    private DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> routePoints,List<Long> routeWays,DmTileEngine.Route path)throws Exception{
         Map<Long,JSONArray> byWay=new HashMap<>();List<Feature> r=new ArrayList<>(),a=new ArrayList<>();
         for(JSONArray f:features){
             if(f.length()!=4||f.getJSONArray(2).length()!=f.getJSONArray(3).length())throw new IOException("Missing shared way identities");
@@ -38,9 +44,24 @@ final class DmUnifiedGeometry {
                 }
             }
         }
-        if(path.points.size()!=path.nodeIds.size()||path.ways.size()!=path.points.size()-1||path.edgeIds.size()!=path.ways.size())throw new IOException("Route identity mismatch");
+        if(routePoints.size()<2||routeWays.size()!=routePoints.size()-1)throw new IOException("Route identity mismatch");
+        if(path!=null&&(path.points.size()!=path.nodeIds.size()||path.edgeIds.size()!=path.ways.size()))throw new IOException("Route node identity mismatch");
         List<Point> trace=new ArrayList<>();
-        for(int i=0;i<path.ways.size();i++){
+        if(path==null){
+            // The hosted edge-walk supplied each way ID and the exact route shape.
+            // A partial first/last segment is permitted only on the identified original segment.
+            for(int i=0;i<routeWays.size();i++){
+                JSONArray f=byWay.get(routeWays.get(i));if(f==null||f.getJSONObject(1).optString("highway").isEmpty())throw new IOException("Route way absent from display");
+                JSONArray coords=f.getJSONArray(2);boolean found=false;
+                for(int j=1;j<coords.length();j++){
+                    Point x=point(coords.getJSONArray(j-1)),y=point(coords.getJSONArray(j));
+                    GeoMath.Point start=new GeoMath.Point(x.latitude(),x.longitude()),end=new GeoMath.Point(y.latitude(),y.longitude());
+                    if(RouteMapPolicy.onSameSegment(start,end,routePoints.get(i),routePoints.get(i+1))){found=true;break;}
+                }
+                if(!found)throw new IOException("Hosted route segment differs from identified road");
+            }
+            for(GeoMath.Point q:routePoints)trace.add(Point.fromLngLat(q.lon,q.lat));
+        }else for(int i=0;i<path.ways.size();i++){
             JSONArray f=byWay.get(path.ways.get(i));if(f==null)throw new IOException("Route way absent from display");
             JSONArray refs=f.getJSONArray(3),coords=f.getJSONArray(2);
             long from=path.nodeIds.get(i),to=path.nodeIds.get(i+1);Point first=null,last=null;
@@ -58,6 +79,6 @@ final class DmUnifiedGeometry {
         roads=FeatureCollection.fromFeatures(r.toArray(new Feature[0]));areas=FeatureCollection.fromFeatures(a.toArray(new Feature[0]));
         route=FeatureCollection.fromFeatures(new Feature[]{Feature.fromGeometry(LineString.fromLngLats(trace))});
         List<GeoMath.Point> exact=new ArrayList<>();for(Point q:trace)exact.add(new GeoMath.Point(q.latitude(),q.longitude()));
-        points=Collections.unmodifiableList(exact);checkedEdges=path.ways.size();
+        points=Collections.unmodifiableList(exact);checkedEdges=routeWays.size();
     }
 }

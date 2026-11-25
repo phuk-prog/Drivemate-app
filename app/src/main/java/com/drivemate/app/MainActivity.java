@@ -172,9 +172,10 @@ public final class MainActivity extends Activity implements LocationListener {
                                     -frame.bearing, map.getMapOrientation());
                             if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
                                 map.setMapOrientation(map.getMapOrientation() + delta);
+                            if (routeLine != null) routeLine.getOutlinePaint().setStrokeWidth(dp(RouteMapPolicy.rasterWidthDp(map.getZoomLevelDouble())));
                             map.postInvalidateOnAnimation();
                         }
-                        if (vectorMap != null && useLocalMap && !autoFallback
+                        if (vectorMap != null && !matchingTomTomMap() && useLocalMap && !autoFallback
                                 && smoothTick % 5 == 0) vectorMap.followFrame(frame);
                     }
                     motionFrames++;
@@ -1024,8 +1025,12 @@ public final class MainActivity extends Activity implements LocationListener {
         refreshHomePanel();
     }
 
+    private boolean matchingTomTomMap() {
+        return RouteMapPolicy.useTomTomMap(route == null ? null : route.provider, !apiKey.isEmpty());
+    }
+
     private boolean showingVector() {
-        return useLocalMap && !autoFallback && vectorMap != null
+        return !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null
                 && vectorRoadsReady;
     }
 
@@ -1033,11 +1038,11 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean vector = showingVector();
         // Keep the vector engine running *behind* the raster fallback until
         // its own rendered-road query proves the UK streets are visible.
-        boolean vectorLoading = useLocalMap && !autoFallback && vectorMap != null;
+        boolean vectorLoading = !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null;
         if (vectorMap != null)
-            vectorMap.setVisible(vectorLoading || ownRouting() || apiKey.isEmpty());
+            vectorMap.setVisible(!matchingTomTomMap() && (vectorLoading || ownRouting() || apiKey.isEmpty()));
         if (map != null)
-            map.setVisibility(!ownRouting() && !vector && !apiKey.isEmpty()
+            map.setVisibility((matchingTomTomMap() || (!ownRouting() && !vector)) && !apiKey.isEmpty()
                     ? View.VISIBLE : View.INVISIBLE);
     }
 
@@ -1432,7 +1437,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 "Camera · " + cameraModeName(),
                 closeZoom ? "Junction detail zoom · On" : "Junction detail zoom · Off",
-                autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
+                matchingTomTomMap() ? "Map · TomTom route-matched provider (journey)" : autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
                         : useLocalMap ? "Map · DriveMate local vector"
                         : "Map · TomTom online raster",
                 "Nearby map cache & Wi-Fi prefetch",
@@ -2619,7 +2624,7 @@ public final class MainActivity extends Activity implements LocationListener {
         } else {
             detail += " · traffic checked";
         }
-        return detail;
+        return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.sharedGeometry != null);
     }
 
     private void showPreview(TomTomApi.Route calculated) {
@@ -2682,7 +2687,7 @@ public final class MainActivity extends Activity implements LocationListener {
         applyDrivingControls();
         stopButton.setText("End");
         stopButton.setContentDescription("End navigation");
-        setStatus("Navigating with "+route.provider+" · "+destination.title);
+        setStatus("Navigating with "+route.provider+" · "+RouteMapPolicy.description(route.provider, route.sharedGeometry != null));
         mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
         guidancePositionConfirmed=false;confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         nextInstruction="";
@@ -2936,11 +2941,12 @@ public final class MainActivity extends Activity implements LocationListener {
         s.satellitesUsed = satellitesUsed;
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
         s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
-                +(vectorMap==null?"":" / visual alignment: "+vectorMap.routeAlignmentDiagnostic());
+                +(route==null?"":" / map: "+RouteMapPolicy.description(route.provider, vectorMap!=null&&vectorMap.hasSharedRouteMap()))
+                +(matchingTomTomMap()?" / raster alignment not measured":vectorMap==null?"":" / visual alignment: "+vectorMap.routeAlignmentDiagnostic());
         s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
-        s.highDetailTiles = false; // no automatic raster detail overlay
+        s.highDetailTiles = matchingTomTomMap(); // same-provider raster for TomTom journeys
         s.cameraBearing = lastCameraBearing;
         s.travelBearing = lastTravelBearing;
         Intent share = new Intent(Intent.ACTION_SEND)
@@ -3048,6 +3054,7 @@ public final class MainActivity extends Activity implements LocationListener {
         network.execute(() -> {
             try {
                 TomTomApi.Route calculated = local?new LocalRoutingPack(this).preview(start,end):own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
+                if ("DriveMate".equals(calculated.provider)) calculated.sharedGeometry = DmUnifiedRegion.matchLive(this, calculated);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
@@ -3178,6 +3185,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
         clearPendingRoute();
         route = calculated;
+        updateMapVisibility();
         confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         if (active) {
             // A new route needs an independent motion index, never a blend
@@ -3220,7 +3228,7 @@ public final class MainActivity extends Activity implements LocationListener {
             geometry.add(new GeoPoint(point.lat, point.lon));
         routeLine.setPoints(geometry);
         routeLine.getOutlinePaint().setColor(0xff007dbb);
-        routeLine.getOutlinePaint().setStrokeWidth(dp(11));
+        routeLine.getOutlinePaint().setStrokeWidth(dp(RouteMapPolicy.rasterWidthDp(map.getZoomLevelDouble())));
         routeLine.getOutlinePaint().setStrokeCap(Paint.Cap.ROUND);
         routeLine.getOutlinePaint().setStrokeJoin(Paint.Join.ROUND);
         map.getOverlays().add(routeLine);
@@ -3239,7 +3247,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         map.invalidate();
         if (vectorMap != null) {
-            vectorMap.setRoute(calculated.points);
+            vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points);
             if (preview) {
                 // Fit once the preview panel has laid out, so the whole route
                 // sits between the search bar and the bottom panel.
@@ -3726,6 +3734,7 @@ public final class MainActivity extends Activity implements LocationListener {
         resubscribeLocationForMode();
         arrivalPolicy.reset();
         route = null;
+        updateMapVisibility();
         destination = null;
         offRouteSince = 0;
         gpsLost = false;
@@ -3753,7 +3762,7 @@ public final class MainActivity extends Activity implements LocationListener {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         map.setMapOrientation(0);
         if (vectorMap != null) {
-            vectorMap.setRoute(null);
+            vectorMap.setSharedRoute(null, null);
             vectorMap.setDestination(null);
         }
         lastCameraUpdate = 0;

@@ -14,6 +14,35 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class DmUnifiedZoomTest {
+    @Test public void actualLiveVectorRendererUsesSharedRoadsAtDrivingZoom()throws Exception{
+        Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
+        assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
+        DmUnifiedRegion region=new DmUnifiedRegion(app,true);DmTileEngine.Route sample=region.sample(true);
+        DmUnifiedGeometry geometry=new DmUnifiedGeometry(region.features,sample.points,sample.ways);
+        GeoMath.Point center=GeoMath.pointAtDistance(sample.points,sample.metres*.4);
+        assertTrue(RouteMapPolicy.insideStockport(center));
+        Intent intent=new Intent(app,DmUnifiedPreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("stockport",true);
+        DmUnifiedPreviewActivity activity=(DmUnifiedPreviewActivity)ins.startActivitySync(intent);
+        final VectorDriveMap[] live=new VectorDriveMap[1];
+        try(DriveTileServer server=new DriveTileServer(app)){
+            ins.runOnMainSync(()->{
+                live[0]=new VectorDriveMap(activity,null,server,"",false,null);
+                activity.setContentView(live[0].view());live[0].onStart();live[0].onResume();
+                live[0].setSharedRoute(geometry,sample.points);live[0].setNavigationDetail(true);live[0].setCamera(center,17,0);
+            });
+            try{
+                for(double zoom:new double[]{17,19,21}){
+                    ins.runOnMainSync(()->live[0].setCamera(center,zoom,0));
+                    long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ok=new AtomicBoolean();
+                    while(SystemClock.elapsedRealtime()<deadline){ins.runOnMainSync(()->ok.set(live[0].sharedRouteRendered(zoom)));if(ok.get())break;SystemClock.sleep(1000);}
+                    assertTrue("Live route and shared roads missing at zoom "+zoom,ok.get());
+                    File dir=new File(app.getExternalFilesDir(null),"unified-zoom");assertTrue(dir.isDirectory()||dir.mkdirs());
+                    Bitmap image=ins.getUiAutomation().takeScreenshot();assertNotNull(image);
+                    try(FileOutputStream out=new FileOutputStream(new File(dir,"live-zoom-"+(int)zoom+".png"))){assertTrue(image.compress(Bitmap.CompressFormat.PNG,100,out));}finally{image.recycle();}
+                }
+            }finally{ins.runOnMainSync(()->{if(live[0]!=null){live[0].onPause();live[0].onStop();live[0].onDestroy();}});}
+        }finally{ins.runOnMainSync(activity::finish);}
+    }
     @Test public void actualStockportGpuRoadsAndRouteAtEveryZoom()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
