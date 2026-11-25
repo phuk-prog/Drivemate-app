@@ -47,6 +47,9 @@ jobs:
             exit 1
           fi
 
+      - name: Reject obsolete release version
+        run: bash tools/check_release_version.sh
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

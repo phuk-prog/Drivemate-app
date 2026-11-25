@@ -54,9 +54,17 @@ public final class TomTomApi {
         public final double turnAngleDegrees;
         public final String street;
         public final String signpost;
+        public final String highwayExit;
+        public final String roadNumbers;
+        public final String drivingSide;
         public Instruction(double routeOffsetMetres, String message, String maneuver,
                            String junctionType, int exitNumber, double turnAngleDegrees,
                            String street, String signpost) {
+            this(routeOffsetMetres,message,maneuver,junctionType,exitNumber,turnAngleDegrees,street,signpost,"","","");
+        }
+        public Instruction(double routeOffsetMetres,String message,String maneuver,
+                           String junctionType,int exitNumber,double turnAngleDegrees,
+                           String street,String signpost,String highwayExit,String roadNumbers,String drivingSide) {
             this.routeOffsetMetres = routeOffsetMetres;
             this.message = message;
             this.maneuver = maneuver;
@@ -65,7 +73,20 @@ public final class TomTomApi {
             this.turnAngleDegrees = turnAngleDegrees;
             this.street = street;
             this.signpost = signpost;
+            this.highwayExit=highwayExit; this.roadNumbers=roadNumbers; this.drivingSide=drivingSide;
         }
+    }
+
+    private static String instructionRoadNumbers(JSONArray values) {
+        if(values==null)return "";
+        StringBuilder out=new StringBuilder();
+        for(int i=0;i<Math.min(values.length(),4);i++){
+            String value=values.optString(i,"").trim();
+            if(value.isEmpty()||value.length()>24||!value.matches("[A-Za-z0-9 ()/-]+"))continue;
+            if(out.length()>0)out.append(" / ");
+            out.append(value);
+        }
+        return out.toString();
     }
 
     public static final class Route {
@@ -273,7 +294,10 @@ public final class TomTomApi {
                             instruction.optInt("roundaboutExitNumber", 0),
                             instruction.optDouble("turnAngleInDecimalDegrees", 0),
                             instruction.optString("street", ""),
-                            instruction.optString("signpostText", "")));
+                            instruction.optString("signpostText", ""),
+                            instruction.optString("exitNumber",""),
+                            instructionRoadNumbers(instruction.optJSONArray("roadNumbers")),
+                            instruction.optString("drivingSide","")));
                 }
             }
         }

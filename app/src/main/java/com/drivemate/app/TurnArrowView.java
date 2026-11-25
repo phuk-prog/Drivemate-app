@@ -13,6 +13,11 @@ public final class TurnArrowView extends View {
     private enum Arrow { STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, UTURN, ROUNDABOUT, ARRIVE }
     private Arrow arrow = Arrow.STRAIGHT;
     private int roundaboutExit;
+    private float[] routeTrace;
+    private int roundaboutDirection;
+    private String drivingSide="";
+    public void setRoundaboutDirection(int direction,String side){roundaboutDirection=direction;drivingSide=side==null?"":side;invalidate();}
+    public void setRouteTrace(float[] points) { routeTrace=points; invalidate(); }
     private int accentColor = Color.rgb(7, 214, 235);
     private int exitTextColor = Color.WHITE;
 
@@ -38,6 +43,7 @@ public final class TurnArrowView extends View {
         else if ("↱".equals(symbol)) arrow = Arrow.RIGHT;
         else arrow = Arrow.STRAIGHT;
         roundaboutExit = Math.max(0, exit);
+        routeTrace=null; roundaboutDirection=0; drivingSide="";
         String label = arrow == Arrow.ROUNDABOUT
                 ? "Roundabout" + (roundaboutExit > 0 ? ", exit " + roundaboutExit : "")
                 : arrow.name().replace('_', ' ').toLowerCase();
@@ -85,7 +91,36 @@ public final class TurnArrowView extends View {
                 head.moveTo(8, 34); head.lineTo(17, 43); head.lineTo(26, 34);
                 break;
             case ROUNDABOUT:
-                // Compact circle-with-arrow. Number is shown separately inside the circle.
+                // Draw only the actual traversed path, never invented side roads.
+                if(routeTrace!=null && routeTrace.length>=8) {
+                    path.moveTo(routeTrace[0],routeTrace[1]);
+                    for(int i=2;i<routeTrace.length;i+=2)path.lineTo(routeTrace[i],routeTrace[i+1]);
+                    int n=routeTrace.length;
+                    float x=routeTrace[n-2],y=routeTrace[n-1],dx=x-routeTrace[n-4],dy=y-routeTrace[n-3];
+                    float len=(float)Math.hypot(dx,dy);
+                    if(len>0.1f){dx/=len;dy/=len;head.moveTo(x-8*dx-5*dy,y-8*dy+5*dx);head.lineTo(x,y);head.lineTo(x-8*dx+5*dy,y-8*dy-5*dx);}
+                    break;
+                }
+                // Schematic direction only if explicitly returned by the route provider.
+                // The arc mirrors traffic handedness; no other exits are drawn.
+                if(roundaboutDirection!=0 && ("LEFT".equals(drivingSide)||"RIGHT".equals(drivingSide))) {
+                    boolean clockwise="LEFT".equals(drivingSide);
+                    double theta=roundaboutDirection==-1?180:roundaboutDirection==1?0:roundaboutDirection==2?270:90;
+                    double sweep=clockwise?(theta-90+360)%360:-((90-theta+360)%360);
+                    if(roundaboutDirection==3)sweep=clockwise?330:-330;
+                    path.moveTo(32,60); path.lineTo(32,47);
+                    path.arcTo(17,17,47,47,90,(float)sweep,false);
+                    double rad=Math.toRadians(90+sweep);
+                    float x=32+15*(float)Math.cos(rad),y=32+15*(float)Math.sin(rad);
+                    // The declared exit direction, rather than ordinal, defines the exit.
+                    float dx=roundaboutDirection==-1?-1:roundaboutDirection==1?1:0;
+                    float dy=roundaboutDirection==2?-1:roundaboutDirection==3?1:0;
+                    float tx=x+dx*12,ty=y+dy*12;
+                    path.lineTo(tx,ty);
+                    head.moveTo(tx-dx*7-dy*5,ty-dy*7+dx*5);head.lineTo(tx,ty);head.lineTo(tx-dx*7+dy*5,ty-dy*7-dx*5);
+                    break;
+                }
+                // Generic symbol if the route shape cannot establish a trustworthy trace.
                 paint.setStyle(Paint.Style.STROKE);
                 canvas.drawArc(15, 14, 49, 48, 38, 292, false, paint);
                 head.moveTo(38, 10); head.lineTo(49, 16); head.lineTo(48, 28);
@@ -111,7 +146,12 @@ public final class TurnArrowView extends View {
             paint.setTextAlign(Paint.Align.CENTER);
             paint.setTextSize(roundaboutExit > 9 ? 13f : 18f);
             paint.setFakeBoldText(true);
-            canvas.drawText(Integer.toString(roundaboutExit), 32, 36, paint);
+            if(routeTrace==null)canvas.drawText(Integer.toString(roundaboutExit),32,36,paint);
+            else {
+                paint.setColor(Color.rgb(10,39,59)); canvas.drawCircle(51,51,11,paint);
+                paint.setColor(Color.WHITE); paint.setTextSize(roundaboutExit>9?10:13);
+                canvas.drawText(Integer.toString(roundaboutExit),51,56,paint);
+            }
             paint.setFakeBoldText(false);
         }
         canvas.restoreToCount(state);

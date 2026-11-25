@@ -35,6 +35,16 @@ public final class DrivingDisplayPolicy {
                 && gapMetres >= 0 && gapMetres <= 450;
     }
 
+    public static boolean showFollowingTurn(double metresToFirst, double gapMetres, float speed) {
+        return showFollowingTurn(metresToFirst,gapMetres)
+                && IntelligentGuidance.closeFollowing(gapMetres,speed);
+    }
+
+    public static double signpostHorizon(float speed) {
+        double v=Float.isFinite(speed)?Math.max(0,speed):0;
+        return Math.max(300,Math.min(1200,250+v*25));
+    }
+
     public static boolean northUp(int cameraMode) {
         return cameraMode == CAMERA_NORTH_2D;
     }
