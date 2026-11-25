@@ -73,8 +73,8 @@ public final class NavigationCamera {
         double routeLength = GeoMath.length(path);
         double progress = clamp(routeProgressMetres, 0, routeLength);
         double junctionAhead = Math.max(0, nextJunctionOffsetMetres - progress);
-        double speed = Math.max(0, speedMetresPerSecond);
-        double viewHeight = Math.max(220, screenHeightPx - headerHeightPx - panelHeightPx);
+        double speed = Float.isFinite(speedMetresPerSecond) ? Math.max(0, speedMetresPerSecond) : 0;
+        double viewHeight = Math.max(80, screenHeightPx - headerHeightPx - panelHeightPx);
 
         // Like mainstream navigation apps, the cruising view is set by speed:
         // about 110 m of road ahead at walking pace, growing with speed (about
@@ -99,6 +99,7 @@ public final class NavigationCamera {
         // clearer overhead junction diagram as the manoeuvre gets close.
         double tilt = clamp(28 + junctionAhead * 0.033
                 + Math.min(5, speed * 0.16), 28, 48);
+        if (viewHeight < 300) tilt = Math.min(tilt, 20);
         if (detailApproach) {
             // More overhead than the default 3D view, especially for exits.
             double blend = 1 - junctionAhead / 420.0;
@@ -118,7 +119,7 @@ public final class NavigationCamera {
         // Include overlay displacement but never look so far past a nearby
         // turn that it disappears underneath the bottom navigation controls.
         double lead = clamp(junctionAhead * 0.50
-                + Math.max(28, speed * 1.5), 36, horizon * 0.52);
+                + Math.max(28, speed * 1.5), Math.min(36, horizon * 0.52), horizon * 0.52);
         double visibleCenterY = headerHeightPx + viewHeight * 0.5;
         double screenCenterY = screenHeightPx * 0.5;
         double centerAlong = progress + lead

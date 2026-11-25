@@ -101,6 +101,13 @@ public final class NavigationCameraTest {
         assertTrue(oneHundred.zoom > threeHundred.zoom + 0.1);
     }
 
+    @Test public void tinyUsableViewportUsesLowerTiltAndFiniteZoom() {
+        NavigationCamera.Frame frame = NavigationCamera.calculate(north, north.get(0), 0, 100, Float.NaN, 600, 300, 250);
+        assertTrue(Double.isFinite(frame.zoom));
+        assertTrue(frame.tiltDegrees <= 20);
+        assertTrue(frame.cameraCenterAlongMetres >= 0);
+    }
+
     @Test public void convertsRasterZoomToMapLibreZoom() {
         // 512 px tiles in dp: one level lower at density 1, plus log2(density).
         assertEquals(15.0, NavigationCamera.toMapLibreZoom(16.0, 1.0), 1e-9);

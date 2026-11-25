@@ -175,12 +175,44 @@ public final class TomTomApi {
 
     public static Route route(String key, GeoMath.Point start, GeoMath.Point destination)
             throws IOException, JSONException {
+        return parseRoute(requestRouteResponse(key, start, destination, false));
+    }
+
+    public static List<Route> routeChoices(String key, GeoMath.Point start, GeoMath.Point destination)
+            throws IOException, JSONException {
+        JSONObject response;
+        try { response = requestRouteResponse(key, start, destination, true); }
+        catch (IOException error) {
+            String msg = error.getMessage();
+            if (msg == null || (!msg.startsWith("TomTom HTTP 400.") && !msg.startsWith("TomTom HTTP 403."))) throw error;
+            return java.util.Collections.singletonList(route(key, start, destination));
+        }
+        return parseRouteChoices(response);
+    }
+
+    static List<Route> parseRouteChoices(JSONObject response) throws IOException, JSONException {
+        List<Route> results = new ArrayList<>();
+        results.add(parseRoute(response));
+        JSONArray routes = response.getJSONArray("routes");
+        for (int i=1; i<Math.min(3,routes.length()); i++) {
+            try {
+                JSONObject single = new JSONObject();
+                single.put("routes", new JSONArray().put(routes.getJSONObject(i)));
+                results.add(parseRoute(single));
+            } catch (IOException | JSONException ignored) { /* No usable guidance: omit this alternative. */ }
+        }
+        return results;
+    }
+
+    private static JSONObject requestRouteResponse(String key, GeoMath.Point start, GeoMath.Point destination, boolean alternatives)
+            throws IOException, JSONException {
         String pair = coordinate(start.lat) + "," + coordinate(start.lon) + ":"
                 + coordinate(destination.lat) + "," + coordinate(destination.lon);
         String url = "https://api.tomtom.com/routing/1/calculateRoute/" + pair + "/json"
                 + "?key=" + encode(key)
                 + "&travelMode=car&routeType=fastest&traffic=true"
-                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
+                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all"
+                + (alternatives ? "&maxAlternatives=2" : "");
         JSONObject response;
         try {
             response = requestJson(url
@@ -194,7 +226,7 @@ public final class TomTomApi {
                     && !message.startsWith("TomTom HTTP 403."))) throw error;
             response = requestJson(url);
         }
-        return parseRoute(response);
+        return response;
     }
 
     /** Package-private to test real response shapes without network/API keys. */

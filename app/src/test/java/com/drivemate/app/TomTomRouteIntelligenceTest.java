@@ -21,6 +21,19 @@ public class TomTomRouteIntelligenceTest {
         return new JSONObject(body);
     }
 
+    @Test public void choicesKeepPrimaryAndSkipUnusableAlternative() throws Exception {
+        JSONObject response = fixture(null);
+        org.json.JSONArray choices = response.getJSONArray("routes");
+        choices.put(new JSONObject());
+        JSONObject valid = new JSONObject(choices.getJSONObject(0).toString());
+        valid.getJSONObject("summary").put("travelTimeInSeconds", 75);
+        choices.put(valid);
+        java.util.List<TomTomApi.Route> parsed = TomTomApi.parseRouteChoices(response);
+        assertEquals(2, parsed.size());
+        assertEquals(40, parsed.get(0).timeSeconds);
+        assertEquals(75, parsed.get(1).timeSeconds);
+    }
+
     @Test public void parsesIndexedLaneSpeedAndTrafficSections() throws Exception {
         String sections = "["
                 + "{\"sectionType\":\"LANES\",\"startPointIndex\":2,\"endPointIndex\":3,"

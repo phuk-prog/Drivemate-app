@@ -305,7 +305,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#10202D",
+        "line-color": "#122532",
         "line-width": [
           "interpolate",
           [
@@ -450,7 +450,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#89949B",
+        "line-color": "#8B9BA5",
         "line-width": [
           "interpolate",
           [
@@ -626,7 +626,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#C1AB7D",
+        "line-color": "#D3B984",
         "line-width": [
           "interpolate",
           [
@@ -684,6 +684,10 @@
             "get",
             "name"
           ],
+          [
+            "get",
+            "ref"
+          ],
           ""
         ],
         "text-font": [
@@ -698,15 +702,15 @@
             "zoom"
           ],
           12,
-          10,
+          11,
           16,
-          14,
+          14.5,
           19,
           17.5
         ],
         "symbol-placement": "line",
         "text-rotation-alignment": "map",
-        "symbol-spacing": 240
+        "symbol-spacing": 280
       },
       "paint": {
         "text-color": "#E0EAF0",
@@ -1160,7 +1164,7 @@
         "text-font": [
           "Noto Sans Regular"
         ],
-        "text-size": 11.5,
+        "text-size": 12,
         "text-anchor": "left",
         "text-offset": [
           0.8,

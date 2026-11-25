@@ -52,6 +52,9 @@ public final class VectorDriveMap {
     private final DriveTileServer tiles;
     private MapLibreMap map;
     private GeoJsonSource routeSource;
+    private GeoJsonSource alternativeSource;
+    private List<GeoMath.Point> pendingAlternative;
+    private boolean vehicleUncertain;
     private GeoJsonSource junctionSource;
     private GeoJsonSource vehicleSource;
     private GeoJsonSource destinationSource;
@@ -163,7 +166,7 @@ public final class VectorDriveMap {
     public void setNavigationDetail(boolean navigating) {
         navigationDetail = navigating;
         if (!ready() || map.getStyle() == null) return;
-        for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops"}) {
+        for (String id : new String[]{"uk-pois-dots", "uk-pois-labels", "uk-bus-stops", "uk-housenumbers", "uk-water-labels", "uk-water-area-labels", "uk-stations-labels"}) {
             org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer(id);
             if (layer != null) layer.setProperties(PropertyFactory.visibility(
                     navigating ? "none" : "visible"));
@@ -287,6 +290,8 @@ public final class VectorDriveMap {
                 setEntrance(pendingEntrance);
                 setParkedCar(pendingParked);
                 if (pendingRoute != null) setRoute(pendingRoute);
+                setAlternative(pendingAlternative);
+                setVehicleUncertain(vehicleUncertain);
                 if (pendingJunctionRoute != null) setJunctionPreview(pendingJunctionRoute);
                 if (pendingCamera != null) setCamera(pendingCamera,
                         pendingZoom, pendingBearing);
@@ -310,6 +315,11 @@ public final class VectorDriveMap {
         parkedSource = new GeoJsonSource("dm-parked",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(routeSource);
+        alternativeSource = new GeoJsonSource("dm-alternative", FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(alternativeSource);
+        LineLayer alternative = new LineLayer("dm-alternative-line", "dm-alternative");
+        alternative.setProperties(PropertyFactory.lineColor("#74839A"), PropertyFactory.lineWidth(4f), PropertyFactory.lineDasharray(new Float[]{2f, 1.5f}), PropertyFactory.lineCap("round"), PropertyFactory.lineJoin("round"));
+        style.addLayer(alternative);
         junctionSource = new GeoJsonSource("dm-junction",
                 FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(junctionSource);
@@ -320,23 +330,32 @@ public final class VectorDriveMap {
         LineLayer routeHalo = new LineLayer("dm-route-halo", "dm-route");
         routeHalo.setProperties(PropertyFactory.lineColor(
                         nightMode ? "#112B3B" : "#FFFFFF"),
-                PropertyFactory.lineWidth(10f),
+                PropertyFactory.lineWidth(9f),
+                PropertyFactory.lineCap("round"), PropertyFactory.lineJoin("round"),
                 PropertyFactory.lineOpacity(0.9f));
         style.addLayer(routeHalo);
         LineLayer routeLayer = new LineLayer("dm-route-line", "dm-route");
         routeLayer.setProperties(PropertyFactory.lineColor("#157EED"),
-                PropertyFactory.lineWidth(6.5f));
+                PropertyFactory.lineWidth(5f), PropertyFactory.lineCap("round"), PropertyFactory.lineJoin("round"));
         style.addLayer(routeLayer);
+        // Route direction from actual calculated geometry; spacing prevents a dense pattern.
+        style.addImage("dm-route-chevron", makeRouteChevron());
+        SymbolLayer direction = new SymbolLayer("dm-route-direction", "dm-route");
+        direction.setProperties(PropertyFactory.symbolPlacement("line"), PropertyFactory.symbolSpacing(160f),
+                PropertyFactory.iconImage("dm-route-chevron"), PropertyFactory.iconRotationAlignment("map"),
+                PropertyFactory.iconKeepUpright(false), PropertyFactory.iconAllowOverlap(false));
+        direction.setMinZoom(14f);
+        style.addLayer(direction);
         // This stroke traces the real calculated route through an approaching
         // roundabout. It never attempts to deduce geometry from an exit count.
         LineLayer junctionHalo = new LineLayer("dm-junction-casing", "dm-junction");
         junctionHalo.setProperties(
                 PropertyFactory.lineColor(nightMode ? "#0D2030" : "#FFFFFF"),
-                PropertyFactory.lineWidth(13f), PropertyFactory.lineOpacity(0.98f));
+                PropertyFactory.lineWidth(10f), PropertyFactory.lineCap("round"), PropertyFactory.lineJoin("round"), PropertyFactory.lineOpacity(0.98f));
         style.addLayer(junctionHalo);
         LineLayer junctionLayer = new LineLayer("dm-junction-highlight", "dm-junction");
         junctionLayer.setProperties(PropertyFactory.lineColor("#12DFC7"),
-                PropertyFactory.lineWidth(8f),
+                PropertyFactory.lineWidth(6f), PropertyFactory.lineCap("round"), PropertyFactory.lineJoin("round"),
                 PropertyFactory.lineOpacity(0.95f));
         style.addLayer(junctionLayer);
         CircleLayer dest = new CircleLayer("dm-dest-dot", "dm-destination");
@@ -366,7 +385,7 @@ public final class VectorDriveMap {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
                 PropertyFactory.iconRotationAlignment("viewport"),
-                PropertyFactory.iconRotate(0f));
+                PropertyFactory.iconRotate(0f), PropertyFactory.iconOpacity(vehicleUncertain ? 0.45f : 1f));
         style.addLayer(vehicle);
     }
 
@@ -413,6 +432,36 @@ public final class VectorDriveMap {
         for (GeoMath.Point p : DisplayPolyline.simplify(path, 1.5))
             geometry.add(Point.fromLngLat(p.lon, p.lat));
         routeSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geometry)));
+    }
+
+    private static Bitmap makeRouteChevron() {
+        Bitmap bitmap = Bitmap.createBitmap(18, 18, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(Color.WHITE); paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(2.7f); paint.setStrokeCap(Paint.Cap.ROUND); paint.setStrokeJoin(Paint.Join.ROUND);
+        Path chevron = new Path(); chevron.moveTo(6,4); chevron.lineTo(11,9); chevron.lineTo(6,14);
+        canvas.drawPath(chevron,paint);
+        return bitmap;
+    }
+
+    public void setAlternative(List<GeoMath.Point> path) {
+        pendingAlternative = path;
+        if (!ready() || alternativeSource == null) return;
+        if (path == null || path.size() < 2) {
+            alternativeSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
+            return;
+        }
+        List<Point> geometry = new ArrayList<>();
+        for (GeoMath.Point p : DisplayPolyline.simplify(path, 1.5)) geometry.add(Point.fromLngLat(p.lon, p.lat));
+        alternativeSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(geometry)));
+    }
+
+    public void setVehicleUncertain(boolean uncertain) {
+        vehicleUncertain = uncertain;
+        if (!ready() || map.getStyle() == null) return;
+        org.maplibre.android.style.layers.Layer layer = map.getStyle().getLayer("dm-vehicle-arrow-layer");
+        if (layer != null) layer.setProperties(PropertyFactory.iconOpacity(uncertain ? 0.45f : 1f));
     }
 
     public void setJunctionPreview(List<GeoMath.Point> segment) {
