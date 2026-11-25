@@ -16,7 +16,11 @@ final class DmUnifiedGeometry {
         return Point.fromLngLat(c.getInt(1)/coordinateScale,c.getInt(0)/coordinateScale);
     }
     private static void retainTags(Feature f,JSONObject tags){
-        Iterator<String> keys=tags.keys();while(keys.hasNext()){String k=keys.next();if(!k.equals("kind"))f.addStringProperty(k,tags.optString(k,""));}
+        // The authoritative database retains all raw tags. The GPU source needs only display attributes.
+        for(String k:new String[]{"name","ref","highway","amenity","shop","tourism","aeroway","railway","public_transport","surface","service","landuse","leisure","natural","building","height","building:levels","min_height","addr:housenumber","entrance","traffic_calming","junction","layer","width","lanes"}){
+            if(tags.has(k)){String value=tags.optString(k,"");if(value.length()<=512)f.addStringProperty(k,value);}
+        }
+        if(tags.has("railway"))f.addStringProperty("kind",tags.optString("railway"));
     }
     private static boolean affirmative(String value){return !value.isEmpty()&&!"no".equals(value)&&!"false".equals(value)&&!"0".equals(value);}
     private static void roadTags(Feature f,JSONObject tags){

@@ -17,11 +17,13 @@ public class DmUnifiedZoomTest {
     @Test public void actualLiveVectorRendererUsesSharedRoadsAtDrivingZoom()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
-        DmUnifiedRegion region=new DmUnifiedRegion(app,true);DmTileEngine.Route sample=region.sample(true);
-        DmUnifiedGeometry geometry=new DmUnifiedGeometry(region.features,sample.points,sample.ways);
+        final DmTileEngine.Route sample;final DmUnifiedGeometry geometry;
+        { DmUnifiedRegion region=new DmUnifiedRegion(app,true);sample=region.sample(true);
+          geometry=new DmUnifiedGeometry(region.features,sample.points,sample.ways); }
+        // No second preview loader; no graph object is needed once route geometry is verified.
         GeoMath.Point center=GeoMath.pointAtDistance(sample.points,sample.metres*.4);
         assertTrue(RouteMapPolicy.insideStockport(center));
-        Intent intent=new Intent(app,DmUnifiedPreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("stockport",true);
+        Intent intent=new Intent(app,DmUnifiedPreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("stockport",true).putExtra("live_renderer_test_host",true);
         DmUnifiedPreviewActivity activity=(DmUnifiedPreviewActivity)ins.startActivitySync(intent);
         final VectorDriveMap[] live=new VectorDriveMap[1];
         try(DriveTileServer server=new DriveTileServer(app)){

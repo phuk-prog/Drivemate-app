@@ -19,6 +19,8 @@ public final class DmUnifiedPreviewActivity extends Activity {
     @Override public void onCreate(Bundle state){
         super.onCreate(state);stockport=getIntent().getBooleanExtra("stockport",true);
         MapLibre.getInstance(getApplicationContext());
+        // The instrumentation live-renderer host must not start a second regional loader or MapView.
+        if(BuildConfig.DEBUG&&getIntent().getBooleanExtra("live_renderer_test_host",false)){setContentView(new FrameLayout(this));return;}
         LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setBackgroundColor(0xff0a273b);
         status=new TextView(this);status.setTextColor(Color.WHITE);status.setTextSize(16);status.setPadding(18,14,18,14);
         status.setText("Loading shared roads · preview only");body.addView(status);
@@ -67,11 +69,11 @@ public final class DmUnifiedPreviewActivity extends Activity {
         try{return !map.queryRenderedFeatures(r,"road-fill").isEmpty()&&!map.queryRenderedFeatures(r,"route-fill").isEmpty();}catch(RuntimeException e){return false;}
     }
     int checkedEdges(){return geometry==null?0:geometry.checkedEdges;}
-    @Override public void onStart(){super.onStart();view.onStart();}
-    @Override public void onResume(){super.onResume();view.onResume();}
-    @Override public void onPause(){view.onPause();super.onPause();}
-    @Override public void onStop(){view.onStop();super.onStop();}
-    @Override public void onLowMemory(){super.onLowMemory();view.onLowMemory();}
-    @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);view.onSaveInstanceState(out);}
-    @Override public void onDestroy(){generation++;view.onDestroy();super.onDestroy();}
+    @Override public void onStart(){super.onStart();if(view!=null)view.onStart();}
+    @Override public void onResume(){super.onResume();if(view!=null)view.onResume();}
+    @Override public void onPause(){if(view!=null)view.onPause();super.onPause();}
+    @Override public void onStop(){if(view!=null)view.onStop();super.onStop();}
+    @Override public void onLowMemory(){super.onLowMemory();if(view!=null)view.onLowMemory();}
+    @Override protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(view!=null)view.onSaveInstanceState(out);}
+    @Override public void onDestroy(){generation++;if(view!=null)view.onDestroy();geometry=null;route=null;map=null;view=null;super.onDestroy();}
 }
