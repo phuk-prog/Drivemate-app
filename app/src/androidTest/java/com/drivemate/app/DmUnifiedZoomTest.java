@@ -21,17 +21,20 @@ public class DmUnifiedZoomTest {
         DmUnifiedPreviewActivity a=(DmUnifiedPreviewActivity)ins.startActivitySync(intent);
         File dir=new File(app.getExternalFilesDir(null),"unified-zoom");assertTrue(dir.isDirectory()||dir.mkdirs());
         try{
-            for(double zoom:new double[]{14.0,17.0,19.0,21.0}){
-                long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ok=new AtomicBoolean();
+            for(boolean night:new boolean[]{false,true}){
+              if(night)ins.runOnMainSync(()->a.setNight(true));
+              for(double zoom:new double[]{14.0,17.0,19.0,21.0}){
+                long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ok=new AtomicBoolean(),positioned=new AtomicBoolean();
                 while(SystemClock.elapsedRealtime()<deadline){
-                    ins.runOnMainSync(()->{if(a.checkedEdges()>0){if(a.rendered(zoom))ok.set(true);else a.position(zoom);}});
+                    ins.runOnMainSync(()->{if(a.readyForZoom()){if(!positioned.getAndSet(true))a.position(zoom);else if(a.rendered(zoom))ok.set(true);}});
                     if(ok.get())break;SystemClock.sleep(1000);
                 }
                 assertTrue("No actual rendered roads and route at zoom "+zoom,ok.get());
                 Bitmap b=ins.getUiAutomation().takeScreenshot();assertNotNull(b);
-                try(FileOutputStream out=new FileOutputStream(new File(dir,"zoom-"+(int)zoom+".png"))){assertTrue(b.compress(Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}
-                android.util.Log.i("UnifiedZoom","PASS Stockport zoom "+zoom+" rendered roads and verified shared route");
+                try(FileOutputStream out=new FileOutputStream(new File(dir,(night?"night-":"day-")+"zoom-"+(int)zoom+".png"))){assertTrue(b.compress(Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}
+                android.util.Log.i("UnifiedZoom","PASS Stockport "+(night?"night":"day")+" zoom "+zoom+" rendered roads and verified shared route");
             }
+              }
         }finally{ins.runOnMainSync(a::finish);}
     }
 }

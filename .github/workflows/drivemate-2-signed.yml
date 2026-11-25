@@ -30,7 +30,9 @@ jobs:
           gradle-version: '8.9'
 
       - name: Validate redesigned day and night style contracts
-        run: python3 tools/test_driving_styles.py
+        run: |
+          python3 tools/test_driving_styles.py
+          python3 tools/test_unified_styles.py
       - name: Verify actual UK road features and style layer compatibility
         run: python3 tools/verify_drive_map_roads.py
       - name: Reject blank map screenshots (regression fixtures)
