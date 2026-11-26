@@ -2469,15 +2469,17 @@ public final class MainActivity extends Activity implements LocationListener {
     private void clearFreeRoadContext(){
         freeContextGeneration++;freeContextBusy=false;freeContextRequestedAt=0;freeRoadContext=null;
         freeRoadMatch.reset();freeLastLimit=-1;
+        if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
         if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
     }
     private void updateFreeRoadIntelligence(Location fix){
         GeoMath.Point point=gpsPoint(fix);
         final String endpoint=ownEndpoint();
         if(freeRoadContext!=null && !freeRoadContext.freshAt(point)){
-            freeRoadContext=null;freeRoadMatch.reset();
+            freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;
+            if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
         }
-        if(endpoint.isEmpty()){freeRoadContext=null;freeRoadMatch.reset();}
+        if(endpoint.isEmpty()){freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;if(vectorMap!=null)vectorMap.setBrowseGeometry(null);}
         long now=SystemClock.elapsedRealtime();
         if(freeRoadContext==null&&!freeContextBusy&&!endpoint.isEmpty()
                 &&(freeContextRequestedAt==0||now-freeContextRequestedAt>=15000)){
@@ -2490,7 +2492,10 @@ public final class MainActivity extends Activity implements LocationListener {
                 runOnUiThread(()->{
                     if(generation!=freeContextGeneration||!freeDriving||active)return;
                     freeContextBusy=false;
-                    if(endpoint.equals(ownEndpoint())&&currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation)))freeRoadContext=context;
+                    if(endpoint.equals(ownEndpoint())&&currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation))){
+                        freeRoadContext=context;
+                        if(vectorMap!=null&&followLocation)vectorMap.setBrowseGeometry(context.map);
+                    }
                 });
             });
         }
@@ -2501,7 +2506,7 @@ public final class MainActivity extends Activity implements LocationListener {
             catch(Exception ignored){freeRoadMatch.reset();}
         }else freeRoadMatch.reset();
         if(match==null){
-            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);freeLastLimit=-1;return;
+            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);return;
         }
         int shown=metricUnits?match.kmh:(int)Math.round(match.kmh/1.609344);
         speedLimitText.setText(String.valueOf(shown));speedLimitText.setVisibility(View.VISIBLE);
