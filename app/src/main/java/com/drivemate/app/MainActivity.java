@@ -106,6 +106,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
                     if(active)suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
+                    else if(freeDriving)clearFreeRoadContext();
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
                     if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
@@ -254,6 +255,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean freeDriving;
     private boolean advanceSpeedVoice = true;
     private double freeDriveBearing=Double.NaN;
+    private final FreeDriveRoadMatch freeRoadMatch=new FreeDriveRoadMatch();
+    private DriveMateProvider.RoadContext freeRoadContext;
+    private long freeContextRequestedAt;
+    private int freeContextGeneration;
+    private boolean freeContextBusy;
+    private int freeLastLimit=-1;
     private LinearLayout homePanel;
     private LinearLayout navigationPanel;
     private LinearLayout topMapOverlay;
@@ -1288,7 +1295,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void setHomeVisible(boolean show) {
         homeMode = show;
-        if(!show&&freeDriving){freeDriving=false;freeDriveBearing=Double.NaN;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
+        if(!show&&freeDriving){freeDriving=false;freeDriveBearing=Double.NaN;clearFreeRoadContext();getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
         if (homePanel == null || navigationPanel == null) return;
         homePanel.setVisibility(show && !keyboardOpen && !freeDriving ? View.VISIBLE : View.GONE);
         navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
@@ -2426,6 +2433,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 lastCameraCenter = gps;
             }
         }
+        if(freeDriving&&!active&&!routing)updateFreeRoadIntelligence(fix);
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
                     + (fix.hasAccuracy() ? "±" + Math.round(fix.getAccuracy()) + " m" : "unknown")
@@ -2458,9 +2466,62 @@ public final class MainActivity extends Activity implements LocationListener {
         return new BitmapDrawable(getResources(),scaled);
     }
 
+    private void clearFreeRoadContext(){
+        freeContextGeneration++;freeContextBusy=false;freeContextRequestedAt=0;freeRoadContext=null;
+        freeRoadMatch.reset();freeLastLimit=-1;
+        if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
+    }
+    private void updateFreeRoadIntelligence(Location fix){
+        GeoMath.Point point=gpsPoint(fix);
+        final String endpoint=ownEndpoint();
+        if(freeRoadContext!=null && !freeRoadContext.freshAt(point)){
+            freeRoadContext=null;freeRoadMatch.reset();
+        }
+        if(endpoint.isEmpty()){freeRoadContext=null;freeRoadMatch.reset();}
+        long now=SystemClock.elapsedRealtime();
+        if(freeRoadContext==null&&!freeContextBusy&&!endpoint.isEmpty()
+                &&(freeContextRequestedAt==0||now-freeContextRequestedAt>=15000)){
+            freeContextBusy=true;freeContextRequestedAt=now;
+            final int generation=freeContextGeneration;
+            network.execute(()->{
+                DriveMateProvider.RoadContext result;
+                try{result=DriveMateProvider.roadContext(endpoint,point);}catch(Exception e){result=null;}
+                final DriveMateProvider.RoadContext context=result;
+                runOnUiThread(()->{
+                    if(generation!=freeContextGeneration||!freeDriving||active)return;
+                    freeContextBusy=false;
+                    if(endpoint.equals(ownEndpoint())&&currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation)))freeRoadContext=context;
+                });
+            });
+        }
+        FreeDriveRoadMatch.Match match=null;
+        if(freeRoadContext!=null&&!gpsLost&&fix.hasBearing()&&fix.hasSpeed()&&fix.hasAccuracy()
+                &&(!fix.hasBearingAccuracy()||fix.getBearingAccuracyDegrees()<=20)){
+            try{match=freeRoadMatch.confirm(FreeDriveRoadMatch.match(freeRoadContext.ways,point,fix.getAccuracy(),fix.getBearing(),fix.getSpeed()),fix.getTime());}
+            catch(Exception ignored){freeRoadMatch.reset();}
+        }else freeRoadMatch.reset();
+        if(match==null){
+            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);freeLastLimit=-1;return;
+        }
+        int shown=metricUnits?match.kmh:(int)Math.round(match.kmh/1.609344);
+        speedLimitText.setText(String.valueOf(shown));speedLimitText.setVisibility(View.VISIBLE);
+        speedLimitText.setContentDescription("Mapped speed limit "+shown+(metricUnits?" km/h":" mph")+". Check road signs.");
+        setStatus("Free driving · mapped limit "+shown+(metricUnits?" km/h":" mph")+(match.name.isEmpty()?"":" · "+match.name));
+        boolean speeding=fix.getSpeed()*2.2369362921>match.kmh/1.609344+speedToleranceMph;
+        speedText.setTextColor(speeding?Color.rgb(255,197,85):Color.WHITE);
+        if(speeding&&speedWarningEnabled&&speechReady&&speech!=null&&!speech.isSpeaking()
+            &&(lastSpeedWarningAt==0||now-lastSpeedWarningAt>120000)){
+            lastSpeedWarningAt=now;sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",true);
+        }
+        if(freeLastLimit>0&&freeLastLimit!=match.kmh&&advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT
+                &&speechReady&&speech!=null&&!speech.isSpeaking())
+            speak("Mapped speed limit now "+shown+(metricUnits?" kilometres per hour.":" miles per hour.")+" Check road signs.");
+        freeLastLimit=match.kmh;
+    }
     private void toggleFreeDriving(){
         if(active||route!=null||routing){Toast.makeText(this,"End the route before using free driving.",Toast.LENGTH_SHORT).show();return;}
         freeDriving=!freeDriving;
+        clearFreeRoadContext();
         freeDriveBearing=Double.NaN;followLocation=true;updateFollowButton();
         if(freeDriving)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
