@@ -39,6 +39,10 @@ public final class JunctionManeuverView extends View {
         this.roundabout = roundabout;
         this.exitNumber = Math.max(0, exitNumber);
         setVisibility(this.route.size() >= 2 ? View.VISIBLE : View.GONE);
+        setContentDescription(this.route.size() < 2 ? ""
+                : this.roundabout
+                ? "Junction diagram: roundabout" + (this.exitNumber > 0 ? ", exit " + this.exitNumber : "")
+                : "Junction diagram: upcoming turn");
         invalidate();
     }
 
