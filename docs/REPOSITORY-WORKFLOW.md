@@ -29,3 +29,5 @@ d13fb793b28097cbca613ee7e20f3ebfad7d0a8161bcddbf813fa4a329db62ac.
 The new commit still requires ordinary security, validation and replay gates.
 Navigation start uses a separate tested GPS/provider policy; preview callbacks
 reject obsolete route references and independent routes no longer imply live traffic was checked.
+
+Owner delivery preference: use AES-256 password-encrypted APK ZIPs in the existing public repository; no private repository or activation system required. See docs/PRIVATE-DISTRIBUTION.md.

@@ -28,3 +28,5 @@ Do not claim a simulator result as road validation. No driving interaction.
 
 ## Subsequent bounded routing pass
 Android local preview now caches read-only edge and turn queries per route while retaining the same expansion, time and queue limits. The map PR compares alternative queue weights on failed exact anchors without changing promotion gates. Do not activate alternative anchors as navigation. Signed main builds produce an artifact by default; public prerelease creation is a separate explicit manual input after owner approval.
+
+Owner delivery preference: use AES-256 password-encrypted APK ZIPs in the existing public repository; no private repository or activation system required. See docs/PRIVATE-DISTRIBUTION.md.

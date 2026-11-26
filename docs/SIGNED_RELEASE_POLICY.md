@@ -21,4 +21,6 @@ The current combined all-11 release candidate is built from `dev/all-approved-st
 
 Always make clear that installing a release-candidate signed update replaces the currently installed application package; users who wish to preserve 1.6.1 should keep it installed and test the isolated debug variant first.
 
-The consolidated main-only signing workflow uploads a signed review APK by default. Publication requires an explicit manual dispatch with publish=true, and separate owner approval. Configure the protected drivemate-release environment before using it. No PR event receives signing secrets.
+The consolidated main-only signing workflow uploads a password-encrypted signed review APK ZIP by default. Publication requires an explicit manual dispatch with publish=true, and separate owner approval. Configure the protected drivemate-release environment before using it. No PR event receives signing secrets.
+
+Set DRIVEMATE_ZIP_PASSWORD in the protected signing environment; never upload an unencrypted APK to a public repository. See PRIVATE-DISTRIBUTION.md. No app account activation required.
