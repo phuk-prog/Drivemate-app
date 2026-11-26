@@ -11,6 +11,8 @@ import android.os.SystemClock;
 public final class DmTileEngine {
     public interface Source { InputStream open(String name)throws Exception; }
     private final JSONObject catalog,globalRules;
+    /** Fastest edge in the catalog; A* heuristic divides by it so it stays a true lower bound. */
+    private final double maxKph;
     private final Source source;
     private final DmCellPlanner planner;
     private final LinkedHashMap<String,Tile> cache=new LinkedHashMap<>(16,.75f,true);
@@ -27,13 +29,16 @@ public final class DmTileEngine {
         if(!sha(manifest).equals(expected))throw new IOException("Manifest checksum mismatch");
         JSONObject m=new JSONObject(new String(manifest,java.nio.charset.StandardCharsets.UTF_8));
         if(!"drivemate-tiles-v1".equals(m.getString("format"))||m.getInt("cell_microdegrees")!=CELL||!"ODbL-1.0".equals(m.getString("license")))throw new IOException("Unsupported map format");
-        catalog=m.getJSONObject("tiles");globalRules=m.getJSONObject("global_rules");this.source=source;planner=new DmCellPlanner(catalog);
+        catalog=m.getJSONObject("tiles");globalRules=m.getJSONObject("global_rules");
+        double declared=m.optDouble("max_speed_kph",160);maxKph=declared>0&&declared<160?declared:160;this.source=source;planner=new DmCellPlanner(catalog);
     }
     static String key(double lat,double lon){return Math.floorDiv((int)Math.round(lat*1e6),CELL)+"_"+Math.floorDiv((int)Math.round(lon*1e6),CELL);}
     public Set<String> keys(){Set<String> out=new TreeSet<>();catalog.keys().forEachRemaining(out::add);return out;}
     static final class Node{
         final long id;final GeoMath.Point point;final JSONArray edges,rules;final String cell;
-        Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);this.cell=cell;}
+        /** False for nodes in a tiny isolated road network; never used to snap a journey end. Older tiles omit field 5. */
+        final boolean snappable;
+        Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);snappable=a.length()<=5||a.getInt(5)!=0;this.cell=cell;}
     }
     static final class Tile{
         final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places;
@@ -75,6 +80,7 @@ public final class DmTileEngine {
             JSONArray e=n.edges.getJSONArray(i);if(nearby.containsKey(e.getString(2)))incoming.add(e.getLong(1));
         }
         for(Tile tile:nearby.values())for(Node n:tile.nodes.values()){
+            if(!n.snappable)continue;
             if(origin){
                 boolean hasExit=false;for(int i=0;i<n.edges.length();i++){JSONArray e=n.edges.getJSONArray(i);if(allowed==null||allowed.contains(e.getString(2))){hasExit=true;break;}}
                 if(!hasExit)continue;
@@ -117,7 +123,7 @@ public final class DmTileEngine {
                 double cost=s.cost+seconds;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
                 String nextCell=e.getString(2);if(allowed!=null&&!allowed.contains(nextCell))continue;
                 Node next=load(nextCell).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");
-                best.put(id,cost);q.add(new State(next,id,way,s.node.id,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/160,lower.getOrDefault(next.cell,0L)/1000.0),s));
+                best.put(id,cost);q.add(new State(next,id,way,s.node.id,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/maxKph,lower.getOrDefault(next.cell,0L)/1000.0),s));
             }
         }throw new CoverageException("No connected route inside pilot limits");
     }
