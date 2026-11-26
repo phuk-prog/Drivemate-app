@@ -17,15 +17,9 @@ The signed v1.2 APK is issued under this **SHA-256 certificate fingerprint** (sa
 The reproducible **source** and **applicationId** are public; the private signing key must never be committed, logged or published as a GitHub Actions artifact.
 
 1. Store the v1.2 signing keystore securely and offline, with a separate password. Back it up. Every v1.3+ APK must use **that exact same keystore alias and certificate**, and a higher `versionCode`. Otherwise Android rejects the update.
-2. The GitHub workflow compiles/tests both a debug APK and an **unsigned release APK**. It intentionally does **not** upload a privately signed release automatically.
-3. Download the unsigned release artifact and use Android SDK Build Tools `apksigner` locally with the private keystore:
-   ```bash
-   export DRIVEMATE_SIGNING_PASSWORD='your-secret'
-   bash tools/sign-release.sh path/to/app-release-unsigned.apk \
-     /private/path/DriveMate-signing-keystore.p12 \
-     path/to/DriveMate-v1.3.apk
-   ```
-4. Install the signed APK on an Android phone already running the privately signed DriveMate v1.2. Confirm the phone offers **Update**, not a separate installation. Keep the private keystore outside the repository.
+2. The GitHub workflow compiles/tests debug and unsigned release intermediates only on isolated runners; neither is downloadable.
+3. Use the main-only verified signing workflow, which checks the owner certificate and uploads only the signed release APK with a one-hour deletion target. No ZIP password is needed; no permanent APK Release asset is published.
+4. Verify the SHA256 evidence and install the signed APK on a phone already running an owner-signed DriveMate. Confirm Android offers **Update**. Keep the private keystore outside the repository.
 
 The **debug** APKs produced by hosted GitHub runners are temporary test builds and may have inconsistent signing certificates across runs. They must not be relied upon for in-place updates. Only the specifically signed release APK can use the stable update path.
 
