@@ -5,7 +5,7 @@ import java.util.List;
 final class RouteMapPolicy {
     private RouteMapPolicy(){}
     static boolean useTomTomMap(String provider,boolean keyAvailable){return false;} // Vector display by default; raster remains an explicit preference or startup fallback.
-    static boolean useTomTomVector(String provider,boolean keyAvailable){return keyAvailable&&"TomTom".equals(provider);}
+    static boolean useTomTomVector(String provider,boolean keyAvailable){return false;} // DriveMate base only.
     static String description(String provider,boolean shared){
         return shared?"DriveMate shared road geometry":"DriveMate vector map · road alignment not verified";
     }

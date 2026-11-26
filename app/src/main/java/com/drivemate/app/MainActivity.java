@@ -270,7 +270,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean advanceSpeedVoice = true;
     private double freeDriveBearing=Double.NaN;
     private final FreeDriveRoadMatch freeRoadMatch=new FreeDriveRoadMatch();
-    private DriveMateProvider.RoadContext freeRoadContext;
+    private NativeRegionalRouter.RoadContext freeRoadContext;
     private long freeContextRequestedAt;
     private int freeContextGeneration;
     private boolean freeContextBusy;
@@ -452,7 +452,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private TilesOverlay trafficTiles;
     private TextToSpeech speech;
     private boolean speechReady;
-    private boolean trafficEnabled = true;
+    private boolean trafficEnabled = false;
+    private String incidentEnhancementKey="";
     private boolean followLocation = true;
     private boolean routing;
     private boolean active;
@@ -517,7 +518,8 @@ public final class MainActivity extends Activity implements LocationListener {
         closeZoom = settings.getBoolean("close_zoom", true);
         highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
-        trafficEnabled = false; // No independent live traffic feed.
+        incidentEnhancementKey=settings.getString("incident_enhancement_key","");
+        trafficEnabled=NativeEnhancementPolicy.enabled(settings.getBoolean("incident_enhancement_consent",false),incidentEnhancementKey);
         useLocalMap = true;
         vectorSavedState = savedInstanceState;
         startupMapView = MapStartupPolicy.initial(
@@ -564,6 +566,9 @@ public final class MainActivity extends Activity implements LocationListener {
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
         map = new MapView(this);
+        // Keep the legacy overlay/camera object offline and hidden; osmdroid's default
+        // tile source must not issue external map requests in the independent candidate.
+        map.setUseDataConnection(false);
         map.setMultiTouchControls(true);
         final float[] touchAnchor = new float[2];
         map.setOnTouchListener((v, event) -> {
@@ -583,7 +588,7 @@ public final class MainActivity extends Activity implements LocationListener {
         map.getController().setZoom(startupMapView.zoom);
         map.getController().setCenter(new GeoPoint(
                 startupMapView.center.lat, startupMapView.center.lon));
-        map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+        map.setVisibility(View.INVISIBLE);
         // Keep both map engines inside the SAME background-only host:
         // the visible TomTom raster map covers MapLibre until actual UK roads
         // (not merely an HTTP tile) are drawn. Control overlays remain on top.
@@ -603,15 +608,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             } else if (status == RoadDisplayHealth.State.FAILED
                                     && useLocalMap && !autoFallback) {
                                 vectorRoadsReady = false;
-                                if (!ownRouting() && !apiKey.isEmpty()) {
-                                    autoFallback = true;
-                                    updateMapVisibility();
-                                    if (route != null && !active) showRoute(route, true);
-                                    else if (currentLocation != null) centreOnLocation(true);
-                                    setStatus("DriveMate streets not rendering · TomTom map active");
-                                } else {
-                                    setStatus("Map roads unavailable · check map connection");
-                                }
+                                setStatus("DriveMate roads unavailable · check downloaded map coverage");
                             }
                         });
                 applyHighDetailPolicy();
@@ -1057,25 +1054,16 @@ public final class MainActivity extends Activity implements LocationListener {
         refreshHomePanel();
     }
 
-    private boolean matchingTomTomMap() {
-        return RouteMapPolicy.useTomTomMap(route == null ? null : route.provider, !apiKey.isEmpty());
-    }
+    private boolean matchingTomTomMap(){return false;}
 
     private boolean showingVector() {
         return !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null
                 && vectorRoadsReady;
     }
 
-    private void updateMapVisibility() {
-        boolean vector = showingVector();
-        // Keep the vector engine running *behind* the raster fallback until
-        // its own rendered-road query proves the UK streets are visible.
-        boolean vectorLoading = !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null;
-        if (vectorMap != null)
-            vectorMap.setVisible(!matchingTomTomMap() && (vectorLoading || ownRouting() || apiKey.isEmpty()));
-        if (map != null)
-            map.setVisibility((matchingTomTomMap() || (!ownRouting() && !vector)) && !apiKey.isEmpty()
-                    ? View.VISIBLE : View.INVISIBLE);
+    private void updateMapVisibility(){
+        if(vectorMap!=null)vectorMap.setVisible(true);
+        if(map!=null){map.setUseDataConnection(false);map.setVisibility(View.INVISIBLE);}
     }
 
     /**
@@ -1500,7 +1488,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
                 "Voice guidance · " + voiceModeName(),
                 "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
-                "Live traffic · not available independently",
+                "Optional area traffic reports · "+(trafficEnabled?"On":"Off"),
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 "Camera · " + cameraModeName(),
                 closeZoom ? "Junction detail zoom · On" : "Junction detail zoom · Off",
@@ -1541,7 +1529,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 2: selectVoiceMode(); break;
                         case 3: selectSpeechVolume(); break;
                         case 4:
-                            showError("Independent live traffic is not available.");
+                            configureIncidentEnhancement();
                             break;
                         case 5:
                             metricUnits = !metricUnits;
@@ -1886,9 +1874,7 @@ public final class MainActivity extends Activity implements LocationListener {
             vectorRoadsReady = false;
             vectorMap.setNightMode(night);
         }
-        if (map != null && !apiKey.isEmpty())
-            map.setTileSource(tileSource(night ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
-                    night ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
+        // Only DriveMate-owned style changes with theme.
         int panel = night || active ? DARK : Color.WHITE;
         int foreground = night || active ? Color.WHITE : Color.rgb(25, 48, 62);
         int subdued = night || active ? Color.rgb(191, 225, 236) : Color.rgb(55, 80, 96);
@@ -2080,46 +2066,35 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void showKeyDialog(){showOfflineRouting();}
 
-    private XYTileSource tileSource(String name, String prefix) {
-        final String key = Uri.encode(apiKey);
-        return new XYTileSource(name, 0, 20, 256, ".png",
-                new String[]{"https://api.tomtom.com/"}) {
-            @Override public String getTileURLString(long tileIndex) {
-                return "https://api.tomtom.com/" + prefix
-                        + MapTileIndex.getZoom(tileIndex) + "/"
-                        + MapTileIndex.getX(tileIndex) + "/"
-                        + MapTileIndex.getY(tileIndex) + ".png?key=" + key;
-            }
-        };
+    private XYTileSource tileSource(String name,String prefix){
+        throw new IllegalStateException("External base map disabled");
     }
 
-    private void configureTiles() {
-        if (apiKey.isEmpty()) return;
-        map.setTileSource(tileSource(
-                nightDisplay ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
-                nightDisplay ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
-        if (vectorMap != null) vectorMap.setTomTomKey(apiKey);
-        updateMapVisibility();
-        configureTrafficTiles();
-        map.invalidate();
-    }
+    private void configureTiles(){updateMapVisibility();}
 
-    private void configureTrafficTiles() {
-        if (trafficTiles != null) {
-            map.getOverlays().remove(trafficTiles);
-            trafficTiles = null;
-        }
-        if (trafficEnabled && !apiKey.isEmpty()) {
-            trafficTiles = new TilesOverlay(
-                    new MapTileProviderBasic(this, tileSource("DriveMate-TomTom-Traffic",
-                            "traffic/map/4/tile/flow/relative0/")), this);
-            trafficTiles.setLoadingBackgroundColor(Color.TRANSPARENT);
-            trafficTiles.setLoadingLineColor(Color.TRANSPARENT);
-            map.getOverlays().add(0, trafficTiles);
-        }
-        if (vectorMap != null) vectorMap.setTraffic(trafficEnabled);
+    private void configureTrafficTiles(){
+        if(trafficTiles!=null){map.getOverlays().remove(trafficTiles);trafficTiles=null;}
+        if(vectorMap!=null)vectorMap.setTraffic(trafficEnabled);
         if(!trafficEnabled)clearLiveIncidents();
-        map.invalidate();
+    }
+    private void configureIncidentEnhancement(){
+        if(active||routing){showError("Stop safely before changing optional traffic settings.");return;}
+        EditText input=new EditText(this);input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setHint("Optional traffic API key");input.setText(incidentEnhancementKey);
+        new AlertDialog.Builder(this).setTitle("Optional TomTom area traffic reports")
+            .setMessage("Off by default. Enable only if your key and licence allow incident data on DriveMate maps. When enabled, a nearby geographic bounding box is sent to TomTom over HTTPS. Reports are labelled area markers, never route instructions, road closures, speed limits or ETA changes. DriveMate routing and base map do not depend on this service.")
+            .setView(input).setPositiveButton("Enable area reports",(d,w)->{
+                String key=input.getText().toString().trim();
+                if(!NativeEnhancementPolicy.enabled(true,key)){showError("Enter a valid optional traffic key.");return;}
+                clearLiveIncidents();incidentEnhancementKey=key;trafficEnabled=true;
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("incident_enhancement_key",key).putBoolean("incident_enhancement_consent",true).apply();
+                configureTrafficTiles();
+            }).setNeutralButton("Disable",(d,w)->{
+                trafficEnabled=false;incidentEnhancementKey="";
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit().remove("incident_enhancement_key").putBoolean("incident_enhancement_consent",false).apply();
+                configureTrafficTiles();
+            }).setNegativeButton("Cancel",null).show();
     }
 
     private void ensureLocationPermission() {
@@ -2431,8 +2406,8 @@ public final class MainActivity extends Activity implements LocationListener {
         if(vectorMap!=null)vectorMap.setLiveIncidents(null,0);
     }
     private void updateLiveIncidents(Location fix){
-        if(!foreground||!active||route==null||!"TomTom".equals(route.provider)||!trafficEnabled
-                ||apiKey.isEmpty()||gpsLost||!showingVector()||!vectorMap.supportsLiveIncidents())return;
+        if(!foreground||!(freeDriving||active)||!NativeEnhancementPolicy.enabled(trafficEnabled,incidentEnhancementKey)
+                ||gpsLost||!showingVector()||!vectorMap.supportsLiveIncidents())return;
         if(!fix.hasAccuracy()||fix.getAccuracy()>50||incidentBusy)return;
         long now=SystemClock.elapsedRealtime();
         GeoMath.Point p=gpsPoint(fix);
@@ -2440,7 +2415,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 now-lastIncidentRequest<120000 && lastIncidentCentre!=null && GeoMath.distance(p,lastIncidentCentre)<1000))return;
         lastIncidentRequest=now;lastIncidentCentre=p;incidentBusy=true;
         final int generation=incidentGeneration;
-        final String key=apiKey;
+        final String key=incidentEnhancementKey;
         incidentWorker.execute(()->{
             List<LiveTrafficIncidents.Event> data;
             try{data=TomTomApi.liveIncidents(key,p);}catch(Exception ignored){data=null;}
@@ -2448,8 +2423,8 @@ public final class MainActivity extends Activity implements LocationListener {
             final long fetched=System.currentTimeMillis();
             runOnUiThread(()->{
                 incidentBusy=false;
-                if(generation!=incidentGeneration||!foreground||!active||route==null||!"TomTom".equals(route.provider)
-                    ||!trafficEnabled||!key.equals(apiKey)||vectorMap==null||!vectorMap.supportsLiveIncidents()||gpsLost)return;
+                if(generation!=incidentGeneration||!foreground||!(freeDriving||active)
+                    ||!NativeEnhancementPolicy.enabled(trafficEnabled,incidentEnhancementKey)||!key.equals(incidentEnhancementKey)||vectorMap==null||!vectorMap.supportsLiveIncidents()||gpsLost)return;
                 if(currentLocation==null||GeoMath.distance(p,gpsPoint(currentLocation))>2000)return;
                 if(result!=null)vectorMap.setLiveIncidents(result,fetched);
                 // On failure the last successful snapshot expires independently; never imply clear roads.
@@ -2464,25 +2439,24 @@ public final class MainActivity extends Activity implements LocationListener {
     }
     private void updateFreeRoadIntelligence(Location fix){
         GeoMath.Point point=gpsPoint(fix);
-        final String endpoint=ownEndpoint();
-        if(freeRoadContext!=null && (!endpoint.equals(freeContextEndpoint)||!freeRoadContext.freshAt(point))){
+        final String endpoint="native-regional";
+        if(freeRoadContext!=null && (!RouteMapPolicy.insideStockport(point)||!freeRoadContext.freshAt(point))){
             freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;
             if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
         }
-        if(endpoint.isEmpty()){freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;if(vectorMap!=null)vectorMap.setBrowseGeometry(null);}
         long now=SystemClock.elapsedRealtime();
-        if(freeRoadContext==null&&!freeContextBusy&&!endpoint.isEmpty()
+        if(freeRoadContext==null&&!freeContextBusy&&RouteMapPolicy.insideStockport(point)
                 &&(freeContextRequestedAt==0||now-freeContextRequestedAt>=15000)){
             freeContextBusy=true;freeContextRequestedAt=now;
             final int generation=freeContextGeneration;
             network.execute(()->{
-                DriveMateProvider.RoadContext result;
-                try{result=DriveMateProvider.roadContext(endpoint,point);}catch(Exception e){result=null;}
-                final DriveMateProvider.RoadContext context=result;
+                NativeRegionalRouter.RoadContext result;
+                try{result=new NativeRegionalRouter(this).roadContext(point);}catch(Exception e){result=null;}
+                final NativeRegionalRouter.RoadContext context=result;
                 runOnUiThread(()->{
                     if(generation!=freeContextGeneration||!freeDriving||active)return;
                     freeContextBusy=false;
-                    if(endpoint.equals(ownEndpoint())&&currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation))){
+                    if(currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation))){
                         freeRoadContext=context;freeContextEndpoint=endpoint;
                         if(vectorMap!=null&&followLocation)vectorMap.setBrowseGeometry(context.map);
                     }
@@ -2977,71 +2951,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** Parking information is requested only on demand and never guessed. */
-    private void findNearbyParking() {
-        if (ownRouting()) { showError("Independent parking search not configured yet."); return; }
-        if (destination == null || apiKey.isEmpty()) {
-            showError("Choose a destination and configure TomTom before finding parking.");
-            return;
-        }
-        if (currentLocation == null || !currentLocation.hasSpeed()
-                || currentLocation.getSpeed() > 1.2f
-                || System.currentTimeMillis() - currentLocation.getTime() > 7000) {
-            showError("Stop safely before finding or selecting parking.");
-            return;
-        }
-        final TomTomApi.Destination searchedFor = destination;
-        final String key = apiKey;
-        setStatus("Looking for map-listed parking near destination…");
-        network.execute(() -> {
-            try {
-                List<TomTomApi.Destination> results =
-                        TomTomApi.parkingNearby(key, searchedFor.point);
-                results.removeIf(item -> GeoMath.distance(
-                        item.point, searchedFor.point) > 1400);
-                results.sort((a, b) -> Double.compare(
-                        GeoMath.distance(a.point, searchedFor.point),
-                        GeoMath.distance(b.point, searchedFor.point)));
-                runOnUiThread(() -> {
-                    if (isFinishing() || destination == null
-                            || GeoMath.distance(destination.point, searchedFor.point) > 2)
-                        return;
-                    if (results.isEmpty()) {
-                        new AlertDialog.Builder(this).setTitle("Nearby parking")
-                                .setMessage("TomTom returned no verified nearby parking POIs. "
-                                        + "Parking availability and access are not guaranteed.")
-                                .setPositiveButton("OK", null).show();
-                        return;
-                    }
-                    String[] names = new String[results.size()];
-                    for (int i = 0; i < results.size(); i++) {
-                        TomTomApi.Destination item = results.get(i);
-                        names[i] = item.title + " · " + NavigationUnits.displayDistance(
-                                GeoMath.distance(item.point, searchedFor.point), metricUnits);
-                    }
-                    new AlertDialog.Builder(this)
-                            .setTitle("Map-listed parking · availability unknown")
-                            .setItems(names, (dialog, which) -> {
-                                TomTomApi.Destination chosen = results.get(which);
-                                new AlertDialog.Builder(this)
-                                        .setTitle("Preview route to " + chosen.title + "?")
-                                        .setMessage("This will replace your current destination. "
-                                                + "Parking capacity, pricing and vehicle access "
-                                                + "have not been verified. Follow signs.")
-                                        .setPositiveButton("Preview route", (d, w) ->
-                                                selectDestination(chosen))
-                                        .setNegativeButton("Keep destination", null).show();
-                            })
-                            .setNegativeButton("Cancel", null).show();
-                });
-            } catch (Exception error) {
-                runOnUiThread(() -> {
-                    if (!isFinishing() && destination != null
-                            && GeoMath.distance(destination.point, searchedFor.point) <= 2)
-                        showError("Nearby parking unavailable: " + error.getMessage());
-                });
-            }
-        });
-    }
+    private void findNearbyParking(){showError("Native parking search is not yet validated. No external search fallback.");}
 
     private void offerSaveParkedCar() {
         new AlertDialog.Builder(this).setTitle("Save where you parked?")

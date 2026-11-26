@@ -149,7 +149,7 @@ public final class VectorDriveMap {
                           String key, boolean showTraffic, RoadStatusListener roadListener) {
         this.activity = activity;
         this.tiles = tiles;
-        this.tomtomKey = key == null ? "" : key;
+        this.tomtomKey = ""; // External credentials can never choose the base map.
         this.trafficEnabled = showTraffic;
         this.roadListener = roadListener;
         MapLibre.getInstance(activity.getApplicationContext());
@@ -178,12 +178,8 @@ public final class VectorDriveMap {
     public boolean nightMode() { return nightMode; }
 
     public void setHighDetailEnabled(boolean enabled) {
-        highDetailEnabled = enabled;
-        if (!ready()) return;
-        org.maplibre.android.style.layers.Layer layer = map.getStyle() == null ? null
-                : map.getStyle().getLayer("dm-tomtom-high-detail");
-        if (layer != null) layer.setProperties(PropertyFactory.visibility(
-                enabled && !navigationDetail && !tomtomKey.isEmpty() ? "visible" : "none"));
+        // Detailed roads/buildings come from DriveMate regional geometry only.
+        highDetailEnabled=false;
     }
 
     /**
@@ -344,8 +340,8 @@ public final class VectorDriveMap {
     }
     public String routeAlignmentDiagnostic(){return lastAlignment;}
     String geometryDescription(){return sharedRouteMap!=null&&sharedRouteMap.checkedEdges==0?"DriveMate source-matched detailed browse map":providerStyle?"TomTom vector roads and routing (same provider; geometry not independently verified)":providerStyleFailed?"Independent vector fallback · road alignment not verified":RouteMapPolicy.description(routeProvider,hasSharedRouteMap());}
-    private boolean requestProviderStyle(){return sharedRouteMap==null&&!providerStyleFailed&&RouteMapPolicy.useTomTomVector(routeProvider,!tomtomKey.isEmpty());}
-    private String providerStyleUrl(){return "https://api.tomtom.com/style/1/style/20.3.4-6?key="+android.net.Uri.encode(tomtomKey)+"&map="+(nightMode?"basic_night":"basic_main")+"&poi=poi_main"+(trafficEnabled?"&traffic_flow="+(nightMode?"flow_relative0-dark":"flow_relative0"):"");}
+    private boolean requestProviderStyle(){return false;}
+    private String providerStyleUrl(){throw new IllegalStateException("External base styles prohibited");}
     boolean hasSharedRouteMap(){return sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0&&ready();}
     public void setBrowseGeometry(DmUnifiedGeometry context){
         if(pendingRoute!=null&&!pendingRoute.isEmpty())return;
@@ -376,12 +372,7 @@ public final class VectorDriveMap {
         }
     }
 
-    public void setTomTomKey(String key) {
-        String newKey = key == null ? "" : key;
-        if (newKey.equals(tomtomKey)) return;
-        tomtomKey = newKey;providerStyleFailed=false;setLiveIncidents(null,0);
-        if (map != null) loadStyle();
-    }
+    public void setTomTomKey(String key) { /* External keys never affect rendering. */ }
 
     private void loadStyle() {
         if (disposed || map == null) return;
@@ -396,9 +387,7 @@ public final class VectorDriveMap {
             String json = readAsset(activity, nightMode
                     ? "drivemate_vector_style_night.json"
                     : "drivemate_vector_style.json")
-                    .replace("__TILE_URL__", tiles.tilesUrl())
-                    .replace("__TOMTOM_STYLE__", nightMode ? "night" : "main")
-                    .replace("__TOMTOM_KEY__", android.net.Uri.encode(tomtomKey));
+                    .replace("__TILE_URL__", tiles.tilesUrl());
             // Use full-detail regional streets only after route identity proof. The main route overlay is still used.
             if(shared!=null){
                 JSONObject local=new JSONObject(readAsset(activity,nightMode?"dm_unified_night.json":"dm_unified_day.json"));
@@ -423,7 +412,7 @@ public final class VectorDriveMap {
             lastRenderedBearing = Double.NaN;
             lastRenderedTilt = Double.NaN;
             lastRenderedVehicleAngle = Double.NaN;
-            Style.Builder builder=remote?new Style.Builder().fromUri(providerStyleUrl()):new Style.Builder().fromJson(json);
+            Style.Builder builder=new Style.Builder().fromJson(json);
             if(remote)view.postDelayed(()->{if(!disposed&&generation==styleGeneration&&providerStylePending){providerStyleFailed=true;providerStylePending=false;loadStyle();}},18000);
             map.setStyle(builder, style -> {
                 if (disposed || generation!=styleGeneration) return;
@@ -475,10 +464,9 @@ public final class VectorDriveMap {
     }
     /** Optional display-only building detail. Never replaces a route or mixes provider road geometry. */
     void setBuildingContext(String endpoint,String source){
-        String ep=endpoint==null?"":endpoint,sha=source==null?"":source;
-        if(ep.equals(buildingEndpoint)&&sha.equals(buildingSourceSha))return;
-        buildingEndpoint=ep;buildingSourceSha=sha;buildingGeneration++;buildingBusy=false;
-        lastBuildingRequest=0;lastBuildingCenter=null;
+        // Regional buildings are read from the local DriveMate pack, not an external service.
+        if(buildingEndpoint.isEmpty()&&buildingSourceSha.isEmpty())return;
+        buildingEndpoint="";buildingSourceSha="";buildingGeneration++;buildingBusy=false;lastBuildingCenter=null;lastBuildingRequest=0;
         if(ready()&&detailBuildingSource!=null)detailBuildingSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
     }
     private void installDetailBuildings(Style style,boolean allowed){
@@ -514,10 +502,7 @@ public final class VectorDriveMap {
             FeatureCollection found=null;
             try{
                 if(regional)found=MappedRegionalBuildings.load(activity.getApplicationContext(),center);
-                else if(hosted){
-                    DriveMateProvider.RoadContext context=DriveMateProvider.roadContext(endpoint,center);
-                    if(sha.equals(context.sourceSha)&&context.freshAt(center))found=MappedRegionalBuildings.onlyBuildings(context.map.areas);
-                }
+                // No hosted building service or provider fallback.
             }catch(Exception failure){Log.w(LOG_TAG,"Detailed building context unavailable");}
             final FeatureCollection result=found;
             view.post(()->{
@@ -722,7 +707,7 @@ public final class VectorDriveMap {
         style.addLayer(notice);
     }
 
-    boolean supportsLiveIncidents(){return ready()&&providerStyle&&trafficEnabled;}
+    boolean supportsLiveIncidents(){return ready()&&trafficEnabled;}
     void setLiveIncidents(List<LiveTrafficIncidents.Event> events,long fetchedAt){
         areaIncidents=events==null?java.util.Collections.emptyList():new ArrayList<>(events);
         areaIncidentFetchedAt=fetchedAt;refreshLiveIncidents(true);
@@ -758,11 +743,9 @@ public final class VectorDriveMap {
             if(!event.present(now)||event.points.isEmpty())continue;
             GeoMath.Point first=event.points.get(0);
             Feature marker=Feature.fromGeometry(Point.fromLngLat(first.lon,first.lat));
-            marker.addStringProperty("label","TomTom: "+event.label);points.add(marker);
-            if(event.points.size()>1){
-                ArrayList<Point> geometry=new ArrayList<>();for(GeoMath.Point p:event.points)geometry.add(Point.fromLngLat(p.lon,p.lat));
-                lines.add(Feature.fromGeometry(LineString.fromLngLats(geometry)));
-            }
+            marker.addStringProperty("label","TomTom area report: "+event.label);points.add(marker);
+            // Never draw provider geometry as a DriveMate road closure or route section.
+            // Area markers are informational only; no matching direction/edge proof.
         }
         incidentLineSource.setGeoJson(FeatureCollection.fromFeatures(lines.toArray(new Feature[0])));
         incidentPointSource.setGeoJson(FeatureCollection.fromFeatures(points.toArray(new Feature[0])));

@@ -31,6 +31,32 @@ final class NativeRegionalRouter {
         route.sharedGeometry=region.geometry(path);
         return route;
     }
+    static final class RoadContext {
+        final List<JSONArray> ways;final double[] bounds;final DmUnifiedGeometry map;final long created=System.currentTimeMillis();
+        RoadContext(List<JSONArray> ways,double[] bounds,DmUnifiedGeometry map){this.ways=ways;this.bounds=bounds;this.map=map;}
+        boolean freshAt(GeoMath.Point p){
+            long age=System.currentTimeMillis()-created;
+            return age>=0&&age<=120000&&p!=null&&p.lon>bounds[0]+.0007&&p.lon<bounds[2]-.0007&&p.lat>bounds[1]+.0005&&p.lat<bounds[3]-.0005;
+        }
+    }
+    RoadContext roadContext(GeoMath.Point p)throws Exception{
+        if(!RouteMapPolicy.insideStockport(p))throw new IOException("No downloaded regional context");
+        double[] regionBounds=RouteMapPolicy.stockportBounds();
+        double[] bounds={Math.max(regionBounds[0],p.lon-.004),Math.max(regionBounds[1],p.lat-.003),Math.min(regionBounds[2],p.lon+.004),Math.min(regionBounds[3],p.lat+.003)};
+        DmUnifiedRegion region=new DmUnifiedRegion(app,true);
+        List<JSONArray> features=region.engine.boundedFeatures(region.engine.keys(),bounds,Collections.emptySet(),false,6000,100000);
+        DmUnifiedGeometry geometry=DmUnifiedGeometry.regional(features,Collections.emptyList(),Collections.emptyList(),bounds);
+        List<JSONArray> ways=new ArrayList<>();
+        // Existing conservative matcher uses E7 coordinates. Convert exactly from E6,
+        // retaining original way and node IDs; no coordinate interpolation.
+        for(JSONArray row:features){
+            JSONObject tags=row.getJSONObject(1);if(!tags.has("highway"))continue;
+            JSONArray coords=row.getJSONArray(2),e7=new JSONArray();
+            for(int i=0;i<coords.length();i++){JSONArray c=coords.getJSONArray(i);e7.put(new JSONArray().put(c.getLong(0)*10).put(c.getLong(1)*10));}
+            ways.add(new JSONArray().put(row.getLong(0)).put(tags).put(e7).put(row.getJSONArray(3)));
+        }
+        return new RoadContext(Collections.unmodifiableList(ways),bounds,geometry);
+    }
     List<TomTomApi.Destination> search(String query,GeoMath.Point near)throws Exception{
         String q=query==null?"":query.trim();if(q.length()<2||q.length()>100)return Collections.emptyList();
         DmUnifiedRegion region=new DmUnifiedRegion(app,true);

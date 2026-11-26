@@ -77,7 +77,7 @@ final class FreeDriveRoadMatch {
             ||GeoMath.distance(boundary,point(nextCoords,forward?0:nextCoords.length()-1))>.2)return null;
         if((name.isEmpty()||!name.equals(next.optString("name")))&&(ref.isEmpty()||!ref.equals(next.optString("ref"))))return null;
         if(next.has("access:conditional")||next.has("oneway:conditional")||!directionAllowed(next,forward))return null;
-        int limit=DriveMateProvider.explicitLimit(next);
+        int limit=MappedSpeedLimits.explicitLimit(next);
         if(limit<=0||limit==current.kmh)return null;
         return new Upcoming(node,limit,distance);
     }
@@ -115,7 +115,7 @@ final class FreeDriveRoadMatch {
         // Do not accept a farther same-way segment simply because its heading fits.
         if(distances.get(chosen)<closest-2)return null;
         for(Map.Entry<Long,Double> other:distances.entrySet())if(other.getKey()!=chosen&&other.getValue()<=closest+accuracy+5)return null;
-        int limit=DriveMateProvider.explicitLimit(chosenTags);
+        int limit=MappedSpeedLimits.explicitLimit(chosenTags);
         if(limit<=0||chosenTags.has("access:conditional")||chosenTags.has("oneway:conditional"))return null;
         return new Match(chosen,limit,chosenTags.optString("name",""),chosenSegment,chosenForward);
     }

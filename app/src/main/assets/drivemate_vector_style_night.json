@@ -23,24 +23,6 @@
         61.13564
       ],
       "attribution": "© OpenStreetMap contributors (ODbL 1.0)"
-    },
-    "tomtom-traffic": {
-      "type": "raster",
-      "tiles": [
-        "https://api.tomtom.com/traffic/map/4/tile/flow/relative0/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"
-      ],
-      "tileSize": 256,
-      "maxzoom": 19
-    },
-    "tomtom-high-detail": {
-      "type": "raster",
-      "tiles": [
-        "https://api.tomtom.com/map/1/tile/basic/__TOMTOM_STYLE__/{z}/{x}/{y}.png?key=__TOMTOM_KEY__"
-      ],
-      "tileSize": 256,
-      "minzoom": 16,
-      "maxzoom": 19,
-      "attribution": "© TomTom (online high-detail tiles)"
     }
   },
   "layers": [
@@ -4052,44 +4034,6 @@
           ]
         ]
       ]
-    },
-    {
-      "id": "dm-tomtom-high-detail",
-      "type": "raster",
-      "source": "tomtom-high-detail",
-      "minzoom": 16.2,
-      "layout": {
-        "visibility": "none"
-      },
-      "paint": {
-        "raster-opacity": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          16.2,
-          0,
-          16.85,
-          0.96,
-          19,
-          0.96
-        ],
-        "raster-fade-duration": 180
-      }
-    },
-    {
-      "id": "tomtom-traffic-flow",
-      "type": "raster",
-      "source": "tomtom-traffic",
-      "layout": {
-        "visibility": "none"
-      },
-      "paint": {
-        "raster-opacity": 0.57
-      }
     }
   ]
 }

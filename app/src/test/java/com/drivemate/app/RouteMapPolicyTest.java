@@ -9,6 +9,9 @@ public class RouteMapPolicyTest {
         assertFalse(RouteMapPolicy.useTomTomMap("DriveMate",true));
         assertFalse(RouteMapPolicy.useTomTomMap("DriveMate local preview",true));
         assertFalse(RouteMapPolicy.useTomTomMap(null,true));
+        assertFalse(RouteMapPolicy.useTomTomVector("TomTom",true));
+        assertFalse(RouteMapPolicy.useTomTomVector("DriveMate local preview",true));
+        assertFalse(RouteMapPolicy.useTomTomVector(null,true));
     }
     @Test public void exactGeometryRejectsMissingBendsAndDifferentRoad(){
         GeoMath.Point a=new GeoMath.Point(53.4,-2.16),b=new GeoMath.Point(53.40001,-2.16002),c=new GeoMath.Point(53.401,-2.161);

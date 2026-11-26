@@ -181,19 +181,7 @@ public final class DriveMateProvider {
         RouteIntelligence.LaneSection s=new RouteIntelligence.LaneSection(Math.max(0,along-100),along+2,lanes);return s.trusted()?s:null;
     }
     /** Only explicit symmetric numeric limits, no directional/conditional/variable guesses. */
-    static int explicitLimit(JSONObject tags){
-        if(tags==null)return 0;
-        Iterator<String> keys=tags.keys();
-        while(keys.hasNext()){
-            String k=keys.next();
-            if(k.startsWith("maxspeed:") && !k.equals("maxspeed:type") && !k.equals("maxspeed:source"))return 0;
-        }
-        String raw=tags.optString("maxspeed","").trim().toLowerCase(Locale.UK);
-        if(!raw.matches("[0-9]{1,3}(?:\\s*(?:mph|km/h|kmh))?"))return 0;
-        try{boolean mph=raw.endsWith("mph");int v=Integer.parseInt(raw.replaceAll("[^0-9]",""));
-            int kmh=mph?(int)Math.round(v*1.609344):v;return kmh>=5&&kmh<=140?kmh:0;
-        }catch(NumberFormatException e){return 0;}
-    }
+    static int explicitLimit(JSONObject tags){return MappedSpeedLimits.explicitLimit(tags);}
     static List<RouteIntelligence.SpeedSection> verifiedSpeedSections(JSONObject trace,List<GeoMath.Point> route,Map<Long,JSONObject> tags)throws Exception{
         List<RouteIntelligence.SpeedSection> result=new ArrayList<>();List<GeoMath.Point> matched=decode(trace.getString("shape"));
         if(matched.size()!=route.size())return result;for(int i=0;i<route.size();i++)if(GeoMath.distance(route.get(i),matched.get(i))>1.5)return result;

@@ -52,7 +52,7 @@ final class NativeManeuvers {
     static List<RouteIntelligence.SpeedSection> limits(List<GeoMath.Point> p,List<Long> ways,Map<Long,JSONObject> tags)throws IOException{
         validate(p,ways,tags);double[] d=offsets(p);List<RouteIntelligence.SpeedSection> out=new ArrayList<>();
         for(int i=0;i<ways.size();i++){
-            int kmh=DriveMateProvider.explicitLimit(tags.get(ways.get(i)));
+            int kmh=MappedSpeedLimits.explicitLimit(tags.get(ways.get(i)));
             if(kmh<=0)continue;
             if(!out.isEmpty()){RouteIntelligence.SpeedSection last=out.get(out.size()-1);
                 if(last.kmh==kmh&&Math.abs(last.end-d[i])<.01){out.set(out.size()-1,new RouteIntelligence.SpeedSection(last.start,d[i+1],kmh));continue;}}
