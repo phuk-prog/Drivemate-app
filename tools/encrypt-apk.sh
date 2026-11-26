@@ -6,8 +6,8 @@ umask 077
 if [[ $# -ne 2 || ! -f "$1" || "$1" != *.apk || "$2" != *.zip ]]; then
   echo 'Usage: encrypt-apk.sh INPUT.apk OUTPUT.zip' >&2; exit 2
 fi
-if [[ -z "${DRIVEMATE_ZIP_PASSWORD:-}" || ${#DRIVEMATE_ZIP_PASSWORD} -lt 16 ]]; then
-  echo 'Set DRIVEMATE_ZIP_PASSWORD (at least 16 characters).' >&2; exit 1
+if [[ -z "${DRIVEMATE_ZIP_PASSWORD:-}" || ${#DRIVEMATE_ZIP_PASSWORD} -lt 11 ]]; then
+  echo 'Set DRIVEMATE_ZIP_PASSWORD (at least 11 characters).' >&2; exit 1
 fi
 command -v 7z >/dev/null
 apk="$(realpath "$1")"

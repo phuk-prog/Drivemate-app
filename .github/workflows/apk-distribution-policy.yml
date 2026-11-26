@@ -19,7 +19,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           printf 'non-installable test fixture\n' > "$tmp/test.apk"
-          export DRIVEMATE_ZIP_PASSWORD='fixture-only-not-a-secret-2026'
+          export DRIVEMATE_ZIP_PASSWORD='fixture-123'
           bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/test.zip"
           if 7z t -pwrong-password "$tmp/test.zip" >/dev/null 2>&1; then
             echo 'Archive unexpectedly accepted wrong password' >&2; exit 1
@@ -30,3 +30,7 @@ jobs:
             echo 'Missing password unexpectedly accepted' >&2; exit 1
           fi
           test ! -e "$tmp/unprotected.zip"
+          if DRIVEMATE_ZIP_PASSWORD='0123456789' bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/too-short.zip"; then
+            echo 'Ten-character password unexpectedly accepted' >&2; exit 1
+          fi
+          test ! -e "$tmp/too-short.zip"
