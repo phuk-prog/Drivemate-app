@@ -96,15 +96,6 @@ jobs:
             exit 1
           fi
 
-      - name: Upload privately signed installable APK
-        if: github.event.repository.private == true
-        uses: actions/upload-artifact@v4
-        with:
-          name: DriveMate-1.7.0-rc1-all11-privately-signed-APK
-          path: app/build/outputs/apk/release/DriveMate-1.7.0-rc1-signed.apk
-          if-no-files-found: error
-          retention-days: 30
-
       - name: Remove transient signing key
         if: always()
         shell: bash

@@ -57,6 +57,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: DriveMate-ui-smoke
-          path: ui-smoke/
+          path: |
+            ui-smoke/
+            !**/*.apk
+            !**/*.aab
+            !**/*.apks
+            !**/*.xapk
+            !**/*.apkm
+            !**/*.zip
           if-no-files-found: warn
           retention-days: 14
