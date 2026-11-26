@@ -20,3 +20,5 @@ Building a signed APK does **not** authorise merging to `main`, creating a GitHu
 The current combined all-11 release candidate is built from `dev/all-approved-stage3-arrival-20261123`, version `1.7.0-rc1`, versionCode `100700`, stable Android application ID `com.drivemate.android`. It can update the installed stable app **if** the certificate verification passes; unlike the separate debug variants, it does not install alongside 1.6.1.
 
 Always make clear that installing a release-candidate signed update replaces the currently installed application package; users who wish to preserve 1.6.1 should keep it installed and test the isolated debug variant first.
+
+Official APK delivery is a password-protected AES-256 ZIP using DRIVEMATE_ZIP_PASSWORD in the protected drivemate-release environment. Do not upload raw APKs publicly. No separate private repository or activation required. See PRIVATE-DISTRIBUTION.md.

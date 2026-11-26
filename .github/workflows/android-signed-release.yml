@@ -19,7 +19,8 @@ concurrency:
 
 jobs:
   signed-apk:
-    if: github.event.repository.private == true && (github.ref == 'refs/heads/main')
+    if: github.ref == 'refs/heads/main'
+    environment: drivemate-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -140,12 +141,16 @@ jobs:
           echo "DRIVEMATE_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Signed APK: DriveMate-$VERSION.apk"
 
-      - name: Upload privately signed installable APK
-        if: github.event.repository.private == true
+      - name: Encrypt verified signed APK
+        env:
+          DRIVEMATE_ZIP_PASSWORD: ${{ secrets.DRIVEMATE_ZIP_PASSWORD }}
+        run: |
+          bash tools/encrypt-apk.sh "app/build/outputs/apk/release/DriveMate-$DRIVEMATE_VERSION.apk" "release-output/DriveMate-$DRIVEMATE_VERSION-signed.zip"
+      - name: Upload encrypted signed APK ZIP only
         uses: actions/upload-artifact@v4
         with:
-          name: DriveMate-${{ env.DRIVEMATE_VERSION }}-signed-APK
-          path: app/build/outputs/apk/release/DriveMate-${{ env.DRIVEMATE_VERSION }}.apk
+          name: DriveMate-${{ env.DRIVEMATE_VERSION }}-password-protected
+          path: release-output/DriveMate-${{ env.DRIVEMATE_VERSION }}-signed.zip
           if-no-files-found: error
           retention-days: 30
 
