@@ -23,7 +23,7 @@ public class DmTileEngineOverlayTest{
     private static final DmTileEngine.Source FIXTURE=name->new ByteArrayInputStream(resource(name));
 
     @Test public void hierarchyMatchesFullSearchAndPythonEngine()throws Exception{
-        DmTileEngine e=engine(FIXTURE);assertTrue(e.hasOverlay());
+        DmTileEngine e=engine(FIXTURE);assertTrue(e.hasOverlay());assertTrue("fixture has level-2 blocks",e.hasLevel2());
         JSONArray expected=new JSONArray(new String(resource("expected.json"),StandardCharsets.UTF_8));
         int checked=0;
         for(int i=0;i<expected.length();i++){
@@ -42,6 +42,23 @@ public class DmTileEngineOverlayTest{
             checked++;
         }
         assertTrue(checked>400);
+    }
+    @Test public void offlineBlockNotFullyDownloadedFallsBackToLevelOne()throws Exception{
+        DmTileEngine e=engine(FIXTURE);
+        GeoMath.Point s=new GeoMath.Point(51.001,-2.199),t=new GeoMath.Point(51.148,-2.052);
+        List<String> keys=new ArrayList<>(e.keys());
+        for(String missing:keys){
+            if(missing.equals(DmTileEngine.key(s.lat,s.lon))||missing.equals(DmTileEngine.key(t.lat,t.lon)))continue;
+            Set<String> allowed=new HashSet<>(keys);allowed.remove(missing);
+            DmTileEngine.Route flat,over;
+            try{flat=e.routeFlat(s,t,allowed);}catch(DmTileEngine.CoverageException none){
+                try{e.routeOverlay(s,t,allowed);fail("hierarchy routed where full search could not");}catch(DmTileEngine.CoverageException expected){}
+                continue;
+            }
+            over=e.routeOverlay(s,t,allowed);
+            assertEquals(flat.seconds,over.seconds,0.015);
+            assertTrue("route stays in downloaded cells",allowed.containsAll(over.cells));
+        }
     }
     @Test public void corruptHierarchyPieceRejected()throws Exception{
         DmTileEngine e=engine(name->{byte[] raw=resource(name);if(name.endsWith(".dmo.gz"))raw[raw.length/2]^=1;return new ByteArrayInputStream(raw);});

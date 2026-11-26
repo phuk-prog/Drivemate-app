@@ -19,6 +19,10 @@ public final class DmTileEngine {
     private final JSONObject overlayCells;
     private final LinkedHashMap<String,Overlay> overlayCache=new LinkedHashMap<>(16,.75f,true);
     private static final int MAX_OVERLAYS=512;
+    /** Level 2: blocks of block x block cells crossed in one exact jump ("overlay2"), or null. */
+    private final JSONObject level2Blocks;private final int block;
+    private final Map<String,Set<String>> blockCells=new HashMap<>();
+    private final LinkedHashMap<String,Overlay> level2Cache=new LinkedHashMap<>(16,.75f,true);
     /** Fastest edge in the catalog; A* heuristic divides by it so it stays a true lower bound. */
     private final double maxKph;
     private final Source source;
@@ -42,24 +46,36 @@ public final class DmTileEngine {
         JSONObject ov=m.optJSONObject("overlay");
         if(ov!=null&&!"drivemate-overlay-v1".equals(ov.optString("format")))throw new IOException("Unsupported road hierarchy");
         overlayCells=ov==null?null:ov.getJSONObject("cells");
+        JSONObject ov2=ov==null?null:m.optJSONObject("overlay2");
+        if(ov2!=null&&(!"drivemate-overlay2-v1".equals(ov2.optString("format"))||ov2.getInt("block_cells")<1))throw new IOException("Unsupported road hierarchy level 2");
+        level2Blocks=ov2==null?null:ov2.getJSONObject("blocks");block=ov2==null?0:ov2.getInt("block_cells");
+        if(ov2!=null)for(String k:keys())blockCells.computeIfAbsent(blockKey(k),x->new HashSet<>()).add(k);
     }
     public boolean hasOverlay(){return overlayCells!=null;}
+    public boolean hasLevel2(){return level2Blocks!=null;}
+    /** Same as tools/dm_overlay.block_key (floor division, so negative longitudes group correctly). */
+    String blockKey(String cell){String[] p=cell.split("_");return Math.floorDiv(Integer.parseInt(p[0]),block)+"_"+Math.floorDiv(Integer.parseInt(p[1]),block);}
     /** Precomputed exact in-cell costs from each entering road to each leaving road. */
     static final class Overlay{
         final long[][] entries,exits;final int[][] cost;final Map<Long,Integer> row=new HashMap<>();final String[] exitCell;
+        /** Level 2 only: the cell each entering road arrives in. */
+        final String[] entryCell;
         Overlay(JSONObject d)throws JSONException{
             JSONArray en=d.getJSONArray("entries"),ex=d.getJSONArray("exits"),c=d.getJSONArray("cost");
-            entries=new long[en.length()][];for(int i=0;i<en.length();i++){JSONArray a=en.getJSONArray(i);entries[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(3),a.getLong(4),a.getLong(5)};row.put(entries[i][0],i);}
+            entries=new long[en.length()][];entryCell=new String[en.length()];
+            for(int i=0;i<en.length();i++){JSONArray a=en.getJSONArray(i);entries[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(3),a.getLong(4),a.getLong(5)};if(a.length()>6)entryCell[i]=a.getString(6);row.put(entries[i][0],i);}
             exits=new long[ex.length()][];exitCell=new String[ex.length()];
             for(int i=0;i<ex.length();i++){JSONArray a=ex.getJSONArray(i);exits[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(4),a.getLong(5),a.getLong(6)};exitCell[i]=a.getString(3);}
             if(c.length()!=entries.length)throw new JSONException("Overlay cost rows");
             cost=new int[c.length()][];for(int i=0;i<c.length();i++){JSONArray r=c.getJSONArray(i);if(r.length()!=exits.length)throw new JSONException("Overlay cost columns");cost[i]=new int[r.length()];for(int j=0;j<r.length();j++)cost[i][j]=r.getInt(j);}
         }
     }
-    private Overlay overlay(String k)throws Exception{
+    private Overlay overlay(String k)throws Exception{return piece(overlayCells,k,".dmo.gz",overlayCache);}
+    private Overlay level2(String b)throws Exception{return piece(level2Blocks,b,".dm2.gz",level2Cache);}
+    private Overlay piece(JSONObject cells,String k,String suffix,LinkedHashMap<String,Overlay> overlayCache)throws Exception{
         Overlay old=overlayCache.get(k);if(old!=null)return old;
-        JSONObject meta=overlayCells.optJSONObject(k);if(meta==null)throw new CoverageException("Road hierarchy missing cell");
-        if(!k.matches("-?[0-9]+_-?[0-9]+")||!(k+".dmo.gz").equals(meta.getString("name")))throw new IOException("Unsafe overlay name");
+        JSONObject meta=cells.optJSONObject(k);if(meta==null)throw new CoverageException("Road hierarchy missing cell");
+        if(!k.matches("-?[0-9]+_-?[0-9]+")||!(k+suffix).equals(meta.getString("name")))throw new IOException("Unsafe overlay name");
         int bytes=meta.getInt("bytes");if(bytes<=0||bytes>8_000_000)throw new IOException("Oversized overlay");
         byte[] raw=read(source.open(meta.getString("name")),bytes);
         if(raw.length!=bytes||!sha(raw).equals(meta.getString("sha256")))throw new IOException("Overlay checksum mismatch");
@@ -155,16 +171,41 @@ public final class DmTileEngine {
         HState(long e,String c,long n,long p,long w,double g,double f){edge=e;cell=c;node=n;prev=p;way=w;cost=g;priority=f;}
     }
     /** How the search reached an edge: road by road from a node, or by jumping across a cell. */
-    private static final class Step{final long parent;final boolean jump;final String cell;final long fromNode;Step(long p,boolean j,String c,long n){parent=p;jump=j;cell=c;fromNode=n;}}
+    private static final class Step{final long parent;final boolean jump,block;final String cell;final long fromNode;
+        /** cell: source cell for a road step, jumped cell for a level-1 jump, block key for a level-2 jump. */
+        Step(long p,boolean j,String c,long n){this(p,j,false,c,n);}
+        Step(long p,boolean j,boolean b,String c,long n){parent=p;jump=j;block=b;cell=c;fromNode=n;}}
+    /** Level-2 block used to cross this cell, or null to use level 1: never the start
+     *  or end block, and offline only when every cell of the block is available. */
+    private String jumpsBlock(String cell,Set<String> hot,Set<String> allowed){
+        if(level2Blocks==null)return null;String b=blockKey(cell);
+        if(hot.contains(b))return null;
+        if(allowed!=null&&!allowed.containsAll(blockCells.get(b)))return null;
+        return b;
+    }
     Route routeOverlay(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed)throws Exception{
         long began=now();Node a=nearest(start,allowed,true),b=nearest(finish,allowed,false);
         if(a.id==b.id)throw new IOException("Same snapped junction");
         Set<String> detail=new HashSet<>(Arrays.asList(a.cell,b.cell));
+        Set<String> hot=level2Blocks==null?Collections.emptySet():new HashSet<>(Arrays.asList(blockKey(a.cell),blockKey(b.cell)));
         PriorityQueue<HState> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));
         Map<Long,Double> best=new HashMap<>();Map<Long,Step> steps=new HashMap<>();
         q.add(new HState(0,a.cell,a.id,0,0,0,heuristic(a.point,b.point)));best.put(0L,0.0);int count=0;
         while(!q.isEmpty()&&count<MAX_NODES&&best.size()<180000&&q.size()<160000&&now()-began<25000){
             HState s=q.poll();if(s.cost>best.getOrDefault(s.edge,Double.POSITIVE_INFINITY)+1e-7)continue;
+            String blk=detail.contains(s.cell)?null:jumpsBlock(s.cell,hot,allowed);
+            if(blk!=null){// cross the whole block in one exact jump
+                Overlay o=level2(blk);Integer r=o.row.get(s.edge);if(r==null)throw new IOException("Road hierarchy missing block entry");count++;
+                int[] row=o.cost[r];
+                for(int j=0;j<row.length;j++){
+                    if(row[j]<0)continue;long[] x=o.exits[j];String dest=o.exitCell[j];
+                    if(allowed!=null&&!allowed.contains(dest))continue;
+                    double cost=s.cost+row[j]/1000.0;if(cost+1e-7>=best.getOrDefault(x[0],Double.POSITIVE_INFINITY))continue;
+                    best.put(x[0],cost);steps.put(x[0],new Step(s.edge,true,true,blk,0));
+                    q.add(new HState(x[0],dest,x[2],x[1],x[3],cost,cost+heuristic(new GeoMath.Point(x[4]/1e6,x[5]/1e6),b.point)));
+                }
+                continue;
+            }
             if(detail.contains(s.cell)){
                 Node n=load(s.cell).nodes.get(s.node);
                 if(n.id==b.id&&s.edge!=0)return unpack(s.edge,s.cost,steps,a,count,now()-began);
@@ -213,26 +254,56 @@ public final class DmTileEngine {
             }
         }return parent;
     }
-    /** Rebuild the full road-by-road route, expanding each cell jump into its roads. */
+    /** Dijkstra over level-1 jumps inside one block, from just after entering entryCell on entryEdge
+     *  (same as tools/dm_overlay.region_search). Returns, per reached road, {previous road} and the cell jumped. */
+    private Map<Long,Object[]> regionSearch(Set<String> cells,long entryEdge,String entryCell)throws Exception{
+        Map<Long,Long> best=new HashMap<>();Map<Long,Object[]> parent=new HashMap<>();
+        PriorityQueue<Object[]> q=new PriorityQueue<>(Comparator.comparingLong(v->(Long)v[0]));
+        best.put(entryEdge,0L);q.add(new Object[]{0L,entryEdge,entryCell});
+        while(!q.isEmpty()){
+            Object[] s=q.poll();long g=(Long)s[0],e=(Long)s[1];String cell=(String)s[2];if(g>best.get(e))continue;
+            Overlay o=overlay(cell);Integer r=o.row.get(e);if(r==null)throw new IOException("Road hierarchy missing entry");
+            int[] row=o.cost[r];
+            for(int j=0;j<row.length;j++){
+                if(row[j]<0)continue;long x=o.exits[j][0];long cost=g+row[j];
+                if(cost>=best.getOrDefault(x,Long.MAX_VALUE))continue;
+                best.put(x,cost);parent.put(x,new Object[]{e,cell});
+                if(cells.contains(o.exitCell[j]))q.add(new Object[]{cost,x,o.exitCell[j]});
+            }
+        }return parent;
+    }
+    /** Roads of one level-1 jump across cell, from entry road to exit road, as {edge, source node, index at source}. */
+    private List<long[]> cellRoads(String cell,long entry,long exit)throws Exception{
+        Overlay o=overlay(cell);Integer r=o.row.get(entry);if(r==null)throw new IOException("Road hierarchy missing entry");long[] en=o.entries[r];
+        Map<Long,long[]> parent=cellSearch(load(cell),cell,en[0],en[1],en[2],en[3]);List<long[]> hops=new ArrayList<>();
+        for(long e=exit;e!=en[0];){long[] pr=parent.get(e);if(pr==null)throw new IOException("Road hierarchy unpack failed");hops.add(new long[]{e,pr[2],pr[1]});e=pr[0];}
+        Collections.reverse(hops);return hops;
+    }
+    /** Rebuild the full road-by-road route, expanding each block jump into cell jumps and each cell jump into roads. */
     private Route unpack(long goalEdge,double seconds,Map<Long,Step> steps,Node start,int count,long elapsed)throws Exception{
         List<Long> chain=new ArrayList<>();for(long e=goalEdge;e!=0;e=steps.get(e).parent)chain.add(e);Collections.reverse(chain);
         List<GeoMath.Point> p=new ArrayList<>();List<Long> w=new ArrayList<>(),n=new ArrayList<>(),ids=new ArrayList<>();Set<String> cells=new HashSet<>();
         p.add(start.point);n.add(start.id);cells.add(start.cell);double metres=0;long prevEdge=0;
         for(long edge:chain){
-            Step st=steps.get(edge);List<long[]> hops=new ArrayList<>();// {edge, source node, index at source}
+            Step st=steps.get(edge);
+            List<long[]> hops=new ArrayList<>();List<String> hopCells=new ArrayList<>();// {edge, source node, index at source}, and the source's cell
             if(!st.jump){
                 Node from=findNode(st.fromNode,st.cell);int at=-1;
                 for(int i=0;i<from.edges.length();i++)if(from.edges.getJSONArray(i).getLong(0)==edge){at=i;break;}
                 if(at<0)throw new IOException("Broken route edge");
-                hops.add(new long[]{edge,from.id,at});
+                hops.add(new long[]{edge,from.id,at});hopCells.add(st.cell);
+            }else if(!st.block){
+                for(long[] h:cellRoads(st.cell,prevEdge,edge)){hops.add(h);hopCells.add(st.cell);}
             }else{
-                Overlay o=overlay(st.cell);long[] en=o.entries[o.row.get(prevEdge)];
-                Map<Long,long[]> parent=cellSearch(load(st.cell),st.cell,en[0],en[1],en[2],en[3]);
-                for(long e=edge;e!=en[0];){long[] pr=parent.get(e);if(pr==null)throw new IOException("Road hierarchy unpack failed");hops.add(new long[]{e,pr[2],pr[1]});e=pr[0];}
-                Collections.reverse(hops);
+                Overlay o=level2(st.cell);Integer r=o.row.get(prevEdge);if(r==null)throw new IOException("Road hierarchy missing block entry");
+                Map<Long,Object[]> parent=regionSearch(blockCells.get(st.cell),prevEdge,o.entryCell[r]);
+                List<Object[]> jumps=new ArrayList<>();// {cell, entry, exit}
+                for(long e=edge;e!=prevEdge;){Object[] pr=parent.get(e);if(pr==null)throw new IOException("Road hierarchy block unpack failed");jumps.add(new Object[]{pr[1],pr[0],e});e=(Long)pr[0];}
+                Collections.reverse(jumps);
+                for(Object[] j:jumps)for(long[] h:cellRoads((String)j[0],(Long)j[1],(Long)j[2])){hops.add(h);hopCells.add((String)j[0]);}
             }
-            for(long[] h:hops){
-                Node from=findNode(h[1],st.cell);JSONArray e=from.edges.getJSONArray((int)h[2]);
+            for(int hi=0;hi<hops.size();hi++){
+                long[] h=hops.get(hi);Node from=findNode(h[1],hopCells.get(hi));JSONArray e=from.edges.getJSONArray((int)h[2]);
                 Node to=load(e.getString(2)).nodes.get(e.getLong(1));if(to==null)throw new IOException("Broken cross-tile connection");
                 p.add(to.point);n.add(to.id);w.add(e.getLong(3));ids.add(h[0]);cells.add(to.cell);metres+=e.getLong(4)/1000.0;
             }

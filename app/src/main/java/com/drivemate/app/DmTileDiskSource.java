@@ -12,6 +12,14 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
     private final long budget;
     private final Set<String> protectedNames=new HashSet<>();
     private final DmTileEngine.Source upstream;
+    /** Level-2 block size in cells, 0 without level 2. */
+    private final int block;
+    /** Road hierarchy pieces a journey through cell k needs: its cell piece and its block piece. */
+    private List<String> hierarchyPieces(String k){
+        List<String> out=new ArrayList<>();if(byName.containsKey(k+".dmo.gz"))out.add(k+".dmo.gz");
+        if(block>0){String[] p=k.split("_");String b=Math.floorDiv(Integer.parseInt(p[0]),block)+"_"+Math.floorDiv(Integer.parseInt(p[1]),block)+".dm2.gz";if(byName.containsKey(b))out.add(b);}
+        return out;
+    }
     public DmTileDiskSource(File root,byte[] manifest,String hash,long budget,DmTileEngine.Source upstream)throws Exception{
         if(!hash.matches("[a-f0-9]{64}")||!DmTileEngine.sha(manifest).equals(hash)||budget<=0)throw new IOException("Invalid cache identity");
         folder=new File(root,hash);if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("Cannot create tile cache");
@@ -19,6 +27,8 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
         addCatalog(doc.getJSONObject("tiles"),".dmt.gz");
         // Road hierarchy pieces are cached and verified exactly like tiles.
         JSONObject overlay=doc.optJSONObject("overlay");if(overlay!=null)addCatalog(overlay.getJSONObject("cells"),".dmo.gz");
+        JSONObject overlay2=overlay==null?null:doc.optJSONObject("overlay2");
+        if(overlay2!=null){block=overlay2.getInt("block_cells");if(block<1)throw new IOException("Invalid tile catalog");addCatalog(overlay2.getJSONObject("blocks"),".dm2.gz");}else block=0;
         this.budget=budget;this.upstream=upstream;
         File pins=new File(folder,"journey-pins.json");if(pins.isFile()){
             JSONArray saved=new JSONArray(new String(DmTileEngine.read(new FileInputStream(pins),2_000_000),StandardCharsets.UTF_8));Set<String> cells=new HashSet<>();
@@ -36,7 +46,7 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
     public synchronized void protect(Set<String> cells)throws IOException{
         Set<String> next=new HashSet<>();long required=0;
         for(String k:cells){String name=k+".dmt.gz";JSONObject info=byName.get(name);if(info==null)throw new IOException("Coverage not in catalog");required+=info.optLong("bytes");next.add(name);
-            JSONObject hierarchy=byName.get(k+".dmo.gz");if(hierarchy!=null){required+=hierarchy.optLong("bytes");next.add(k+".dmo.gz");}}
+            for(String piece:hierarchyPieces(k))if(next.add(piece))required+=byName.get(piece).optLong("bytes");}
         if(required>budget)throw new IOException("Journey coverage exceeds cache budget");
         protectedNames.clear();protectedNames.addAll(next);
     }
@@ -78,7 +88,7 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
             protectedNames.addAll(prior);
             for(String k:new TreeSet<>(cells)){
                 try(InputStream in=open(k+".dmt.gz")){}
-                if(byName.containsKey(k+".dmo.gz"))try(InputStream in=open(k+".dmo.gz")){}
+                for(String piece:hierarchyPieces(k))try(InputStream in=open(piece)){}
             }
             protect(cells);
             android.util.AtomicFile pins=new android.util.AtomicFile(new File(folder,"journey-pins.json"));
@@ -98,15 +108,19 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
         if(overlay!=null&&(!"overlay.dmo".equals(overlay.getString("name"))||overlay.getLong("bytes")<=0))throw new IOException("Invalid road hierarchy archive");
         final URL overlayRoot=overlay==null?null:new URL(root,"overlay.dmo");
         final long overlayTotal=overlay==null?0:overlay.getLong("bytes");
+        JSONObject overlay2=overlay==null?null:doc.optJSONObject("overlay2");
+        if(overlay2!=null&&(!"overlay2.dmo".equals(overlay2.getString("name"))||overlay2.getLong("bytes")<=0))throw new IOException("Invalid road hierarchy archive");
+        final URL overlay2Root=overlay2==null?null:new URL(root,"overlay2.dmo");
+        final long overlay2Total=overlay2==null?0:overlay2.getLong("bytes");
         return name->{
-            boolean hierarchy=name.matches("-?[0-9]+_-?[0-9]+\\.dmo\\.gz");
-            if(!hierarchy&&!name.matches("-?[0-9]+_-?[0-9]+\\.dmt\\.gz"))throw new IOException("Invalid routing tile");
-            if(hierarchy&&overlay==null)throw new IOException("No road hierarchy in catalog");
-            JSONObject meta=(hierarchy?overlay.getJSONObject("cells"):tiles).getJSONObject(name.substring(0,name.length()-7));
-            long all=hierarchy?overlayTotal:total;
+            boolean hierarchy=name.matches("-?[0-9]+_-?[0-9]+\\.dmo\\.gz"),level2=name.matches("-?[0-9]+_-?[0-9]+\\.dm2\\.gz");
+            if(!hierarchy&&!level2&&!name.matches("-?[0-9]+_-?[0-9]+\\.dmt\\.gz"))throw new IOException("Invalid routing tile");
+            if(hierarchy&&overlay==null||level2&&overlay2==null)throw new IOException("No road hierarchy in catalog");
+            JSONObject meta=(level2?overlay2.getJSONObject("blocks"):hierarchy?overlay.getJSONObject("cells"):tiles).getJSONObject(name.substring(0,name.length()-7));
+            long all=level2?overlay2Total:hierarchy?overlayTotal:total;
             long offset=meta.getLong("offset");int len=meta.getInt("bytes");
             if(offset<0||len<=0||len>8000000||offset>all-len)throw new IOException("Invalid archive range");
-            URL url=hierarchy?overlayRoot:root;String range="bytes="+offset+"-"+(offset+len-1);
+            URL url=level2?overlay2Root:hierarchy?overlayRoot:root;String range="bytes="+offset+"-"+(offset+len-1);
             for(int i=0;i<6;i++){
                 if(!"https".equals(url.getProtocol())||!(url.getHost().equals("github.com")||url.getHost().endsWith(".githubusercontent.com")))throw new IOException("Unexpected map host");
                 HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(10000);c.setReadTimeout(15000);c.setRequestProperty("Range",range);c.setRequestProperty("Accept-Encoding","identity");
