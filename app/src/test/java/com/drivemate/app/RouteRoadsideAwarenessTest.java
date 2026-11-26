@@ -7,6 +7,8 @@ public class RouteRoadsideAwarenessTest {
         assertEquals("Mapped traffic lights",RouteRoadsideAwareness.label("traffic_signals","","",false));
         assertEquals("Mapped crossing",RouteRoadsideAwareness.label("crossing","","both",false));
         assertEquals("",RouteRoadsideAwareness.label("speed_camera","","",false));
+        assertEquals("Mapped speed camera",RouteRoadsideAwareness.label("speed_camera","","both",false));
+        assertEquals("",RouteRoadsideAwareness.label("speed_camera","","forward",false));
         assertEquals("",RouteRoadsideAwareness.label("traffic_signals","","forward",false));
         assertEquals("",RouteRoadsideAwareness.label("crossing","","",true));
     }
