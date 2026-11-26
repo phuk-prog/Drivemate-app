@@ -33,11 +33,11 @@ final class DmUnifiedRegion {
         return new double[]{w,s,e,n};
     }
     private static final double[] MARGINS={1,.65,.4,.2};
-    private static final class Context {
+    private static final class DisplayContext {
         final double[] bounds;final List<JSONArray> features;
-        Context(double[] b,List<JSONArray> f){bounds=b;features=f;}
+        DisplayContext(double[] b,List<JSONArray> f){bounds=b;features=f;}
     }
-    private Context context(List<GeoMath.Point> points,List<Long> ways)throws Exception{
+    private DisplayContext context(List<GeoMath.Point> points,List<Long> ways)throws Exception{
         Set<Long> required=new HashSet<>(ways);
         Exception last=null;
         // A dense neighbourhood must not make the complete preview unavailable.
@@ -48,7 +48,7 @@ final class DmUnifiedRegion {
             try{
                 List<JSONArray> rows=engine.boundedFeatures(engine.keys(),bounds,required,false,16000,160000);
                 android.util.Log.i("UnifiedRegion","Bounded regional context: "+rows.size()+" features, margin "+margin);
-                return new Context(bounds,rows);
+                return new DisplayContext(bounds,rows);
             }catch(DmTileEngine.CoverageException dense){
                 last=dense;
                 android.util.Log.w("UnifiedRegion","Regional context unavailable at margin "+margin+": "+dense.getMessage());
@@ -57,11 +57,11 @@ final class DmUnifiedRegion {
         throw new IOException("No verified regional context fits display bounds",last);
     }
     DmUnifiedGeometry geometry(DmTileEngine.Route route)throws Exception{
-        Context c=context(route.points,route.ways);
+        DisplayContext c=context(route.points,route.ways);
         return DmUnifiedGeometry.regional(c.features,route,c.bounds);
     }
     DmUnifiedGeometry geometry(List<GeoMath.Point> points,List<Long> ways)throws Exception{
-        Context c=context(points,ways);
+        DisplayContext c=context(points,ways);
         return DmUnifiedGeometry.regional(c.features,points,ways,c.bounds);
     }
     /** Only enable the regional live renderer if every actual route vertex and ordered way matches the same pinned OSM snapshot. */
