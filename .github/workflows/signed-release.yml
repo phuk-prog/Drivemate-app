@@ -104,7 +104,7 @@ jobs:
           script: bash tools/run_offline_routing_pilot.sh && bash tools/run_unified_zoom_test.sh && bash tools/run_drivemate_replay.sh
       - name: Upload shared road zoom evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Stockport-shared-geometry-zoom-evidence
           path: |
@@ -185,7 +185,7 @@ jobs:
           python3 tools/write_release_evidence.py --directory release-output
 
       - name: Upload non-installable release evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: DriveMate-${{ env.VERSION }}-release-evidence
           path: |
@@ -196,7 +196,7 @@ jobs:
           retention-days: 90
 
       - name: Upload verified signed APK (one-hour cleanup target)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: DriveMate-${{ env.VERSION }}-signed-apk-1h
           path: release-output/DriveMate-${{ env.VERSION }}-signed.apk
