@@ -50,6 +50,8 @@ final class FreeDriveRoadMatch {
             }
         }
         if(chosenTags==null)return null;
+        // Do not accept a farther same-way segment simply because its heading fits.
+        if(distances.get(chosen)<closest-2)return null;
         for(Map.Entry<Long,Double> other:distances.entrySet())if(other.getKey()!=chosen&&other.getValue()<=closest+accuracy+5)return null;
         int limit=DriveMateProvider.explicitLimit(chosenTags);
         if(limit<=0||chosenTags.has("access:conditional")||chosenTags.has("oneway:conditional"))return null;
