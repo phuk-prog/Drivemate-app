@@ -26,6 +26,10 @@ jobs:
         run: |
           ./gradlew --no-daemon :app:dependencies --write-locks > dependency-report.txt
           git diff -- app/gradle.lockfile > dependency-lock.diff
+          echo 'LOCKFILE-BEGIN'
+          cat app/gradle.lockfile
+          echo 'LOCKFILE-END'
+          sha256sum app/gradle.lockfile
           python3 tools/scan_dependencies.py app/gradle.lockfile
       - uses: actions/upload-artifact@v4
         if: always()

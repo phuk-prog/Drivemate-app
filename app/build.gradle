@@ -50,7 +50,7 @@ configurations.configureEach {
         resolutionStrategy.eachDependency { details ->
             def g = details.requested.group
             def n = details.requested.name
-            if (g == 'com.google.guava' && n == 'guava') details.useVersion('33.6.0-jre')
+            if (g == 'com.google.guava' && n == 'guava') details.useVersion('33.8.0-jre')
             if (g == 'com.google.protobuf' && n == 'protobuf-java') details.useVersion('3.25.9')
             if (g == 'commons-io' && n == 'commons-io') details.useVersion('2.21.0')
             if (g == 'io.netty' && n.startsWith('netty-') && details.requested.version?.startsWith('4.1.')) {
