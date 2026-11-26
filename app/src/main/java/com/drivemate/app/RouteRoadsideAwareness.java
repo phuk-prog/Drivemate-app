@@ -25,6 +25,7 @@ final class RouteRoadsideAwareness {
         // Do not turn an unknown-direction camera into a warning, nor claim a
         // mapped signal is operational. Exact node membership is also required.
         if(conditional||!(direction.isEmpty()||"both".equals(direction)))return "";
+        if("speed_camera".equals(highway)&&"both".equals(direction))return "Mapped speed camera";
         if("traffic_signals".equals(highway))return "Mapped traffic lights";
         if("crossing".equals(highway))return "Mapped crossing";
         if(Arrays.asList("bump","hump","table","cushion","rumble_strip","chicane").contains(calming))return "Mapped traffic calming";
