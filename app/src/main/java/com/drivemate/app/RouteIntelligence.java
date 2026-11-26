@@ -93,6 +93,12 @@ public final class RouteIntelligence {
                 case "JAM": return "Congestion";
                 case "ROAD_WORK": return "Roadworks";
                 case "ROAD_CLOSURE": return "Road closure";
+                case "ACCIDENT": return "Accident";
+                case "OBSTRUCTION": return "Road obstruction";
+                case "ANIMALS": return "Animals on road";
+                case "PEOPLE": return "People on road";
+                case "VEHICLE_HAZARD": return "Vehicle hazard";
+                case "MULTIPLE_HAZARDS": return "Multiple road hazards";
                 default: return "Reported traffic";
             }
         }

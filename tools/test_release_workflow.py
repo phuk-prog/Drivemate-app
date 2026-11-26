@@ -15,3 +15,13 @@ class VersionTest(unittest.TestCase):
             with self.assertRaises(ValueError):advance(self.v,self.g,name)
     def test_reject_drift(self):
         with self.assertRaises(ValueError):advance(self.v,self.g.replace("200014","200015"),"2.0.3")
+
+class ConsolidationSigningTest(unittest.TestCase):
+    def test_release_requires_explicit_dispatch(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/'.github/workflows/signed-release.yml').read_text()
+        trigger=source.split('\non:\n',1)[1].split('\nconcurrency:',1)[0]
+        self.assertIn('workflow_dispatch:',trigger)
+        self.assertNotIn('push:',trigger)
+        self.assertIn("github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'",source)
+        self.assertIn('environment: drivemate-release',source)
