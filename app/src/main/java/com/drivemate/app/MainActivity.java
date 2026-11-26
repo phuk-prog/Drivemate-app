@@ -493,7 +493,7 @@ public final class MainActivity extends Activity implements LocationListener {
         Configuration.getInstance().setTileFileSystemCacheMaxBytes(180L * 1024L * 1024L);
         Configuration.getInstance().setTileFileSystemCacheTrimBytes(140L * 1024L * 1024L);
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
-        apiKey = settings.getString("tomtom_key", "");
+        apiKey = ""; // Native-only candidate: ignore saved external service credentials.
         metricUnits = settings.getBoolean("metric_units", false);
         voiceMode = settings.contains("voice_mode_v2")
                 ? Math.max(0, Math.min(3, settings.getInt("voice_mode_v2", 1)))
@@ -517,8 +517,8 @@ public final class MainActivity extends Activity implements LocationListener {
         closeZoom = settings.getBoolean("close_zoom", true);
         highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
-        trafficEnabled = settings.getBoolean("traffic", false);
-        useLocalMap = settings.getBoolean("drivemate_vector_map", true);
+        trafficEnabled = false; // No independent live traffic feed.
+        useLocalMap = true;
         vectorSavedState = savedInstanceState;
         startupMapView = MapStartupPolicy.initial(
                 settings.getFloat("last_map_lat", Float.NaN),
@@ -1456,15 +1456,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** Drive time such as "14 min", or null if TomTom can't route right now. */
-    private static String quickEta(String key, String own, GeoMath.Point from, TomTomApi.Destination to) {
-        if (to == null || to.point == null) return null;
-        try {
-            TomTomApi.Route trip = own.isEmpty()?TomTomApi.route(key,from,to.point):DriveMateProvider.route(own,from,to.point);
-            return NavigationUnits.duration(trip.timeSeconds);
-        } catch (Exception error) {
-            return null;
-        }
-    }
+    private static String quickEta(String key,String own,GeoMath.Point from,TomTomApi.Destination to){return null;}
 
     private int dp(float dp) {
         return Math.round(dp * getResources().getDisplayMetrics().density);
@@ -1504,17 +1496,15 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void showSettings() {
         String[] options = {
-                "TomTom API key",
+                "DriveMate native routing · coverage",
                 voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
                 "Voice guidance · " + voiceModeName(),
                 "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
-                trafficEnabled ? "Hide provider-matched live traffic" : "Show provider-matched live traffic",
+                "Live traffic · not available independently",
                 metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
                 "Camera · " + cameraModeName(),
                 closeZoom ? "Junction detail zoom · On" : "Junction detail zoom · Off",
-                matchingTomTomMap() ? "Map · TomTom route-matched provider (journey)" : autoFallback && useLocalMap ? "Retry DriveMate map (TomTom fallback active)"
-                        : useLocalMap ? "Map · "+(vectorMap!=null?vectorMap.geometryDescription():"DriveMate local vector")
-                        : "Map · TomTom online raster",
+                "Map · "+(vectorMap!=null?vectorMap.geometryDescription():"DriveMate local vector"),
                 "Nearby map cache & Wi-Fi prefetch",
                 "Set or change Home",
                 "Set or change Work",
@@ -1531,10 +1521,10 @@ public final class MainActivity extends Activity implements LocationListener {
                         ? "Find my parked car" : "Find my parked car · none saved",
                 "Share diagnostics (no location included)",
                 "3D buildings · " + (buildings3d ? "On" : "Off"),
-                "DriveMate-first routing and search · " + (ownRouting() ? "Experimental" : "Off"),
+                "DriveMate native routing and search · preview",
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
                 "Independent map survey drafts",
-                "Offline routing · UK experimental preview",
+                "Offline routing · regional coverage",
                 "Offline visual map · download full UK",
                 "DriveMate original stack · Wells pilot",
                 "Free driving · "+(freeDriving?"On":"Off"),
@@ -1551,10 +1541,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 2: selectVoiceMode(); break;
                         case 3: selectSpeechVolume(); break;
                         case 4:
-                            trafficEnabled = !trafficEnabled;
-                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                    .putBoolean("traffic", trafficEnabled).apply();
-                            configureTrafficTiles();
+                            showError("Independent live traffic is not available.");
                             break;
                         case 5:
                             metricUnits = !metricUnits;
@@ -1591,7 +1578,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 vectorRoadsReady = false;
                                 setStatus("Retrying DriveMate streets…");
                             } else {
-                                useLocalMap = !useLocalMap;
+                                useLocalMap = true;
                                 autoFallback = false;
                                 vectorRoadsReady = vectorMap.hasRenderedRoads();
                             }
@@ -1611,7 +1598,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                     .setMessage(stats + "\n\nMaps are cached privately on your phone (up to 180 MB of street tiles). "
                                             + "An approximately 20–30 km area is prefetched on unmetered Wi-Fi "
                                             + "around a GPS fix. Online use fetches missing tiles individually. "
-                                            + "TomTom routing still needs internet. "
+                                            + "Native routing uses the verified packaged regional graph. "
                                             + "Map data © OpenStreetMap contributors, ODbL 1.0.")
                                     .setPositiveButton("Prefetch nearby", (d, button) -> {
                                         if (vectorMap != null && currentLocation != null)
@@ -1634,7 +1621,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             new AlertDialog.Builder(this).setTitle("DriveMate v" + installedVersionName())
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
-                                            + "Online TomTom routing, traffic and spoken directions. " +
+                                            + "DriveMate local route previews and generated instructions. No live traffic feed. " +
                                             "Road-matching and route camera are experimental. " +
                                             "Keep DriveMate open; never use it as your sole navigator " +
                                             "before testing directions on a real device.")
@@ -1683,22 +1670,14 @@ public final class MainActivity extends Activity implements LocationListener {
                 }).setNegativeButton("Close", null).show();
     }
 
-    private String ownEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_route_endpoint","");}
-    private String ownSearchEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_search_endpoint","");}
-    private boolean localRouting(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("local_routing_preview",false);}
-    private boolean ownRouting(){return localRouting()||!ownEndpoint().isEmpty();}
+    private String ownEndpoint(){return "";}
+    private String ownSearchEndpoint(){return "";}
+    private boolean localRouting(){return true;}
+    private boolean ownRouting(){return true;}
     private void showOfflineRouting(){
-        if(active||route!=null||routing){showError("End or cancel the current journey before changing map data.");return;}
-        LocalRoutingPack pack=new LocalRoutingPack(this);
-        new AlertDialog.Builder(this).setTitle("Offline UK routing (experimental)")
-            .setMessage((pack.installed()?"Verified installation present.":"Download approximately 2.40 GB over unmetered Wi-Fi; extra space needed for decompression.")+"\n\nLocal route previews and mapped place names only. No driving guidance, postcode search or nationwide performance acceptance yet. Map display uses its existing cache.")
-            .setPositiveButton(pack.installed()?"Enable local previews":"Download UK routing",(d,w)->{
-                if(pack.installed()){enableLocalRouting(true);return;}
-                if(downloadingLocalPack){showError("Download already running");return;}
-                downloadingLocalPack=true;setStatus("Preparing UK routing download…");
-                packWorker.execute(()->{try{pack.download(message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing()&&!active&&route==null&&!routing)enableLocalRouting(true);});}
-                    catch(Exception e){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(e.getMessage());});}});
-            }).setNeutralButton("Disable local mode",(d,w)->enableLocalRouting(false)).setNegativeButton("Close",null).show();
+        new AlertDialog.Builder(this).setTitle("DriveMate native regional routing")
+            .setMessage("Cheadle/Stockport packaged, checksum-verified map. Local route calculations, mapped address/postcode search and generated turn instructions are experimental previews. Driving start remains blocked until acceptance. Outside coverage: no route and no external fallback. More regional downloads are not published yet.")
+            .setPositiveButton("Close",null).show();
     }
     private void showOfflineDisplay(){
         if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
@@ -1712,43 +1691,13 @@ public final class MainActivity extends Activity implements LocationListener {
                     catch(Exception e){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(e.getMessage());});}});
             }).setNegativeButton("Close",null).show();
     }
-    private void enableLocalRouting(boolean enabled){
-        if(active||route!=null||routing)return;
-        getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("local_routing_preview",enabled).apply();
-        if(enabled){useLocalMap=true;autoFallback=false;getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("drivemate_vector_map",true).apply();}
-        updateMapVisibility();quickEtaFetchedAt=0;homeEtaLabel=null;workEtaLabel=null;
-        setStatus(enabled?"Offline route preview mode · not for driving":"Offline preview mode disabled");
-    }
-    private boolean comparisonPermitted(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("licensed_comparison",false);}
-    private void configureIndependent(){
-        if(active||route!=null||routing){showError("End or cancel the journey before changing providers.");return;}
-        LinearLayout inputs=new LinearLayout(this);inputs.setOrientation(LinearLayout.VERTICAL);inputs.setPadding(dp(18),0,dp(18),0);
-        EditText re=new EditText(this);re.setSingleLine(true);re.setHint("https://your-host/route");re.setText(ownEndpoint());inputs.addView(re);
-        EditText se=new EditText(this);se.setSingleLine(true);se.setHint("https://your-host/api/ (Photon)");se.setText(ownSearchEndpoint());inputs.addView(se);
-        android.widget.CheckBox license=new android.widget.CheckBox(this);license.setText("I have confirmed written permission for TomTom comparison use");license.setChecked(comparisonPermitted());inputs.addView(license);
-        new AlertDialog.Builder(this).setTitle("Experimental DriveMate-first services")
-            .setMessage("Trusted HTTPS endpoints only. No silent TomTom routing fallback. Comparison requires permission under your agreement. Findings stay in this session; never copy TomTom results to OSM.")
-            .setView(inputs).setPositiveButton("Save",(d,w)->{
-                String ru=re.getText().toString().trim(),su=se.getText().toString().trim();
-                if(!ru.isEmpty()&&(!DriveMateProvider.valid(ru)||!ru.endsWith("/route"))){showError("Enter a trusted HTTPS /route endpoint");return;}
-                if(!su.isEmpty()&&!DriveMateProvider.valid(su)){showError("Enter a trusted HTTPS Photon endpoint");return;}
-                getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("own_route_endpoint",ru).putString("own_search_endpoint",su).putBoolean("licensed_comparison",license.isChecked()).apply();
-                if(!ru.isEmpty()){useLocalMap=true;autoFallback=false;getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("drivemate_vector_map",true).apply();updateMapVisibility();}
-                setStatus(ru.isEmpty()?"TomTom routing selected":"Experimental DriveMate routing selected");quickEtaFetchedAt=0;homeEtaLabel=null;workEtaLabel=null;
-            }).setNegativeButton("Cancel",null).show();
-    }
+    private void enableLocalRouting(boolean enabled){showOfflineRouting();}
+    private boolean comparisonPermitted(){return false;}
+    private void configureIndependent(){showOfflineRouting();}
     private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
-        if(localRouting())return new LocalRoutingPack(this).search(query);
-        return ownRouting()?DriveMateProvider.search(ownSearchEndpoint(),query,near):TomTomApi.search(apiKey,query,near);
+        return new NativeRegionalRouter(this).search(query,near);
     }
-    private void requestComparison(){
-        if(!active||!comparisonPermitted()||apiKey.isEmpty()||route==null||!"DriveMate".equals(route.provider)||comparisonBusy||currentLocation==null||destination==null||!hasNetwork())return;
-        long now=SystemClock.elapsedRealtime();if(comparisonRequestedAt>0&&now-comparisonRequestedAt<180000)return;
-        comparisonRequestedAt=now;comparisonBusy=true;final int generation=reviewGeneration;
-        final GeoMath.Point start=gpsPoint(currentLocation),end=destination.point;final String key=apiKey;
-        network.execute(()->{TomTomApi.Route reference=null;try{reference=TomTomApi.route(key,start,end);}catch(Exception ignored){}
-            final TomTomApi.Route result=reference;runOnUiThread(()->{if(generation!=reviewGeneration)return;comparisonBusy=false;if(active)comparisonRoute=result;});});
-    }
+    private void requestComparison(){/* Native-only: no external comparison requests. */}
     private void showMapReview(){
         if(active || currentLocation==null || !currentLocation.hasSpeed() || currentLocation.getSpeed()>=0.5f || System.currentTimeMillis()-currentLocation.getTime()>10000){showError("Review map differences only after ending navigation and parking safely.");return;}
         List<MapReview.Finding> items=mapReview.snapshot();
@@ -2129,42 +2078,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    private void showKeyDialog() {
-        EditText keyInput = new EditText(this);
-        keyInput.setSingleLine(true);
-        keyInput.setHint("Paste your TomTom API key");
-        keyInput.setInputType(InputType.TYPE_CLASS_TEXT
-                | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        keyInput.setText(apiKey);
-        FrameLayout holder = new FrameLayout(this);
-        holder.setPadding(dp(20), dp(8), dp(20), 0);
-        holder.addView(keyInput, new FrameLayout.LayoutParams(-1, dp(55)));
-        AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Connect TomTom")
-                .setMessage("A TomTom API key with Maps, Search, Routing and Traffic access is required. The key stays on this device.")
-                .setView(holder)
-                .setPositiveButton("Save and open map", null)
-                .setNegativeButton("Cancel", (d, w) -> {
-                    if (apiKey.isEmpty()) setStatus("Enter an API key to show the map.");
-                })
-                .create();
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String supplied = keyInput.getText().toString().trim();
-            if (supplied.isEmpty()) {
-                keyInput.setError("A key is required");
-                return;
-            }
-            if (!supplied.equals(apiKey)) stopNavigation(false);
-            apiKey = supplied;
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString("tomtom_key", supplied).apply();
-            configureTiles();
-            setStatus("Connected. Search for a destination.");
-            instructionText.setText("Type an address or postcode and tap GO.");
-            dialog.dismiss();
-        }));
-        dialog.show();
-    }
+    private void showKeyDialog(){showOfflineRouting();}
 
     private XYTileSource tileSource(String name, String prefix) {
         final String key = Uri.encode(apiKey);
@@ -3282,17 +3196,10 @@ public final class MainActivity extends Activity implements LocationListener {
         final int plannedGeneration = ++requestGeneration;
         final GeoMath.Point start = gpsPoint(currentLocation);
         final GeoMath.Point end = destination.point;
-        final String keyForRequest = apiKey;
-        final String own = ownEndpoint();
-        final boolean local = localRouting();
-        setStatus(local ? "Calculating local route preview…" : own.isEmpty() ? (firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…") : "Planning DriveMate map route…");
+        setStatus("Calculating DriveMate native route preview…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = local?new LocalRoutingPack(this).preview(start,end):own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
-                if ("DriveMate".equals(calculated.provider)) {
-                    calculated.sharedGeometry = DriveMateProvider.sharedMap(own,calculated);
-                    if(calculated.sharedGeometry==null)calculated.sharedGeometry=DmUnifiedRegion.matchLive(this,calculated);
-                }
+                TomTomApi.Route calculated = new NativeRegionalRouter(this).preview(start,end);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;

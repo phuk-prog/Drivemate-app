@@ -14,6 +14,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class DmUnifiedZoomTest {
+    @Test public void nativeRegionalRouteAndSearchWithoutProvider()throws Exception{
+        Context app=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
+        NativeRegionalRouter router=new NativeRegionalRouter(app);
+        DmUnifiedRegion region=new DmUnifiedRegion(app,true);
+        DmTileEngine.Route sample=region.sample(true);
+        TomTomApi.Route route=NativeRegionalRouter.convert(region,sample,sample.points.get(0),sample.points.get(sample.points.size()-1));
+        assertEquals(NativeRegionalRouter.PROVIDER,route.provider);
+        assertEquals(sample.ways.size(),route.sharedGeometry.checkedEdges);
+        assertTrue(route.instructions.size()>=1);
+        assertEquals("DESTINATION",route.instructions.get(route.instructions.size()-1).maneuver);
+        double previous=-1;
+        for(TomTomApi.Instruction step:route.instructions){assertTrue(step.routeOffsetMetres>previous);assertTrue(step.routeOffsetMetres<=route.lengthMetres+.01);previous=step.routeOffsetMetres;}
+        assertTrue(route.trafficSections.isEmpty());assertTrue(route.laneSections.isEmpty());
+        assertTrue(NavigationStartPolicy.previewOnly(route.provider));
+        assertFalse("Mapped street search must work offline",router.search("Yew Street",sample.points.get(0)).isEmpty());
+        try{router.preview(new GeoMath.Point(51,-2),new GeoMath.Point(51.01,-2));fail("Outside coverage routed");}
+        catch(java.io.IOException expected){assertTrue(expected.getMessage().contains("No external fallback"));}
+    }
     @Test public void actualLiveVectorRendererUsesSharedRoadsAtDrivingZoom()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());

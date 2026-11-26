@@ -164,6 +164,58 @@ public final class DmTileEngine {
         }
         return coords.length()>0&&west<=bounds[2]&&east>=bounds[0]&&south<=bounds[3]&&north>=bounds[1];
     }
+    /** Tags and legal outgoing choices for the actual directed route, not a proximity guess. */
+    Map<Long,JSONObject> routeTags(Route route)throws Exception{
+        Set<Long> required=new HashSet<>(route.ways);Map<Long,JSONObject> out=new HashMap<>();
+        pinned.clear();cache.clear();
+        try{
+            for(String key:new TreeSet<>(route.cells)){
+                JSONArray rows=load(key).features;
+                for(int i=0;i<rows.length();i++){
+                    JSONArray row=rows.getJSONArray(i);long id=row.getLong(0);
+                    if(required.contains(id))out.put(id,row.getJSONObject(1));
+                }
+                cache.remove(key);
+            }
+            if(!out.keySet().containsAll(required))throw new CoverageException("Missing exact route way tags");
+            return out;
+        }finally{cache.clear();}
+    }
+    int[] legalChoices(Route route)throws Exception{
+        int[] count=new int[route.points.size()];
+        try{
+            for(int i=1;i<route.points.size()-1;i++){
+                GeoMath.Point p=route.points.get(i);Node n=load(key(p.lat,p.lon)).nodes.get(route.nodeIds.get(i));
+                if(n==null)throw new CoverageException("Missing route junction");
+                State state=new State(n,route.edgeIds.get(i-1),route.ways.get(i-1),route.nodeIds.get(i-1),0,0,0,null);
+                List<long[]> restrictions=rules(state);Set<Long> exits=new HashSet<>();boolean actual=false;
+                for(int j=0;j<n.edges.length();j++){
+                    JSONArray e=n.edges.getJSONArray(j);long dst=e.getLong(1),way=e.getLong(3);
+                    if(LocalRoutingPilot.allowed(state.prev,dst,way,restrictions)){
+                        exits.add(dst);if(e.getLong(0)==route.edgeIds.get(i))actual=true;
+                    }
+                }
+                if(!actual)throw new CoverageException("Route turn no longer permitted");
+                count[i]=exits.size();
+            }
+            return count;
+        }finally{cache.clear();}
+    }
+    /** Search one verified cell at a time, avoiding retaining the whole regional graph. */
+    List<JSONArray> regionalSearch(String query)throws Exception{
+        ArrayList<JSONArray> rows=new ArrayList<>();Set<String> seen=new HashSet<>();
+        pinned.clear();cache.clear();
+        try{
+            for(String k:keys()){
+                for(JSONArray row:search(query,Collections.singleton(k))){
+                    String identity=row.optString(0)+"|"+row.optInt(1)+"|"+row.optInt(2);
+                    if(seen.add(identity))rows.add(row);
+                }
+                cache.remove(k);
+            }
+            return rows;
+        }finally{cache.clear();}
+    }
     public JSONObject wayTags(long id,Set<String> cells)throws Exception{
         for(JSONArray f:features(cells))if(f.getLong(0)==id)return f.getJSONObject(1);
         return new JSONObject();
