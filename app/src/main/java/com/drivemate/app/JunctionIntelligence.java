@@ -4,7 +4,7 @@ import java.util.*;
 final class JunctionIntelligence {
  private JunctionIntelligence(){}
  enum Kind {
- UNKNOWN("NEXT MANOEUVRE"), STRAIGHT("CONTINUE"), TURN("NEXT TURN"), CROSSROADS("CROSSROADS"), T_JUNCTION("T-JUNCTION"), FORK("ROAD FORK"), STAGGERED("SUCCESSIVE JUNCTIONS"), ROUNDABOUT("ROUNDABOUT"), MINI_ROUNDABOUT("MINI-ROUNDABOUT"), DOUBLE_ROUNDABOUT("ROUNDABOUTS"), SPIRAL_ROUNDABOUT("ROUNDABOUT"), MULTI_ARM("COMPLEX JUNCTION"), MOTORWAY_EXIT("MOTORWAY EXIT"), RAMP("SLIP ROAD"), MERGE("MERGE"), LANE_DROP("LANE DROP"), INTERCHANGE("INTERCHANGE"), U_TURN("U-TURN"), DUAL_CARRIAGEWAY("CARRIAGEWAY CROSSING"), ARRIVE("DESTINATION");
+ UNKNOWN("NEXT MANOEUVRE"), STRAIGHT("CONTINUE"), TURN("NEXT TURN"), CROSSROADS("CROSSROADS"), T_JUNCTION("T-JUNCTION"), FORK("ROAD FORK"), KEEP("FOLLOW ROAD"), STAGGERED("SUCCESSIVE JUNCTIONS"), ROUNDABOUT("ROUNDABOUT"), MINI_ROUNDABOUT("MINI-ROUNDABOUT"), DOUBLE_ROUNDABOUT("ROUNDABOUTS"), SPIRAL_ROUNDABOUT("ROUNDABOUT"), MULTI_ARM("COMPLEX JUNCTION"), MOTORWAY_EXIT("MOTORWAY EXIT"), RAMP("SLIP ROAD"), MERGE("MERGE"), LANE_DROP("LANE DROP"), INTERCHANGE("INTERCHANGE"), U_TURN("U-TURN"), DUAL_CARRIAGEWAY("CARRIAGEWAY CROSSING"), ARRIVE("DESTINATION");
  final String title; Kind(String title){this.title=title;}
  }
  static String token(String v){return v==null?"":v.trim().toUpperCase(Locale.ROOT);}
@@ -30,7 +30,7 @@ final class JunctionIntelligence {
  if(m.startsWith("MOTORWAY_EXIT")||m.equals("TAKE_EXIT"))return Kind.MOTORWAY_EXIT;
  if(m.startsWith("ENTER_MOTORWAY")||m.startsWith("MERGE")||m.equals("JOIN_MOTORWAY"))return Kind.MERGE;
  if(m.contains("RAMP")||m.contains("SLIP_ROAD"))return Kind.RAMP;
- if(m.equals("KEEP_LEFT")||m.equals("KEEP_RIGHT")||m.equals("BEAR_LEFT")||m.equals("BEAR_RIGHT"))return Kind.FORK;
+ if(m.equals("KEEP_LEFT")||m.equals("KEEP_RIGHT")||m.equals("BEAR_LEFT")||m.equals("BEAR_RIGHT"))return Kind.KEEP;
  if(m.equals("STRAIGHT")||m.equals("CONTINUE")||m.equals("GO_STRAIGHT"))return Kind.STRAIGHT;
  if(m.contains("LEFT")||m.contains("RIGHT")||m.contains("TURN"))return Kind.TURN;
  return Kind.UNKNOWN;
@@ -41,6 +41,7 @@ final class JunctionIntelligence {
  static String glyph(TomTomApi.Instruction step,Kind k){
  if(roundabout(k))return "↻";
  if(k==Kind.U_TURN)return token(step.maneuver).contains("RIGHT")?"⤻":"⤺";
+ if(k==Kind.MERGE||k==Kind.RAMP||k==Kind.MOTORWAY_EXIT){String m=token(step.maneuver);if(m.endsWith("_LEFT"))return "↖";if(m.endsWith("_RIGHT"))return "↗";}
  return GuidanceLogic.symbol(step.maneuver,step.junctionType,step.turnAngleDegrees);
  }
  static boolean preview(Kind k,double distance,float speed){

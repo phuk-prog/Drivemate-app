@@ -13,6 +13,7 @@ final class IntelligentGuidance {
     static String action(TomTomApi.Instruction step, String glyph, int exit) {
         String message = clean(step.message);
         String road = clean(step.street);
+        if ("ROUNDABOUT_EXIT".equals(step.maneuver) && exit<=0) return message.isEmpty()?"Exit roundabout":message;
         if ("↻".equals(glyph)) return exit > 0 ? "Take " + GuidanceLogic.ordinal(exit) + " exit" : roundaboutAction(step);
         String highway=highwayExit(step);
         if(!highway.isEmpty()) {
@@ -32,6 +33,7 @@ final class IntelligentGuidance {
     }
 
     static String direction(TomTomApi.Instruction step, String glyph, int exit) {
+        if ("ROUNDABOUT_EXIT".equals(step.maneuver) && exit<=0) return clean(step.message).isEmpty()?"Exit the roundabout":clean(step.message);
         if (!"↻".equals(glyph)) {
             String highway=highwayExit(step);
             if(!highway.isEmpty() && ("MOTORWAY_EXIT_LEFT".equals(step.maneuver)||"MOTORWAY_EXIT_RIGHT".equals(step.maneuver)||"TAKE_EXIT".equals(step.maneuver))) {
@@ -108,7 +110,7 @@ final class IntelligentGuidance {
     }
 
     static String thenLine(TomTomApi.Instruction step, double gap, boolean metric) {
-        String glyph = GuidanceLogic.symbol(step.maneuver, step.junctionType, step.turnAngleDegrees);
+        String glyph = JunctionIntelligence.glyph(step,JunctionIntelligence.classify(step.maneuver,step.junctionType));
         int exit = "↻".equals(glyph) ? JunctionFraming.reportedExit(step.exitNumber) : 0;
         String action=action(step,glyph,exit);
         String road=roadLine(action,step);
