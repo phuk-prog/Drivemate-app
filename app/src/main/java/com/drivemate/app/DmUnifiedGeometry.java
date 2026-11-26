@@ -13,6 +13,9 @@ final class DmUnifiedGeometry {
     private final Map<Long,Double> routeNodeOffsets=new HashMap<>();
     private final Set<Long> ambiguousNodes=new HashSet<>();
     List<RouteRoadsideAwareness.Event> routeRoadside=Collections.emptyList();
+    List<MappedEnforcement.Zone> averageZones=Collections.emptyList();
+    private List<Long> orderedRouteWays=Collections.emptyList();
+    private double[] orderedOffsets;
     final double[] bounds;
     private final double coordinateScale;
     private Point point(JSONArray c)throws JSONException{
@@ -57,6 +60,14 @@ final class DmUnifiedGeometry {
             if(!label.isEmpty())notices.add(new RouteRoadsideAwareness.Event(id,offset,label));
         }
         routeRoadside=Collections.unmodifiableList(notices);
+    }
+    void setEnforcement(JSONArray relations)throws JSONException{
+        if(checkedEdges==0||orderedOffsets==null)return;
+        MappedEnforcement.Match matched=MappedEnforcement.match(relations,routeNodeOffsets,ambiguousNodes,orderedRouteWays,orderedOffsets);
+        ArrayList<RouteRoadsideAwareness.Event> notices=new ArrayList<>(routeRoadside);
+        notices.addAll(matched.notices);
+        routeRoadside=Collections.unmodifiableList(notices);
+        averageZones=Collections.unmodifiableList(matched.zones);
     }
     boolean covers(GeoMath.Point p){return RouteMapPolicy.insideBounds(p,bounds);}
     private static boolean exact(Point p,GeoMath.Point g){
@@ -110,6 +121,7 @@ final class DmUnifiedGeometry {
         if(path!=null&&(path.points.size()!=path.nodeIds.size()||path.edgeIds.size()!=path.ways.size()))throw new IOException("Route node identity mismatch");
         List<Point> trace=new ArrayList<>();
         double[] routeOffsets=DriveMateProvider.offsets(routePoints);
+        orderedRouteWays=new ArrayList<>(routeWays);orderedOffsets=routeOffsets.clone();
         if(path==null){
             // The hosted edge-walk supplied each way ID and the exact route shape.
             // A partial first/last segment is permitted only on the identified original segment.
