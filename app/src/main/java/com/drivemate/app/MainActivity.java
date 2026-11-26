@@ -261,6 +261,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private int freeContextGeneration;
     private boolean freeContextBusy;
     private int freeLastLimit=-1;
+    private long freeAdvanceNode=-1,freeLastLimitAt;
+    private String freeContextEndpoint="";
     private LinearLayout homePanel;
     private LinearLayout navigationPanel;
     private LinearLayout topMapOverlay;
@@ -2468,14 +2470,14 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void clearFreeRoadContext(){
         freeContextGeneration++;freeContextBusy=false;freeContextRequestedAt=0;freeRoadContext=null;
-        freeRoadMatch.reset();freeLastLimit=-1;
+        freeRoadMatch.reset();freeLastLimit=-1;freeLastLimitAt=0;freeAdvanceNode=-1;freeContextEndpoint="";
         if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
         if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
     }
     private void updateFreeRoadIntelligence(Location fix){
         GeoMath.Point point=gpsPoint(fix);
         final String endpoint=ownEndpoint();
-        if(freeRoadContext!=null && !freeRoadContext.freshAt(point)){
+        if(freeRoadContext!=null && (!endpoint.equals(freeContextEndpoint)||!freeRoadContext.freshAt(point))){
             freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;
             if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
         }
@@ -2493,7 +2495,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     if(generation!=freeContextGeneration||!freeDriving||active)return;
                     freeContextBusy=false;
                     if(endpoint.equals(ownEndpoint())&&currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation))){
-                        freeRoadContext=context;
+                        freeRoadContext=context;freeContextEndpoint=endpoint;
                         if(vectorMap!=null&&followLocation)vectorMap.setBrowseGeometry(context.map);
                     }
                 });
@@ -2506,12 +2508,26 @@ public final class MainActivity extends Activity implements LocationListener {
             catch(Exception ignored){freeRoadMatch.reset();}
         }else freeRoadMatch.reset();
         if(match==null){
-            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);return;
+            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);
+            if(now-freeLastLimitAt>10000)freeLastLimit=-1;
+            return;
         }
         int shown=metricUnits?match.kmh:(int)Math.round(match.kmh/1.609344);
         speedLimitText.setText(String.valueOf(shown));speedLimitText.setVisibility(View.VISIBLE);
         speedLimitText.setContentDescription("Mapped speed limit "+shown+(metricUnits?" km/h":" mph")+". Check road signs.");
-        setStatus("Free driving · mapped limit "+shown+(metricUnits?" km/h":" mph")+(match.name.isEmpty()?"":" · "+match.name));
+        String status="Free driving · mapped limit "+shown+(metricUnits?" km/h":" mph")+(match.name.isEmpty()?"":" · "+match.name);
+        FreeDriveRoadMatch.Upcoming next=null;
+        try{next=FreeDriveRoadMatch.upcoming(freeRoadContext.ways,match,point,fix.getSpeed(),freeRoadContext.bounds);}catch(Exception ignored){}
+        if(next!=null){
+            int future=metricUnits?next.kmh:(int)Math.round(next.kmh/1.609344);
+            status+=" · "+future+(metricUnits?" km/h":" mph")+" in "+NavigationUnits.displayDistance(next.distance,metricUnits)+" if continuing";
+            if(advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()&&freeAdvanceNode!=next.node){
+                freeAdvanceNode=next.node;
+                speak("If continuing on this road, mapped limit "+future+(metricUnits?" kilometres per hour in ":" miles per hour in ")
+                    +NavigationUnits.spokenDistance(next.distance,metricUnits)+". Check road signs.");
+            }
+        }
+        setStatus(status);
         boolean speeding=fix.getSpeed()*2.2369362921>match.kmh/1.609344+speedToleranceMph;
         speedText.setTextColor(speeding?Color.rgb(255,197,85):Color.WHITE);
         if(speeding&&speedWarningEnabled&&speechReady&&speech!=null&&!speech.isSpeaking()
@@ -2521,7 +2537,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(freeLastLimit>0&&freeLastLimit!=match.kmh&&advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT
                 &&speechReady&&speech!=null&&!speech.isSpeaking())
             speak("Mapped speed limit now "+shown+(metricUnits?" kilometres per hour.":" miles per hour.")+" Check road signs.");
-        freeLastLimit=match.kmh;
+        freeLastLimit=match.kmh;freeLastLimitAt=now;
     }
     private void toggleFreeDriving(){
         if(active||route!=null||routing){Toast.makeText(this,"End the route before using free driving.",Toast.LENGTH_SHORT).show();return;}
