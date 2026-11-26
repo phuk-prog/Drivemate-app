@@ -108,6 +108,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
+                    if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
                     if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
                     if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
                     saySystemWarning("GPS signal lost. Waiting for location.");
@@ -325,8 +326,10 @@ public final class MainActivity extends Activity implements LocationListener {
     private GeoMath.Point pendingRouteOrigin;
     private int pendingSavingSeconds;
     private int rerouteMode = 1; // 0 automatic, 1 ask first
-    private int speedToleranceMph = 5;
+    private int speedToleranceMph = 0;
     private long lastSpeedWarningAt;
+    private TextView upcomingSpeedText;
+    private final SpeedChangeAwareness speedChangeAwareness = new SpeedChangeAwareness();
     private long lastTrafficWarningAt;
     private double lastTrafficWarningStart = -1;
     private Button stopButton;
@@ -468,7 +471,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         settings.getBoolean("voice", true));
         guidanceVolume = Math.max(0.1f, Math.min(1f, settings.getFloat("speech_volume", 0.85f)));
         rerouteMode = Math.max(0, Math.min(1, settings.getInt("reroute_mode", 1)));
-        speedToleranceMph = Math.max(0, Math.min(15, settings.getInt("speed_tolerance_mph", 5)));
+        speedToleranceMph = Math.max(0, Math.min(15, settings.getInt("speed_tolerance_mph", 0)));
         cameraMode = settings.contains("camera_mode")
                 ? Math.max(0, Math.min(2, settings.getInt("camera_mode", 0)))
                 : settings.getBoolean("north_up", false)
@@ -1144,6 +1147,12 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams trafficPos = new LinearLayout.LayoutParams(-1, dp(25));
         trafficPos.topMargin = dp(3);
         container.addView(trafficNoticeText, trafficPos);
+        upcomingSpeedText = text("", 14, Color.WHITE, true);
+        upcomingSpeedText.setBackground(rounded(DARK, 8));
+        upcomingSpeedText.setPadding(dp(8), dp(4), dp(8), dp(4));
+        upcomingSpeedText.setMaxLines(2);
+        upcomingSpeedText.setVisibility(View.GONE);
+        container.addView(upcomingSpeedText, new LinearLayout.LayoutParams(-1, -2));
 
         LinearLayout arrivalRow = new LinearLayout(this);
         arrivalRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1188,9 +1197,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private void applyDrivingControls(){
         if(drivingMore==null)return;
         drivingMore.setVisibility(active?View.VISIBLE:View.GONE);
-        drivingMore.setText(drivingControlsExpanded?"Less":"Controls");
+        drivingMore.setText(drivingControlsExpanded?"Less":"Trip controls · End");
         drivingMore.setContentDescription(drivingControlsExpanded?"Hide extra navigation controls":"Show extra navigation controls");
-        if(active){repeatButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);refreshButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);voiceButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);}
+        if(active){stopButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);repeatButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);refreshButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);voiceButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);}
     }
     private void applyNavigationChrome() {
         boolean navigating = active;
@@ -1213,6 +1222,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 ((View) arrivalHintText.getTag()).setVisibility(View.GONE);
         }
         if (!navigating) {
+            if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
             if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
             if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
             if (rerouteSuggestionRow != null) rerouteSuggestionRow.setVisibility(View.GONE);
@@ -1806,8 +1816,8 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void selectSpeedTolerance() {
-        final String[] labels = {"3 mph", "5 mph", "7 mph", "10 mph", "15 mph"};
-        final int[] values = {3, 5, 7, 10, 15};
+        final String[] labels = {"0 mph", "3 mph", "5 mph", "7 mph", "10 mph", "15 mph"};
+        final int[] values = {0, 3, 5, 7, 10, 15};
         int selected = 1;
         for (int i = 0; i < values.length; i++)
             if (values[i] == speedToleranceMph) selected = i;
@@ -2698,6 +2708,7 @@ public final class MainActivity extends Activity implements LocationListener {
         say("Navigation started.");
         lastCameraUpdate = 0;
         previousInstructionIndex = 0;
+        speedChangeAwareness.reset();
         stabilizedAlong = -1;
         navigationMatch = null;
         lastRoutePrefetchAt = -1;
@@ -3204,6 +3215,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         offRouteSince = 0;
         previousInstructionIndex = 0;
+        speedChangeAwareness.reset();
         stabilizedAlong = -1;
         navigationMatch = null;
         lastRoutePrefetchAt = -1;
@@ -3311,6 +3323,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(laneGuidanceText!=null)laneGuidanceText.setVisibility(View.GONE);
         if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
         if(trafficNoticeText!=null)trafficNoticeText.setVisibility(View.GONE);
+        if(upcomingSpeedText!=null)upcomingSpeedText.setVisibility(View.GONE);
         clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
     }
 
@@ -3460,6 +3473,13 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         previousInstructionIndex = next;
+        // A confirmed start is not a turn. Present the next actionable instruction
+        // without advancing the underlying confirmation state or inventing a distance.
+        TomTomApi.Instruction departure = route.instructions.get(next);
+        if (next == 0 && next + 1 < route.instructions.size()
+                && ("DEPART".equalsIgnoreCase(departure.maneuver) || "DEPARTURE".equalsIgnoreCase(departure.maneuver))
+                && along >= departure.routeOffsetMetres && along <= departure.routeOffsetMetres + 8
+                && route.instructions.get(next+1).routeOffsetMetres > along) next++;
         TomTomApi.Instruction step = route.instructions.get(next);
         double untilTurn = Math.max(0, step.routeOffsetMetres - along);
         updateRoadIntelligence(fix, along, projected.offRouteMetres,
@@ -3612,6 +3632,24 @@ public final class MainActivity extends Activity implements LocationListener {
                 speedLimitText.setContentDescription("Mapped speed limit " + label
                         + ". Road signs take precedence.");
                 speedLimitText.setVisibility(View.VISIBLE);
+            }
+        }
+        SpeedChangeAwareness.Change change = confident && !gpsLost && guidancePositionConfirmed
+                ? SpeedChangeAwareness.next(route.speedSections, limit, along, fix.hasSpeed()?fix.getSpeed():0)
+                : null;
+        if (upcomingSpeedText != null) {
+            if (change == null) upcomingSpeedText.setVisibility(View.GONE);
+            else {
+                int shown = metricUnits ? change.kmh : (int)Math.round(change.kmh / 1.609344);
+                upcomingSpeedText.setText("Limit " + shown + (metricUnits?" km/h":" mph") + " ahead · "
+                        + NavigationUnits.displayDistance(change.offset-along, metricUnits));
+                upcomingSpeedText.setVisibility(View.VISIBLE);
+                // Defer to a close turn; do not mark as spoken until eligible.
+                if (speedWarningEnabled && distanceToTurn > 65 && speedChangeAwareness.shouldAnnounce(change)) {
+                    sayVerifiedAlert("Mapped speed limit changes to " + shown
+                            + (metricUnits?" kilometres per hour in ":" miles per hour in ")
+                            + NavigationUnits.spokenDistance(change.offset-along, metricUnits) + ". Check road signs.", true);
+                }
             }
         }
         speedText.setTextColor(speeding ? Color.rgb(255, 197, 85) : Color.WHITE);
@@ -3798,6 +3836,7 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsAccuracyText.setText("");
         vehicleFilter.reset();
         previousInstructionIndex = 0;
+        speedChangeAwareness.reset();
         stabilizedAlong = -1;
         navigationMatch = null;
         lastRoutePrefetchAt = -1;
