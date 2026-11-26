@@ -2542,7 +2542,7 @@ public final class MainActivity extends Activity implements LocationListener {
         GeoMath.Point current = gpsPoint(fix);
         long now = SystemClock.elapsedRealtime();
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
-        if (System.currentTimeMillis() - fix.getTime() > 10000) {
+        if (fixAgeMs(fix) > 10000) {
             suspendPositionGuidance("POSITION UNCERTAIN · CHECK ROAD SIGNS","Waiting for a fresh position");return;
         }
         if (navigationMatch == null) navigationMatch = new NavigationMatch(route.points);
@@ -2577,7 +2577,7 @@ public final class MainActivity extends Activity implements LocationListener {
             offRouteSince = 0;
         }
 
-        if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {
+        if (!matched.confident || fixAgeMs(fix) > 10000) {
             if(joining){showJoiningRoute(fix,now);return;}
             String reason=matched.reason==NavigationMatch.Reason.POOR_ACCURACY ? "GPS accuracy too low · "+Math.round(accuracy)+" m" : matched.reason==NavigationMatch.Reason.AMBIGUOUS ? "Matching position to nearby roads" : matched.reason==NavigationMatch.Reason.RECOVERING ? "Confirming position on route" : "Position not confirmed on route";
             if(matched.reason==NavigationMatch.Reason.OUTSIDE_WINDOW && accuracy<=35 && fix.hasSpeed() && fix.getSpeed()<1.5f && GeoMath.distance(current,route.points.get(0))<=100 && projected.offRouteMetres<=100) {
@@ -2615,7 +2615,7 @@ public final class MainActivity extends Activity implements LocationListener {
         ArrivalPolicy.State arrival = arrivalPolicy.observe(
                 distanceToDestination, leftMetres, projected.offRouteMetres,
                 accuracy, fix.hasSpeed() ? fix.getSpeed() : Float.POSITIVE_INFINITY,
-                fix.getTime(), System.currentTimeMillis());
+                System.currentTimeMillis() - fixAgeMs(fix), System.currentTimeMillis());
         if (arrival == ArrivalPolicy.State.ARRIVED) {
             stopNavigation(true);
             return;
@@ -2926,7 +2926,7 @@ public final class MainActivity extends Activity implements LocationListener {
     boolean canInspectGuidance(){
         if(!active||route==null||!guidancePositionConfirmed||gpsLost||currentLocation==null||stabilizedAlong<0)return false;
         Location fix=currentLocation;
-        long age=System.currentTimeMillis()-fix.getTime();
+        long age=fixAgeMs(fix);
         return age>=0&&age<5000&&fix.hasAccuracy()&&fix.getAccuracy()<=25&&fix.hasSpeed()&&fix.getSpeed()<0.5f;
     }
 
