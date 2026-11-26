@@ -29,3 +29,7 @@ for name in ("drivemate_vector_style.json","drivemate_vector_style_night.json","
     assert "tomtom" not in json.dumps(style).lower(),name
     assert "https://" not in json.dumps(style),name
 print("PASS: DriveMate-owned base routes/search/styles; external traffic area overlay only; no external fallback")
+
+assert 'org.osmdroid:' not in (root/'app/build.gradle').read_text()
+assert 'org.osmdroid:' not in (root/'app/gradle.lockfile').read_text()
+assert not any('import org.osmdroid.' in p.read_text() for p in src.glob('*.java'))
