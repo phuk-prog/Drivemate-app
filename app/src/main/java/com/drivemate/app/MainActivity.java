@@ -1535,9 +1535,29 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean localRouting(){return true;}
     private boolean ownRouting(){return true;}
     private void showOfflineRouting(){
-        new AlertDialog.Builder(this).setTitle("DriveMate native regional routing")
-            .setMessage("Cheadle/Stockport packaged, checksum-verified map. Local route calculations, mapped address/postcode search and generated turn instructions are experimental previews. Driving start remains blocked until acceptance. Outside coverage: no route and no external fallback. More regional downloads are not published yet.")
-            .setPositiveButton("Close",null).show();
+        if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
+        NativeRegionPacks packs=new NativeRegionPacks(this);
+        try{
+            List<NativeRegionPacks.Entry> entries=packs.catalog();
+            if(entries.isEmpty()){
+                new AlertDialog.Builder(this).setTitle("DriveMate native regional routing")
+                    .setMessage("Cheadle/Stockport is packaged. No additional verified GitHub regional release is pinned yet. Native route previews and local search only; no external fallback. Driving start remains blocked pending acceptance.")
+                    .setPositiveButton("Close",null).show();return;
+            }
+            String[] labels=new String[entries.size()];
+            for(int i=0;i<labels.length;i++){NativeRegionPacks.Entry e=entries.get(i);labels[i]=e.id+" · "+(packs.installed(e)?"Installed":(e.bytes/1000000)+" MB");}
+            new AlertDialog.Builder(this).setTitle("DriveMate regional downloads · preview").setItems(labels,(dialog,index)->{
+                NativeRegionPacks.Entry e=entries.get(index);
+                new AlertDialog.Builder(this).setTitle("Download "+e.id).setMessage("Verified GitHub data only, on unmetered Wi-Fi. No cross-region routing. Preview only until driving acceptance.")
+                    .setPositiveButton("Download",(d,w)->{
+                        if(active||route!=null||routing||downloadingLocalPack)return;
+                        downloadingLocalPack=true;packWorker.execute(()->{try{
+                            packs.install(e,message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));
+                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus("Regional pack installed · route preview only");});
+                        }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage());});}});
+                    }).setNegativeButton("Cancel",null).show();
+            }).setNegativeButton("Close",null).show();
+        }catch(Exception e){showError("Regional catalog invalid: "+e.getMessage());}
     }
     private void showOfflineDisplay(){
         if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
@@ -2289,12 +2309,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private void updateFreeRoadIntelligence(Location fix){
         GeoMath.Point point=gpsPoint(fix);
         final String endpoint="native-regional";
-        if(freeRoadContext!=null && (!RouteMapPolicy.insideStockport(point)||!freeRoadContext.freshAt(point))){
+        if(freeRoadContext!=null && !freeRoadContext.freshAt(point)){
             freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;
             if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
         }
         long now=SystemClock.elapsedRealtime();
-        if(freeRoadContext==null&&!freeContextBusy&&RouteMapPolicy.insideStockport(point)
+        if(freeRoadContext==null&&!freeContextBusy
                 &&(freeContextRequestedAt==0||now-freeContextRequestedAt>=15000)){
             freeContextBusy=true;freeContextRequestedAt=now;
             final int generation=freeContextGeneration;

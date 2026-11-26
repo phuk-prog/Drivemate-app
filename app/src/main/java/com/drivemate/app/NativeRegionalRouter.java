@@ -11,10 +11,9 @@ final class NativeRegionalRouter {
     private final Context app;
     NativeRegionalRouter(Context context){app=context.getApplicationContext();}
     TomTomApi.Route preview(GeoMath.Point from,GeoMath.Point to)throws Exception{
-        if(!RouteMapPolicy.insideStockport(from)||!RouteMapPolicy.insideStockport(to))
-            throw new IOException("DriveMate native routing is available in the packaged Cheadle/Stockport region only. No external fallback.");
-        DmUnifiedRegion region=new DmUnifiedRegion(app,true);
+        DmUnifiedRegion region=new NativeRegionPacks(app).select(from,to);
         DmTileEngine.Route path=region.engine.route(from,to);
+        for(GeoMath.Point p:path.points)if(!region.covers(p))throw new IOException("Route crosses unverified regional boundary. No external fallback.");
         return convert(region,path,from,to);
     }
     static TomTomApi.Route convert(DmUnifiedRegion region,DmTileEngine.Route path,GeoMath.Point from,GeoMath.Point to)throws Exception{
@@ -40,10 +39,9 @@ final class NativeRegionalRouter {
         }
     }
     RoadContext roadContext(GeoMath.Point p)throws Exception{
-        if(!RouteMapPolicy.insideStockport(p))throw new IOException("No downloaded regional context");
-        double[] regionBounds=RouteMapPolicy.stockportBounds();
+        DmUnifiedRegion region=new NativeRegionPacks(app).select(p,null);
+        double[] regionBounds=region.regionBounds;
         double[] bounds={Math.max(regionBounds[0],p.lon-.004),Math.max(regionBounds[1],p.lat-.003),Math.min(regionBounds[2],p.lon+.004),Math.min(regionBounds[3],p.lat+.003)};
-        DmUnifiedRegion region=new DmUnifiedRegion(app,true);
         List<JSONArray> features=region.engine.boundedFeatures(region.engine.keys(),bounds,Collections.emptySet(),false,6000,100000);
         NativeMapScene geometry=NativeMapScene.browse(features,bounds);
         List<JSONArray> ways=new ArrayList<>();
@@ -59,12 +57,14 @@ final class NativeRegionalRouter {
     }
     List<TomTomApi.Destination> search(String query,GeoMath.Point near)throws Exception{
         String q=query==null?"":query.trim();if(q.length()<2||q.length()>100)return Collections.emptyList();
-        DmUnifiedRegion region=new DmUnifiedRegion(app,true);
+        NativeRegionPacks packs=new NativeRegionPacks(app);
+        DmUnifiedRegion region;
+        try{region=near==null?new DmUnifiedRegion(app,true):packs.select(near,null);}catch(IOException noRegion){return Collections.emptyList();}
         List<JSONArray> rows=region.engine.regionalSearch(q);
         List<TomTomApi.Destination> out=new ArrayList<>();
         for(JSONArray row:rows){
             GeoMath.Point p=new GeoMath.Point(row.getInt(1)/1e6,row.getInt(2)/1e6);
-            if(!RouteMapPolicy.insideStockport(p))continue;
+            if(!region.covers(p))continue;
             out.add(new TomTomApi.Destination(row.getString(0),row.optString(3,"Mapped place"),p));
         }
         // A postcode or mapped address is a location, never an inferred driveway/entrance.

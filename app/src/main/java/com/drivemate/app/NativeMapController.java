@@ -95,7 +95,7 @@ final class NativeMapController {
         requestedAt=now;lastRequested=p;lastZoom=zoom;busy=true;int gen=generation,w=view.getWidth(),h=view.getHeight();
         worker.execute(()->{
             NativeMapScene loaded=null;
-            if(zoom>=15&&RouteMapPolicy.insideStockport(p))try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
+            if(zoom>=15)try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
             if(loaded==null)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){
                 try{loaded=tileSource.load(p,Math.min(6,zoom),w,h);}catch(Exception unavailable){}
             }

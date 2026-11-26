@@ -5,9 +5,9 @@ import java.util.*;
 import org.json.*;
 /** Packaged, bounded regional proof. No live GPS or network. */
 final class DmUnifiedRegion {
-    final DmTileEngine engine;final String parentSource;private final boolean stockport;
+    final DmTileEngine engine;final String parentSource;private final boolean stockport;final double[] regionBounds;
     DmUnifiedRegion(Context app,boolean stockport)throws Exception{
-        this.stockport=stockport;
+        this.stockport=stockport;regionBounds=stockport?RouteMapPolicy.stockportBounds():null;
         String folder=stockport?"dmtiles-stockport/":"dmtiles/";
         byte[] raw=DmTileEngine.read(app.getAssets().open(folder+"manifest.json"),2_000_000);
         String hash=new String(DmTileEngine.read(app.getAssets().open(folder+"manifest.sha256"),128),java.nio.charset.StandardCharsets.UTF_8).trim();
@@ -17,6 +17,11 @@ final class DmUnifiedRegion {
         engine=new DmTileEngine(raw,hash,n->app.getAssets().open(folder+n+".bin"));
         // Route search loads its own bounded cells; do not pin the entire regional pack.
     }
+    DmUnifiedRegion(byte[] manifest,String sha,DmTileEngine.Source source,double[] bounds)throws Exception{
+        stockport=false;regionBounds=bounds.clone();JSONObject m=new JSONObject(new String(manifest,java.nio.charset.StandardCharsets.UTF_8));
+        parentSource=m.getString("parent_source_sha256");engine=new DmTileEngine(manifest,sha,source);
+    }
+    boolean covers(GeoMath.Point p){return regionBounds!=null&&RouteMapPolicy.insideBounds(p,regionBounds);}
     static double[] displayBounds(List<GeoMath.Point> points,boolean stockport)throws IOException{
         return displayBounds(points,stockport,1);
     }
@@ -44,7 +49,9 @@ final class DmUnifiedRegion {
         // Reduce only optional context, never the route or its original way IDs.
         for(double margin:MARGINS){
             double[] bounds;
-            try{bounds=displayBounds(points,stockport,margin);}catch(IOException tooWide){last=tooWide;continue;}
+            try{bounds=displayBounds(points,stockport,margin);
+                if(regionBounds!=null){bounds[0]=Math.max(bounds[0],regionBounds[0]);bounds[1]=Math.max(bounds[1],regionBounds[1]);bounds[2]=Math.min(bounds[2],regionBounds[2]);bounds[3]=Math.min(bounds[3],regionBounds[3]);if(bounds[2]<=bounds[0]||bounds[3]<=bounds[1])throw new IOException("Outside regional context");}
+            }catch(IOException tooWide){last=tooWide;continue;}
             try{
                 List<JSONArray> rows=engine.boundedFeatures(engine.keys(),bounds,required,false,16000,160000);
                 android.util.Log.i("UnifiedRegion","Bounded regional context: "+rows.size()+" features, margin "+margin);
