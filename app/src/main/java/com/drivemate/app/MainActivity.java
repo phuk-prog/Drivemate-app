@@ -100,12 +100,12 @@ public final class MainActivity extends Activity implements LocationListener {
     private final Runnable gpsWatchdog = new Runnable() {
         @Override public void run() {
             if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
-            if (active && currentLocation != null
+            if ((active||freeDriving) && currentLocation != null
                     && System.currentTimeMillis() - currentLocation.getTime() > 15000) {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
-                    suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
+                    if(active)suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
                     if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
@@ -329,7 +329,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private GeoMath.Point pendingRouteOrigin;
     private int pendingSavingSeconds;
     private int rerouteMode = 1; // 0 automatic, 1 ask first
-    private int speedToleranceMph = 0;
+    private int speedToleranceMph = 5;
     private long lastSpeedWarningAt;
     private TextView upcomingSpeedText;
     private final SpeedChangeAwareness speedChangeAwareness = new SpeedChangeAwareness();
@@ -474,7 +474,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         settings.getBoolean("voice", true));
         guidanceVolume = Math.max(0.1f, Math.min(1f, settings.getFloat("speech_volume", 0.85f)));
         rerouteMode = Math.max(0, Math.min(1, settings.getInt("reroute_mode", 1)));
-        speedToleranceMph = Math.max(0, Math.min(15, settings.getInt("speed_tolerance_mph", 0)));
+        speedToleranceMph = Math.max(0, Math.min(15, settings.getInt("speed_tolerance_mph", 5)));
         cameraMode = settings.contains("camera_mode")
                 ? Math.max(0, Math.min(2, settings.getInt("camera_mode", 0)))
                 : settings.getBoolean("north_up", false)
@@ -1280,7 +1280,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void setHomeVisible(boolean show) {
         homeMode = show;
-        if(!show)freeDriving=false;
+        if(!show&&freeDriving){freeDriving=false;freeDriveBearing=Double.NaN;getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
         if (homePanel == null || navigationPanel == null) return;
         homePanel.setVisibility(show && !keyboardOpen && !freeDriving ? View.VISIBLE : View.GONE);
         navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
@@ -1303,6 +1303,8 @@ public final class MainActivity extends Activity implements LocationListener {
             int above = navHeight > 0 ? navHeight + dp(19) : dp(active ? 100 : 225);
             speedBadgePos.bottomMargin = freeDriving ? dp(16) : show ? dp(320) : above;
             gpsButtonPos.bottomMargin = freeDriving ? dp(16) : show ? dp(327) : above;
+            if(speedBadgeView!=null)speedBadgeView.requestLayout();
+            if(followButton!=null)followButton.requestLayout();
         }
         applyNavigationChrome();
         if (show && !keyboardOpen) refreshHomePanel();
