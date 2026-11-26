@@ -59,7 +59,7 @@ public final class VectorDriveMap {
     private GeoJsonSource signalSource;
     private MappedSignals signals;
     private GeoJsonSource roadsideSource, speedChangeSource, routeEventSource;
-    private GeoJsonSource incidentLineSource,incidentPointSource;
+    private GeoJsonSource incidentLineSource,incidentPointSource,averageZoneSource;
     private List<LiveTrafficIncidents.Event> areaIncidents=java.util.Collections.emptyList();
     private long areaIncidentFetchedAt;
     private int areaIncidentCount=-1;
@@ -615,6 +615,10 @@ public final class VectorDriveMap {
         speedChangeSource=new GeoJsonSource("dm-speed-changes",FeatureCollection.fromFeatures(new Feature[0]));
         routeEventSource=new GeoJsonSource("dm-route-events",FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(speedChangeSource);style.addSource(routeEventSource);
+        averageZoneSource=exactLineSource("dm-average-speed-zones");style.addSource(averageZoneSource);
+        LineLayer average=new LineLayer("dm-average-speed-zone-outline","dm-average-speed-zones");
+        average.setMinZoom(12f);average.setProperties(PropertyFactory.lineColor("#a85c15"),PropertyFactory.lineWidth(15f),PropertyFactory.lineOpacity(.8f),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+        style.addLayerBelow(average,"dm-route-halo");
         CircleLayer c=new CircleLayer("dm-speed-change-roundels","dm-speed-changes");
         c.setMinZoom(13f);c.setProperties(PropertyFactory.circleColor("#ffffff"),
                 PropertyFactory.circleRadius(13f),PropertyFactory.circleStrokeWidth(3f),PropertyFactory.circleStrokeColor("#d9272e"));
@@ -685,7 +689,7 @@ public final class VectorDriveMap {
     }
     private void publishRouteEvents(){
         if(!ready()||speedChangeSource==null||routeEventSource==null)return;
-        ArrayList<Feature> speed=new ArrayList<>(),traffic=new ArrayList<>();
+        ArrayList<Feature> speed=new ArrayList<>(),traffic=new ArrayList<>(),zones=new ArrayList<>();
         long age=System.currentTimeMillis()-routeEventsFetchedAt;
         if(!routeEventsExpired && age>=0 && age<=480000 && pendingRoute!=null&&pendingRoute.size()>1){
             for(RouteIntelligence.SpeedSection section:pendingSpeedSections){
@@ -705,6 +709,21 @@ public final class VectorDriveMap {
                 if(p!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(p.lon,p.lat));f.addStringProperty("label",section.label());traffic.add(f);}
             }
         }
+        if(!routeEventsExpired&&age>=0&&age<=480000&&sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0&&pendingRoute!=null){
+            for(RouteRoadsideAwareness.Event event:sharedRouteMap.routeRoadside){
+                if(traffic.size()>=500)break;
+                if(event.offset<0||event.offset>routeLength)continue;
+                GeoMath.Point point=exactGeometry.at(event.offset);
+                if(point!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(point.lon,point.lat));f.addStringProperty("label",event.label);traffic.add(f);}
+            }
+            for(MappedEnforcement.Zone zone:sharedRouteMap.averageZones){
+                if(zones.size()>=200||zone.start<0||zone.end>routeLength||zone.end<=zone.start)continue;
+                List<GeoMath.Point> slice=GeoMath.slice(pendingRoute,zone.start,zone.end);
+                ArrayList<Point> vertices=new ArrayList<>();for(GeoMath.Point point:slice)vertices.add(Point.fromLngLat(point.lon,point.lat));
+                if(vertices.size()>1)zones.add(Feature.fromGeometry(LineString.fromLngLats(vertices)));
+            }
+        }
+        if(averageZoneSource!=null)averageZoneSource.setGeoJson(FeatureCollection.fromFeatures(zones.toArray(new Feature[0])));
         speedChangeSource.setGeoJson(FeatureCollection.fromFeatures(speed.toArray(new Feature[0])));
         routeEventSource.setGeoJson(FeatureCollection.fromFeatures(traffic.toArray(new Feature[0])));
     }
