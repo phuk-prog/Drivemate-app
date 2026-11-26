@@ -67,12 +67,16 @@ public final class DmTileEngine {
         final long[][] entries,exits;final int[][] cost;final Map<Long,Integer> row=new HashMap<>();final String[] exitCell;
         /** Level 2 only: the cell each entering road arrives in. */
         final String[] entryCell;
+        /** Compass bearing of each entering / leaving road (-1 unknown), for turn costs. */
+        final int[] entryBrg,exitBrg;
         Overlay(JSONObject d)throws JSONException{
             JSONArray en=d.getJSONArray("entries"),ex=d.getJSONArray("exits"),c=d.getJSONArray("cost");
-            entries=new long[en.length()][];entryCell=new String[en.length()];
-            for(int i=0;i<en.length();i++){JSONArray a=en.getJSONArray(i);entries[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(3),a.getLong(4),a.getLong(5)};if(a.length()>6)entryCell[i]=a.getString(6);row.put(entries[i][0],i);}
-            exits=new long[ex.length()][];exitCell=new String[ex.length()];
-            for(int i=0;i<ex.length();i++){JSONArray a=ex.getJSONArray(i);exits[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(4),a.getLong(5),a.getLong(6)};exitCell[i]=a.getString(3);}
+            entries=new long[en.length()][];entryCell=new String[en.length()];entryBrg=new int[en.length()];
+            // Level 1: [edge,src,dst,way,lat,lon,bearing]; level 2 adds the cell: [...,lon,cell,bearing].
+            for(int i=0;i<en.length();i++){JSONArray a=en.getJSONArray(i);entries[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(3),a.getLong(4),a.getLong(5)};
+                if(a.opt(6) instanceof String){entryCell[i]=a.getString(6);entryBrg[i]=a.optInt(7,-1);}else entryBrg[i]=a.optInt(6,-1);row.put(entries[i][0],i);}
+            exits=new long[ex.length()][];exitCell=new String[ex.length()];exitBrg=new int[ex.length()];
+            for(int i=0;i<ex.length();i++){JSONArray a=ex.getJSONArray(i);exits[i]=new long[]{a.getLong(0),a.getLong(1),a.getLong(2),a.getLong(4),a.getLong(5),a.getLong(6)};exitCell[i]=a.getString(3);exitBrg[i]=a.optInt(7,-1);}
             if(c.length()!=entries.length)throw new JSONException("Overlay cost rows");
             cost=new int[c.length()][];for(int i=0;i<c.length();i++){JSONArray r=c.getJSONArray(i);if(r.length()!=exits.length)throw new JSONException("Overlay cost columns");cost[i]=new int[r.length()];for(int j=0;j<r.length();j++)cost[i][j]=r.getInt(j);}
         }
@@ -153,8 +157,9 @@ public final class DmTileEngine {
         return best;
     }
     static final class State{
-        final Node node;final long edge,way,prev;final double cost,distance,priority;final State parent;
-        State(Node n,long e,long w,long p,double c,double d,double f,State prevState){node=n;edge=e;way=w;prev=p;cost=c;distance=d;priority=f;parent=prevState;}
+        final Node node;final long edge,way,prev;final double cost,distance,priority;final State parent;final int brg;
+        State(Node n,long e,long w,long p,double c,double d,double f,State prevState){this(n,e,w,p,c,d,f,prevState,-1);}
+        State(Node n,long e,long w,long p,double c,double d,double f,State prevState,int bearing){node=n;edge=e;way=w;prev=p;cost=c;distance=d;priority=f;parent=prevState;brg=bearing;}
     }
     public static final class Route{
         public final List<GeoMath.Point> points;public final List<Long> ways,nodeIds,edgeIds;public final Set<String> cells;public final double metres,seconds;public final int expansions;public final long ms;
@@ -184,8 +189,8 @@ public final class DmTileEngine {
     }
     /** Search state for the hierarchy: a road by road step in a detail cell, or an overlay entry. */
     private static final class HState{
-        final long edge,node,prev,way;final String cell;final double cost,priority;
-        HState(long e,String c,long n,long p,long w,double g,double f){edge=e;cell=c;node=n;prev=p;way=w;cost=g;priority=f;}
+        final long edge,node,prev,way;final String cell;final double cost,priority;final int brg;
+        HState(long e,String c,long n,long p,long w,double g,double f,int bearing){edge=e;cell=c;node=n;prev=p;way=w;cost=g;priority=f;brg=bearing;}
     }
     /** How the search reached an edge: road by road from a node, or by jumping across a cell. */
     private static final class Step{final long parent;final boolean jump,block;final String cell;final long fromNode;
@@ -207,7 +212,7 @@ public final class DmTileEngine {
         Set<String> hot=level2Blocks==null?Collections.emptySet():new HashSet<>(Arrays.asList(blockKey(a.cell),blockKey(b.cell)));
         PriorityQueue<HState> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));
         Map<Long,Double> best=new HashMap<>();Map<Long,Step> steps=new HashMap<>();
-        q.add(new HState(0,a.cell,a.id,0,0,0,heuristic(a.point,b.point)));best.put(0L,0.0);int count=0;
+        q.add(new HState(0,a.cell,a.id,0,0,0,heuristic(a.point,b.point),-1));best.put(0L,0.0);int count=0;
         while(!q.isEmpty()&&count<MAX_NODES&&best.size()<180000&&q.size()<160000&&now()-began<25000){
             HState s=q.poll();if(s.cost>best.getOrDefault(s.edge,Double.POSITIVE_INFINITY)+1e-7)continue;
             String blk=detail.contains(s.cell)?null:jumpsBlock(s.cell,hot,allowed);
@@ -219,25 +224,25 @@ public final class DmTileEngine {
                     if(allowed!=null&&!allowed.contains(dest))continue;
                     double cost=s.cost+row[j]/1000.0;if(cost+1e-7>=best.getOrDefault(x[0],Double.POSITIVE_INFINITY))continue;
                     best.put(x[0],cost);steps.put(x[0],new Step(s.edge,true,true,blk,0));
-                    q.add(new HState(x[0],dest,x[2],x[1],x[3],cost,cost+heuristic(new GeoMath.Point(x[4]/1e6,x[5]/1e6),b.point)));
+                    q.add(new HState(x[0],dest,x[2],x[1],x[3],cost,cost+heuristic(new GeoMath.Point(x[4]/1e6,x[5]/1e6),b.point),o.exitBrg[j]));
                 }
                 continue;
             }
             if(detail.contains(s.cell)){
                 Node n=load(s.cell).nodes.get(s.node);
                 if(n.id==b.id&&s.edge!=0)return unpack(s.edge,s.cost,steps,a,count,now()-began);
-                count++;List<long[]> rs=rules(n,s.way);
+                count++;List<long[]> rs=rules(n,s.way);int options=options(n,s.prev);
                 for(int i=0;i<n.edges.length();i++){
                     JSONArray e=n.edges.getJSONArray(i);long id=e.getLong(0),dst=e.getLong(1),way=e.getLong(3);String dest=e.getString(2);
                     if(allowed!=null&&!allowed.contains(dest))continue;
                     if(s.edge!=0&&!LocalRoutingPilot.allowed(s.prev,dst,way,rs))continue;
                     double seconds=e.getLong(5)/1000.0;if(e.getLong(4)<=0||seconds<=0)throw new IOException("Invalid edge");
-                    double cost=s.cost+seconds;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
+                    double cost=s.cost+(e.getLong(5)+turnMs(s.brg,e.optInt(6,-1),options))/1000.0;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
                     GeoMath.Point at;
                     if(detail.contains(dest)){Node next=load(dest).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");at=next.point;}
                     else{Overlay o=overlay(dest);Integer r=o.row.get(id);if(r==null)throw new IOException("Road hierarchy missing entry");at=new GeoMath.Point(o.entries[r][4]/1e6,o.entries[r][5]/1e6);}
                     best.put(id,cost);steps.put(id,new Step(s.edge,false,s.cell,n.id));
-                    q.add(new HState(id,dest,dst,n.canon,way,cost,cost+heuristic(at,b.point)));
+                    q.add(new HState(id,dest,dst,n.canon,way,cost,cost+heuristic(at,b.point),e.optInt(6,-1)));
                 }
             }else{
                 Overlay o=overlay(s.cell);Integer r=o.row.get(s.edge);if(r==null)throw new IOException("Road hierarchy missing entry");count++;
@@ -247,27 +252,39 @@ public final class DmTileEngine {
                     if(allowed!=null&&!allowed.contains(dest))continue;
                     double cost=s.cost+row[j]/1000.0;if(cost+1e-7>=best.getOrDefault(x[0],Double.POSITIVE_INFINITY))continue;
                     best.put(x[0],cost);steps.put(x[0],new Step(s.edge,true,s.cell,0));
-                    q.add(new HState(x[0],dest,x[2],x[1],x[3],cost,cost+heuristic(new GeoMath.Point(x[4]/1e6,x[5]/1e6),b.point)));
+                    q.add(new HState(x[0],dest,x[2],x[1],x[3],cost,cost+heuristic(new GeoMath.Point(x[4]/1e6,x[5]/1e6),b.point),o.exitBrg[j]));
                 }
             }
         }throw new CoverageException("No connected route inside pilot limits");
     }
     private double heuristic(GeoMath.Point p,GeoMath.Point goal){return GeoMath.distance(p,goal)*3.6/maxKph;}
+    /** Turn costs: same model and integer arithmetic as map tools/dm_overlay.turn_ms. UK drives on
+     *  the left, so right turns cross oncoming traffic; only at real junctions, sharper than 30 degrees. */
+    static final int LEFT_TURN_S=4,RIGHT_TURN_S=8,TURN_FREE_DEG=30;
+    static long turnMs(int bIn,int bOut,int options){
+        if(bIn<0||bOut<0||options<=1)return 0;
+        int d=((bOut-bIn+540)%360)-180,a=Math.abs(d);
+        if(a<TURN_FREE_DEG)return 0;
+        long s=d<0?LEFT_TURN_S:RIGHT_TURN_S;
+        return s*1000+s*500*(a-TURN_FREE_DEG)/(180-TURN_FREE_DEG);
+    }
+    /** Ways on from a node, excluding a U-turn back to where the search came from. */
+    private static int options(Node n,long prev)throws JSONException{int c=0;for(int i=0;i<n.edges.length();i++)if(n.edges.getJSONArray(i).getLong(1)!=prev)c++;return c;}
     /** Edge-based Dijkstra inside one cell after driving entry edge (id, src, dst, way); integer ms like the map compiler.
      *  Returns, for each reached edge, {previous edge, edge index at its source node, source node}. */
-    private Map<Long,long[]> cellSearch(Tile tile,String cell,long entry,long src,long dst,long way)throws Exception{
+    private Map<Long,long[]> cellSearch(Tile tile,String cell,long entry,long src,long dst,long way,int entryBrg)throws Exception{
         Map<Long,Long> best=new HashMap<>();Map<Long,long[]> parent=new HashMap<>();
         PriorityQueue<long[]> q=new PriorityQueue<>(Comparator.comparingLong(v->v[0]));
-        best.put(entry,0L);q.add(new long[]{0,entry,dst,src,way});
+        best.put(entry,0L);q.add(new long[]{0,entry,dst,src,way,entryBrg});
         while(!q.isEmpty()){
             long[] s=q.poll();if(s[0]>best.get(s[1]))continue;
-            Node n=tile.nodes.get(s[2]);if(n==null)throw new IOException("Broken overlay entry");List<long[]> rs=rules(n,s[4]);
+            Node n=tile.nodes.get(s[2]);if(n==null)throw new IOException("Broken overlay entry");List<long[]> rs=rules(n,s[4]);int options=options(n,s[3]);
             for(int i=0;i<n.edges.length();i++){
-                JSONArray e=n.edges.getJSONArray(i);long id=e.getLong(0),to=e.getLong(1),nw=e.getLong(3);
+                JSONArray e=n.edges.getJSONArray(i);long id=e.getLong(0),to=e.getLong(1),nw=e.getLong(3);int bo=e.optInt(6,-1);
                 if(!LocalRoutingPilot.allowed(s[3],to,nw,rs))continue;
-                long cost=s[0]+e.getLong(5);if(cost>=best.getOrDefault(id,Long.MAX_VALUE))continue;
+                long cost=s[0]+e.getLong(5)+turnMs((int)s[5],bo,options);if(cost>=best.getOrDefault(id,Long.MAX_VALUE))continue;
                 best.put(id,cost);parent.put(id,new long[]{s[1],i,n.id});
-                if(cell.equals(e.getString(2)))q.add(new long[]{cost,id,to,n.canon,nw});
+                if(cell.equals(e.getString(2)))q.add(new long[]{cost,id,to,n.canon,nw,bo});
             }
         }return parent;
     }
@@ -292,7 +309,7 @@ public final class DmTileEngine {
     /** Roads of one level-1 jump across cell, from entry road to exit road, as {edge, source node, index at source}. */
     private List<long[]> cellRoads(String cell,long entry,long exit)throws Exception{
         Overlay o=overlay(cell);Integer r=o.row.get(entry);if(r==null)throw new IOException("Road hierarchy missing entry");long[] en=o.entries[r];
-        Map<Long,long[]> parent=cellSearch(load(cell),cell,en[0],en[1],en[2],en[3]);List<long[]> hops=new ArrayList<>();
+        Map<Long,long[]> parent=cellSearch(load(cell),cell,en[0],en[1],en[2],en[3],o.entryBrg[r]);List<long[]> hops=new ArrayList<>();
         for(long e=exit;e!=en[0];){long[] pr=parent.get(e);if(pr==null)throw new IOException("Road hierarchy unpack failed");hops.add(new long[]{e,pr[2],pr[1]});e=pr[0];}
         Collections.reverse(hops);return hops;
     }
@@ -338,15 +355,15 @@ public final class DmTileEngine {
         while(!q.isEmpty()&&count<MAX_NODES&&best.size()<180000&&q.size()<160000&&now()-began<25000){
             State s=q.poll();if(s.cost>best.getOrDefault(s.edge,Double.POSITIVE_INFINITY)+1e-7)continue;
             if(s.node.id==b.id)return new Route(s,count,now()-began);
-            count++;List<long[]> rs=rules(s);
+            count++;List<long[]> rs=rules(s);int options=options(s.node,s.prev);
             for(int i=0;i<s.node.edges.length();i++){
                 JSONArray e=s.node.edges.getJSONArray(i);long id=e.getLong(0),dst=e.getLong(1),way=e.getLong(3);
                 if(s.edge!=0&&!LocalRoutingPilot.allowed(s.prev,dst,way,rs))continue;
                 double length=e.getLong(4)/1000.0,seconds=e.getLong(5)/1000.0;if(length<=0||seconds<=0)throw new IOException("Invalid edge");
-                double cost=s.cost+seconds;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
+                double cost=s.cost+(e.getLong(5)+turnMs(s.brg,e.optInt(6,-1),options))/1000.0;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
                 String nextCell=e.getString(2);if(allowed!=null&&!allowed.contains(nextCell))continue;
                 Node next=load(nextCell).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");
-                best.put(id,cost);q.add(new State(next,id,way,s.node.canon,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/maxKph,lower.getOrDefault(next.cell,0L)/1000.0),s));
+                best.put(id,cost);q.add(new State(next,id,way,s.node.canon,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/maxKph,lower.getOrDefault(next.cell,0L)/1000.0),s,e.optInt(6,-1)));
             }
         }throw new CoverageException("No connected route inside pilot limits");
     }
