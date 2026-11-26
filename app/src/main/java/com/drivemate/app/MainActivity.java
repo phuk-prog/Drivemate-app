@@ -109,6 +109,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
                     if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
+                    if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
                     if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
                     if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
                     saySystemWarning("GPS signal lost. Waiting for location.");
@@ -331,7 +332,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private int rerouteMode = 1; // 0 automatic, 1 ask first
     private int speedToleranceMph = 5;
     private long lastSpeedWarningAt;
-    private TextView upcomingSpeedText;
+    private TextView upcomingSpeedText, upcomingRoadsideText;
+    private final RouteRoadsideAwareness roadsideAwareness=new RouteRoadsideAwareness();
     private final SpeedChangeAwareness speedChangeAwareness = new SpeedChangeAwareness();
     private long lastTrafficWarningAt;
     private double lastTrafficWarningStart = -1;
@@ -1157,6 +1159,11 @@ public final class MainActivity extends Activity implements LocationListener {
         upcomingSpeedText.setMaxLines(2);
         upcomingSpeedText.setVisibility(View.GONE);
         container.addView(upcomingSpeedText, new LinearLayout.LayoutParams(-1, -2));
+        upcomingRoadsideText=text("",13,Color.WHITE,true);
+        upcomingRoadsideText.setBackground(rounded(DARK,8));
+        upcomingRoadsideText.setPadding(dp(8),dp(4),dp(8),dp(4));
+        upcomingRoadsideText.setVisibility(View.GONE);
+        container.addView(upcomingRoadsideText,new LinearLayout.LayoutParams(-1,-2));
 
         LinearLayout arrivalRow = new LinearLayout(this);
         arrivalRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -1227,6 +1234,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (!navigating) {
             if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
+                    if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
             if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
             if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
             if (rerouteSuggestionRow != null) rerouteSuggestionRow.setVisibility(View.GONE);
@@ -2752,7 +2760,7 @@ public final class MainActivity extends Activity implements LocationListener {
         say("Navigation started.");
         lastCameraUpdate = 0;
         previousInstructionIndex = 0;
-        speedChangeAwareness.reset();
+        speedChangeAwareness.reset();roadsideAwareness.reset();
         stabilizedAlong = -1;
         navigationMatch = null;
         lastRoutePrefetchAt = -1;
@@ -3259,7 +3267,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         offRouteSince = 0;
         previousInstructionIndex = 0;
-        speedChangeAwareness.reset();
+        speedChangeAwareness.reset();roadsideAwareness.reset();
         stabilizedAlong = -1;
         navigationMatch = null;
         lastRoutePrefetchAt = -1;
@@ -3369,6 +3377,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
         if(trafficNoticeText!=null)trafficNoticeText.setVisibility(View.GONE);
         if(upcomingSpeedText!=null)upcomingSpeedText.setVisibility(View.GONE);
+        if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
         clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
     }
 
@@ -3707,6 +3716,19 @@ public final class MainActivity extends Activity implements LocationListener {
                     true);
         }
 
+        RouteRoadsideAwareness.Event roadside = confident && guidancePositionConfirmed && accuracy<=25 && offRoute<=20
+                && route.sharedGeometry!=null && age<=480000
+                ? RouteRoadsideAwareness.next(route.sharedGeometry.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
+                : null;
+        if(upcomingRoadsideText!=null){
+            upcomingRoadsideText.setVisibility(roadside==null?View.GONE:View.VISIBLE);
+            if(roadside!=null){
+                upcomingRoadsideText.setText(roadside.label+" ahead · "+NavigationUnits.displayDistance(roadside.offset-along,metricUnits));
+                if(hazardWarningEnabled&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()
+                        && distanceToTurn>100 && fix.hasSpeed()&&fix.getSpeed()>1.5f && roadsideAwareness.announce(roadside))
+                    sayVerifiedAlert(roadside.label+" ahead in "+NavigationUnits.spokenDistance(roadside.offset-along,metricUnits)+". Check road conditions.",false);
+            }
+        }
         RouteIntelligence.TrafficSection traffic = confident
                 ? RouteIntelligence.nextTraffic(route.trafficSections, along, 2500) : null;
         if (trafficNoticeText != null) {
@@ -3882,7 +3904,7 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsAccuracyText.setText("");
         vehicleFilter.reset();
         previousInstructionIndex = 0;
-        speedChangeAwareness.reset();
+        speedChangeAwareness.reset();roadsideAwareness.reset();
         stabilizedAlong = -1;
         navigationMatch = null;
         lastRoutePrefetchAt = -1;
