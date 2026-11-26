@@ -1,0 +1,32 @@
+name: Remove historical unprotected APK downloads
+on:
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: Delete matching historical APK artifacts and raw release assets (unchecked = report only)
+        type: boolean
+        default: false
+        required: true
+permissions:
+  actions: write
+  contents: write
+concurrency:
+  group: remove-public-apks
+  cancel-in-progress: false
+jobs:
+  cleanup:
+    if: github.ref == 'refs/heads/main' && github.repository == 'phuk-prog/Drivemate-app'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit or remove historical APK downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DELETE_REQUESTED: ${{ inputs.delete }}
+        run: |
+          if [[ "$DELETE_REQUESTED" == true ]]; then
+            bash tools/remove-public-apks.sh --delete
+          else
+            bash tools/remove-public-apks.sh --dry-run
+          fi

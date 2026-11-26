@@ -1,0 +1,30 @@
+name: APK distribution safety
+on:
+  pull_request:
+  push:
+    branches: [main, 'feat/**', 'policy/**']
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/check-apk-distribution.py
+      - name: Verify password encryption on harmless test fixture
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          printf 'non-installable test fixture\n' > "$tmp/test.apk"
+          export DRIVEMATE_ZIP_PASSWORD='fixture-only-not-a-secret-2026'
+          bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/test.zip"
+          if 7z t -pwrong-password "$tmp/test.zip" >/dev/null 2>&1; then
+            echo 'Archive unexpectedly accepted wrong password' >&2; exit 1
+          fi
+          7z x "-p$DRIVEMATE_ZIP_PASSWORD" "-o$tmp/extracted" "$tmp/test.zip" >/dev/null
+          cmp "$tmp/test.apk" "$tmp/extracted/test.apk"
+          if DRIVEMATE_ZIP_PASSWORD='' bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/unprotected.zip"; then
+            echo 'Missing password unexpectedly accepted' >&2; exit 1
+          fi
+          test ! -e "$tmp/unprotected.zip"

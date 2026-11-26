@@ -111,6 +111,12 @@ jobs:
             navigation-lab/evidence/
             unified-zoom-results/
             app/src/main/assets/dmtiles-stockport/alignment-report.json
+            !**/*.apk
+            !**/*.aab
+            !**/*.apks
+            !**/*.xapk
+            !**/*.apkm
+            !**/*.zip
           if-no-files-found: warn
       - name: Build unsigned release APK
         run: ./gradlew --no-daemon :app:assembleRelease

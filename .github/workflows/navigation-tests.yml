@@ -57,4 +57,10 @@ jobs:
             unified-zoom-results/
             navigation-lab/evidence/
             navigation-lab/trace.json
+            !**/*.apk
+            !**/*.aab
+            !**/*.apks
+            !**/*.xapk
+            !**/*.apkm
+            !**/*.zip
           if-no-files-found: warn
