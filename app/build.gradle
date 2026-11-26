@@ -9,8 +9,8 @@ android {
         minSdk 26
         targetSdk 34
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        versionCode 200015
-        versionName '2.1.0'
+        versionCode 200016
+        versionName '2.1.1'
     }
     // The map/zoom test variant installs alongside stable DriveMate.
     // The signed release variant retains the established update-compatible ID.
