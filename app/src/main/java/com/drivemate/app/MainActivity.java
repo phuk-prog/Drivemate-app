@@ -110,6 +110,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
+                    clearLiveIncidents();
                     if(active)suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
                     else if(freeDriving)clearFreeRoadContext();
                     if (speedText != null) speedText.setText("GPS —");
@@ -3839,10 +3840,17 @@ public final class MainActivity extends Activity implements LocationListener {
                 && route.sharedGeometry!=null && age<=480000
                 ? RouteRoadsideAwareness.next(route.sharedGeometry.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
                 : null;
+        MappedEnforcement.Zone activeZone=null;
+        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20&&route.sharedGeometry!=null&&age<=480000){
+            for(MappedEnforcement.Zone z:route.sharedGeometry.averageZones)if(z.active(along)){
+                if(activeZone==null||z.end<activeZone.end)activeZone=z;
+            }
+        }
         if(upcomingRoadsideText!=null){
-            upcomingRoadsideText.setVisibility(roadside==null?View.GONE:View.VISIBLE);
+            upcomingRoadsideText.setVisibility(roadside==null&&activeZone==null?View.GONE:View.VISIBLE);
+            if(activeZone!=null)upcomingRoadsideText.setText("Mapped average-speed zone · "+NavigationUnits.displayDistance(activeZone.end-along,metricUnits)+" remaining");
             if(roadside!=null){
-                upcomingRoadsideText.setText(roadside.label+" ahead · "+NavigationUnits.displayDistance(roadside.offset-along,metricUnits));
+                if(activeZone==null)upcomingRoadsideText.setText(roadside.label+" ahead · "+NavigationUnits.displayDistance(roadside.offset-along,metricUnits));
                 if(hazardWarningEnabled&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()
                         && distanceToTurn>100 && fix.hasSpeed()&&fix.getSpeed()>1.5f && roadsideAwareness.announce(roadside))
                     sayVerifiedAlert(roadside.label+" ahead in "+NavigationUnits.spokenDistance(roadside.offset-along,metricUnits)+". Check road conditions.",false);
