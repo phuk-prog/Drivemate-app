@@ -59,8 +59,8 @@ public final class DriveMateProvider {
         return route;
     }
     static final class RoadContext {
-        final List<JSONArray> ways;final double[] bounds;final long fetchedAt;
-        RoadContext(List<JSONArray> ways,double[] bounds){this.ways=ways;this.bounds=bounds;fetchedAt=System.currentTimeMillis();}
+        final List<JSONArray> ways;final double[] bounds;final long fetchedAt;final DmUnifiedGeometry map;
+        RoadContext(List<JSONArray> ways,double[] bounds,DmUnifiedGeometry map){this.ways=ways;this.bounds=bounds;this.map=map;fetchedAt=System.currentTimeMillis();}
         boolean freshAt(GeoMath.Point p){
             long age=System.currentTimeMillis()-fetchedAt;
             return age>=0&&age<=120000&&p!=null&&p.lon>bounds[0]+.0007&&p.lon<bounds[2]-.0007
@@ -89,7 +89,9 @@ public final class DriveMateProvider {
             vertices+=f.getJSONArray(2).length();if(vertices>100000)throw new IOException("Too many vertices");ways.add(f);
         }
         if(!source.equals(json(root+"/v1/graph-source",null).optString("source_sha256")))throw new IOException("Road context source changed");
-        return new RoadContext(Collections.unmodifiableList(ways),bounds);
+        DmUnifiedGeometry geometry=DmUnifiedGeometry.browse(ways,bounds);
+        JSONArray mapped=response.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
+        return new RoadContext(Collections.unmodifiableList(ways),bounds,geometry);
     }
     /** Optional V2 geometry from the configured trusted routing host; never alters route or instructions. */
     static DmUnifiedGeometry sharedMap(String endpoint,TomTomApi.Route route){
