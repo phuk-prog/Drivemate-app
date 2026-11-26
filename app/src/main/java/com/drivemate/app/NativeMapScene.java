@@ -41,7 +41,7 @@ final class NativeMapScene {
         return create(rows,path.points,path.ways,path.nodeIds,bounds);
     }
     static NativeMapScene create(List<JSONArray> rows,List<GeoMath.Point> points,List<Long> ways,List<Long> nodes,double[] bounds)throws Exception{
-        if(points.size()<2||ways.size()!=points.size()-1||nodes.size()!=points.size()||bounds==null||bounds.length!=4||rows.size()>16000)throw new IOException("Invalid native scene identity");
+        if((!points.isEmpty()&&(points.size()<2||ways.size()!=points.size()-1||nodes.size()!=points.size()))||(points.isEmpty()&&(!ways.isEmpty()||!nodes.isEmpty()))||bounds==null||bounds.length!=4||rows.size()>16000)throw new IOException("Invalid native scene identity");
         Map<Long,JSONArray> exact=new HashMap<>();List<Shape> shapes=new ArrayList<>();int vertices=0;
         for(JSONArray row:rows){
             if(row.length()!=4||exact.put(row.getLong(0),row)!=null)throw new IOException("Duplicate or invalid map way");
@@ -73,6 +73,10 @@ final class NativeMapScene {
         shapes.sort(Comparator.comparingInt((Shape s)->s.bridge?100+s.kind:s.tunnel?3:s.kind));
         return new NativeMapScene(shapes,points,ways.size(),bounds);
     }
+    static NativeMapScene browse(List<JSONArray> rows,double[] bounds)throws Exception{
+        return create(rows,Collections.emptyList(),Collections.emptyList(),Collections.emptyList(),bounds);
+    }
+    boolean covers(GeoMath.Point p){return RouteMapPolicy.insideBounds(p,bounds);}
     private static boolean matches(JSONArray p,GeoMath.Point q)throws JSONException{
         return p.getLong(0)==Math.round(q.lat*1e6)&&p.getLong(1)==Math.round(q.lon*1e6);
     }

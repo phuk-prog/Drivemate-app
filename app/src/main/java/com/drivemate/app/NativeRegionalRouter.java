@@ -28,12 +28,12 @@ final class NativeRegionalRouter {
         TomTomApi.Route route=new TomTomApi.Route(path.points,instructions,GeoMath.length(path.points),
                 Math.max(1,(int)Math.ceil(path.seconds)),0,Collections.emptyList(),limits,Collections.emptyList(),PROVIDER);
         route.geometrySourceSha=region.parentSource;route.geometryWays=path.ways;
-        route.sharedGeometry=region.geometry(path);
+        route.nativeScene=region.nativeScene(path);
         return route;
     }
     static final class RoadContext {
-        final List<JSONArray> ways;final double[] bounds;final DmUnifiedGeometry map;final long created=System.currentTimeMillis();
-        RoadContext(List<JSONArray> ways,double[] bounds,DmUnifiedGeometry map){this.ways=ways;this.bounds=bounds;this.map=map;}
+        final List<JSONArray> ways;final double[] bounds;final NativeMapScene map;final long created=System.currentTimeMillis();
+        RoadContext(List<JSONArray> ways,double[] bounds,NativeMapScene map){this.ways=ways;this.bounds=bounds;this.map=map;}
         boolean freshAt(GeoMath.Point p){
             long age=System.currentTimeMillis()-created;
             return age>=0&&age<=120000&&p!=null&&p.lon>bounds[0]+.0007&&p.lon<bounds[2]-.0007&&p.lat>bounds[1]+.0005&&p.lat<bounds[3]-.0005;
@@ -45,7 +45,7 @@ final class NativeRegionalRouter {
         double[] bounds={Math.max(regionBounds[0],p.lon-.004),Math.max(regionBounds[1],p.lat-.003),Math.min(regionBounds[2],p.lon+.004),Math.min(regionBounds[3],p.lat+.003)};
         DmUnifiedRegion region=new DmUnifiedRegion(app,true);
         List<JSONArray> features=region.engine.boundedFeatures(region.engine.keys(),bounds,Collections.emptySet(),false,6000,100000);
-        DmUnifiedGeometry geometry=DmUnifiedGeometry.regional(features,Collections.emptyList(),Collections.emptyList(),bounds);
+        NativeMapScene geometry=NativeMapScene.browse(features,bounds);
         List<JSONArray> ways=new ArrayList<>();
         // Existing conservative matcher uses E7 coordinates. Convert exactly from E6,
         // retaining original way and node IDs; no coordinate interpolation.

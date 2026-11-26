@@ -258,7 +258,7 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private MapView map;
     private DriveTileServer driveTiles;
-    private VectorDriveMap vectorMap;
+    private NativeMapController vectorMap;
     private Bundle vectorSavedState;
     private boolean useLocalMap = true;
     private boolean vectorRoadsReady;
@@ -527,12 +527,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 settings.getFloat("last_map_lon", Float.NaN),
                 settings.getLong("last_map_at", 0L),
                 System.currentTimeMillis());
-        try {
-            driveTiles = new DriveTileServer(this);
-        } catch (java.io.IOException e) {
-            driveTiles = null;
-            useLocalMap = false;
-        }
+        driveTiles = null; // Native regional scene reader needs no tile server.
         buildScreen();
         applyTheme();
         updateVoiceButton();
@@ -595,40 +590,16 @@ public final class MainActivity extends Activity implements LocationListener {
         FrameLayout mapHost = new FrameLayout(this);
         frame.addView(mapHost, new FrameLayout.LayoutParams(-1, -1));
         mapHost.addView(map, new FrameLayout.LayoutParams(-1, -1));
-        if (driveTiles != null) {
-            try {
-                vectorMap = new VectorDriveMap(this, vectorSavedState, driveTiles,
-                        apiKey, trafficEnabled, (status, roads) -> {
-                            if (status == RoadDisplayHealth.State.READY) {
-                                vectorRoadsReady = true;
-                                if (useLocalMap && !autoFallback) {
-                                    updateMapVisibility();
-                                    if (!active) setStatus("DriveMate map ready · UK streets visible");
-                                }
-                            } else if (status == RoadDisplayHealth.State.FAILED
-                                    && useLocalMap && !autoFallback) {
-                                vectorRoadsReady = false;
-                                setStatus("DriveMate roads unavailable · check downloaded map coverage");
-                            }
-                        });
-                applyHighDetailPolicy();
-                vectorMap.setOnUserGesture(this::disengageFollowForGesture);
-                vectorMap.setCamera(startupMapView.center, startupMapView.zoom, 0);
-                // Place MapLibre below the existing TomTom map while waiting
-                // for first verifiably painted UK street features.
-                mapHost.addView(vectorMap.view(), 0,
-                        new FrameLayout.LayoutParams(-1, -1));
-                updateMapVisibility();
-            } catch (Throwable error) {
-                android.util.Log.e("DriveMateMap", "Vector map initialization failed", error);
-                vectorMap = null;
-                useLocalMap = false;
-                if (driveTiles != null) {
-                    driveTiles.close();
-                    driveTiles = null;
-                }
-            }
-        }
+        vectorMap=new NativeMapController(this,(status,roads)->{
+            vectorRoadsReady=status==RoadDisplayHealth.State.READY;
+            if(!active&&route==null&&status==RoadDisplayHealth.State.FAILED)
+                setStatus("DriveMate detail unavailable · regional coverage required");
+        });
+        mapHost.addView(vectorMap.view(),0,new FrameLayout.LayoutParams(-1,-1));
+        useLocalMap=true;autoFallback=false;
+        vectorMap.setOnUserGesture(this::disengageFollowForGesture);
+        vectorMap.setCamera(startupMapView.center,startupMapView.zoom,0);
+        applyHighDetailPolicy();updateMapVisibility();
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
@@ -1057,8 +1028,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean matchingTomTomMap(){return false;}
 
     private boolean showingVector() {
-        return !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null
-                && vectorRoadsReady;
+        return vectorMap != null; // Native renderer owns camera, even during loading.
     }
 
     private void updateMapVisibility(){
@@ -2396,7 +2366,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private BitmapDrawable makeCarIcon() {
-        Bitmap source=VectorDriveMap.makeVehicleArrow();
+        Bitmap source=NativeMapController.makeVehicleArrow();
         Bitmap scaled=Bitmap.createScaledBitmap(source,dp(55),dp(55),true);
         return new BitmapDrawable(getResources(),scaled);
     }
@@ -2745,7 +2715,7 @@ public final class MainActivity extends Activity implements LocationListener {
         } else {
             detail += NavigationStartPolicy.trafficStatus(calculated.provider);
         }
-        return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.sharedGeometry != null);
+        return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.nativeScene != null);
     }
 
     private void showPreview(TomTomApi.Route calculated) {
@@ -2808,7 +2778,7 @@ public final class MainActivity extends Activity implements LocationListener {
         applyDrivingControls();
         stopButton.setText("End");
         stopButton.setContentDescription("End navigation");
-        setStatus("Navigating with "+route.provider+" · "+RouteMapPolicy.description(route.provider, route.sharedGeometry != null));
+        setStatus("Navigating with "+route.provider+" · "+RouteMapPolicy.description(route.provider, route.nativeScene != null));
         mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
         guidancePositionConfirmed=false;confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         nextInstruction="";
@@ -3311,7 +3281,7 @@ public final class MainActivity extends Activity implements LocationListener {
         map.invalidate();
         if (vectorMap != null) {
             vectorMap.setBuildingContext("DriveMate".equals(calculated.provider)?ownEndpoint():"",calculated.geometrySourceSha);
-            vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points, calculated.provider);
+            vectorMap.setSharedRoute(calculated.nativeScene, calculated.points, calculated.provider);
             vectorMap.setRouteEvents(calculated.speedSections,calculated.trafficSections,metricUnits,calculated.fetchedAtMs);
             if (preview) {
                 // Fit once the preview panel has laid out, so the whole route

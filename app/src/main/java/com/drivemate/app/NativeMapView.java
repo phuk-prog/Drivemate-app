@@ -14,7 +14,13 @@ final class NativeMapView extends View {
     private NativeMapScene scene;
     private GeoMath.Point center,vehicle;
     private RouteRenderGeometry route;
-    private double zoom=16,bearing=0,tilt=0,progress=0,turn=Double.NaN;
+    private double zoom=16,bearing=0,tilt=0,progress=0,turn=Double.NaN,secondTurn=Double.NaN,vehicleBearing=Double.NaN;
+    private GeoMath.Point destination,entrance,parked;
+    private boolean showBuildings=true,metric;
+    private List<RouteIntelligence.SpeedSection> speeds=Collections.emptyList();
+    private List<LiveTrafficIncidents.Event> incidents=Collections.emptyList();
+    private long incidentAt;
+    private Runnable gesture,paintListener;
     private boolean night;
     private int roadsDrawn,routeDrawn,buildingsDrawn;
     private float lastX,lastY;
@@ -25,11 +31,33 @@ final class NativeMapView extends View {
             @Override public boolean onScale(ScaleGestureDetector d){setZoom(zoom+Math.log(d.getScaleFactor())/Math.log(2));return true;}
         });
     }
-    void setScene(NativeMapScene value){scene=value;route=new RouteRenderGeometry(value.route);center=route.at(route.length*.4);vehicle=center;invalidate();}
-    void setZoom(double value){zoom=Math.max(11,Math.min(21,value));invalidate();}
+    void setScene(NativeMapScene value){scene=value;route=new RouteRenderGeometry(value==null?Collections.emptyList():value.route);if(value!=null&&!value.route.isEmpty()){center=route.at(route.length*.4);vehicle=center;}invalidate();}
+    void setSceneOnly(NativeMapScene value){scene=value;invalidate();}
+    void setRoute(List<GeoMath.Point> value){route=new RouteRenderGeometry(value);progress=0;turn=secondTurn=Double.NaN;invalidate();}
+    void setVehicle(GeoMath.Point p,double direction){vehicle=p;vehicleBearing=direction;invalidate();}
+    void setMarkers(GeoMath.Point d,GeoMath.Point e,GeoMath.Point p){destination=d;entrance=e;parked=p;invalidate();}
+    void setProgressOnly(double p){progress=Math.max(0,p);invalidate();}
+    void setTurns(double a,double b){turn=a;secondTurn=b;invalidate();}
+    void setEvents(List<RouteIntelligence.SpeedSection> s,boolean metric){speeds=s==null?Collections.emptyList():s;this.metric=metric;invalidate();}
+    void setIncidents(List<LiveTrafficIncidents.Event> data,long at){incidents=data==null?Collections.emptyList():data;incidentAt=at;invalidate();}
+    void setBuildings(boolean value){showBuildings=value;invalidate();}
+    void setGesture(Runnable callback){gesture=callback;}
+    void setPaintListener(Runnable callback){paintListener=callback;}
+    GeoMath.Point center(){return center;}
+    void fit(List<GeoMath.Point> p,int top,int bottom,int side){
+        if(p==null||p.size()<2)return;
+        if(getWidth()<100||getHeight()<100){postDelayed(()->{if(getWidth()>=100&&getHeight()>=100)fit(p,top,bottom,side);},250);return;}
+        double w=1,e=0,n=1,s=0;
+        for(GeoMath.Point q:p){double x=NativeMapProjection.x(q.lon),y=NativeMapProjection.y(q.lat);w=Math.min(w,x);e=Math.max(e,x);n=Math.min(n,y);s=Math.max(s,y);}
+        double scale=Math.min(Math.max(80,getWidth()-2*side)/Math.max(1e-9,e-w),Math.max(80,getHeight()-top-bottom)/Math.max(1e-9,s-n));
+        double z=Math.max(2,Math.min(21,Math.log(scale/256)/Math.log(2)));
+        double actual=256*Math.pow(2,z),cy=(n+s)/2-(top-bottom)/(2.0*actual);
+        setCamera(new GeoMath.Point(NativeMapProjection.lat(cy),NativeMapProjection.lon((w+e)/2)),z,0,0);
+    }
+    void setZoom(double value){zoom=Math.max(2,Math.min(21,value));invalidate();}
     double zoom(){return zoom;}
     void setNight(boolean value){night=value;invalidate();}
-    void setCamera(GeoMath.Point p,double z,double bearing,double tilt){if(p==null)return;center=p;zoom=Math.max(11,Math.min(21,z));this.bearing=bearing;this.tilt=tilt;invalidate();}
+    void setCamera(GeoMath.Point p,double z,double bearing,double tilt){if(p==null)return;center=p;zoom=Math.max(2,Math.min(21,z));this.bearing=bearing;this.tilt=tilt;invalidate();}
     void setProgress(double value,GeoMath.Point vehicle,double turnOffset){progress=Math.max(0,value);this.vehicle=vehicle;turn=turnOffset;invalidate();}
     int roadsDrawn(){return roadsDrawn;}int routeDrawn(){return routeDrawn;}int buildingsDrawn(){return buildingsDrawn;}
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
@@ -52,10 +80,10 @@ final class NativeMapView extends View {
     }
     @Override protected void onDraw(Canvas canvas){
         super.onDraw(canvas);canvas.drawColor(color(0xffeef1e9,0xff132634));roadsDrawn=routeDrawn=buildingsDrawn=0;
-        if(scene==null||center==null||getWidth()==0)return;
+        if(center==null||getWidth()==0)return;
         NativeMapProjection.Camera c=camera();paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);occupied.clear();
         ArrayList<NativeMapScene.Shape> visible=new ArrayList<>();
-        for(NativeMapScene.Shape f:scene.shapes){if(f.kind==NativeMapScene.BUILDING&&zoom<15||!visible(f,c))continue;visible.add(f);}
+        if(scene!=null)for(NativeMapScene.Shape f:scene.shapes){if(f.kind==NativeMapScene.BUILDING&&(!showBuildings||zoom<15)||!visible(f,c))continue;visible.add(f);}
         for(NativeMapScene.Shape f:visible){
             if(!f.area)continue;makePath(f,c);
             if(f.kind==NativeMapScene.BUILDING){fill(canvas,color(0xffd7cbb9,0xff334654));stroke(canvas,color(0xffc2b6a3,0xff455867),.7f);buildingsDrawn++;}
@@ -85,19 +113,36 @@ final class NativeMapView extends View {
         }
         if(route!=null){routePath(canvas,c,route.full(),color(0xffaeb9bb,0xff516270),6);routePath(canvas,c,route.remaining(progress),0xff143d64,8);routePath(canvas,c,route.remaining(progress),0xff16a6f4,5);
             if(route.full().size()>1)routeDrawn=1;
-            if(Double.isFinite(turn)&&turn>progress&&turn<route.length){
-                GeoMath.Point p=route.at(turn),q=route.at(Math.min(route.length,turn+18));point(c,p);float ax=screen[0],ay=screen[1];point(c,q);
-                float dx=screen[0]-ax,dy=screen[1]-ay,len=(float)Math.hypot(dx,dy);if(len>1){dx/=len;dy/=len;float size=dp(11);path.reset();path.moveTo(ax+dx*size,ay+dy*size);path.lineTo(ax-dx*size*.6f-dy*size*.65f,ay-dy*size*.6f+dx*size*.65f);path.lineTo(ax-dx*size*.6f+dy*size*.65f,ay-dy*size*.6f-dx*size*.65f);path.close();fill(canvas,Color.WHITE);}
+            arrow(canvas,c,turn);arrow(canvas,c,secondTurn);
+            for(RouteIntelligence.SpeedSection section:speeds){
+                if(section.start<=progress||section.start>progress+700||section.start>=route.length)continue;
+                point(c,route.at(section.start));if(screen[0]<0||screen[0]>getWidth()||screen[1]<0||screen[1]>getHeight())continue;
+                paint.setStyle(Paint.Style.FILL);paint.setColor(0xffb7232c);canvas.drawCircle(screen[0],screen[1],dp(11),paint);paint.setColor(Color.WHITE);canvas.drawCircle(screen[0],screen[1],dp(8),paint);
+                paint.setColor(0xff192635);paint.setTextSize(dp(9));String t=String.valueOf(metric?section.kmh:(int)Math.round(section.kmh/1.609344));canvas.drawText(t,screen[0]-paint.measureText(t)/2,screen[1]+dp(3),paint);
             }
-            point(c,route.full().get(route.full().size()-1));paint.setStyle(Paint.Style.FILL);paint.setColor(0xffc33538);canvas.drawCircle(screen[0],screen[1],dp(6),paint);
         }
-        if(vehicle!=null){point(c,vehicle);paint.setStyle(Paint.Style.FILL);paint.setColor(Color.WHITE);canvas.drawCircle(screen[0],screen[1],dp(10),paint);paint.setColor(0xff007ac9);canvas.drawCircle(screen[0],screen[1],dp(7),paint);}
+        if(System.currentTimeMillis()-incidentAt>=0&&System.currentTimeMillis()-incidentAt<=LiveTrafficIncidents.MAX_AGE_MS)
+            for(LiveTrafficIncidents.Event event:incidents)if(event.present(System.currentTimeMillis())&&!event.points.isEmpty())marker(canvas,c,event.points.get(0),0xffbd5426,"!");
+        marker(canvas,c,destination,0xffbf3038,"D");marker(canvas,c,entrance,0xff267a58,"E");marker(canvas,c,parked,0xff426987,"P");
+        if(vehicle!=null){point(c,vehicle);float x=screen[0],y=screen[1];canvas.save();canvas.translate(x,y);canvas.rotate(Double.isFinite(vehicleBearing)?(float)(vehicleBearing-bearing):0);
+            path.reset();path.moveTo(0,-dp(13));path.lineTo(dp(9),dp(10));path.lineTo(0,dp(5));path.lineTo(-dp(9),dp(10));path.close();fill(canvas,0xff007ac9);stroke(canvas,Color.WHITE,2);canvas.restore();}
+        if(scene==null){paint.setColor(color(0xff344451,0xfff1f4f5));paint.setTextSize(dp(12));paint.setStyle(Paint.Style.FILL);canvas.drawText("Regional detail unavailable",dp(10),getHeight()*.45f,paint);}
+        if(paintListener!=null)paintListener.run();
         paint.setStyle(Paint.Style.FILL);paint.setTextSize(dp(10));paint.setColor(color(0xff344451,0xfff1f4f5));canvas.drawText("© OpenStreetMap contributors · DriveMate renderer preview",dp(8),getHeight()-dp(8),paint);
+    }
+    private void marker(Canvas canvas,NativeMapProjection.Camera c,GeoMath.Point p,int color,String text){
+        if(p==null)return;point(c,p);paint.setStyle(Paint.Style.FILL);paint.setColor(color);canvas.drawCircle(screen[0],screen[1],dp(9),paint);paint.setColor(Color.WHITE);paint.setTextSize(dp(10));canvas.drawText(text,screen[0]-paint.measureText(text)/2,screen[1]+dp(3),paint);
+    }
+    private void arrow(Canvas canvas,NativeMapProjection.Camera c,double offset){
+        if(route==null||!Double.isFinite(offset)||offset<=progress||offset>=route.length)return;
+        GeoMath.Point p=route.at(offset),q=route.at(Math.min(route.length,offset+18));point(c,p);float ax=screen[0],ay=screen[1];point(c,q);
+        float dx=screen[0]-ax,dy=screen[1]-ay,len=(float)Math.hypot(dx,dy);if(len<=1)return;
+        dx/=len;dy/=len;float size=dp(11);path.reset();path.moveTo(ax+dx*size,ay+dy*size);path.lineTo(ax-dx*size*.6f-dy*size*.65f,ay-dy*size*.6f+dx*size*.65f);path.lineTo(ax-dx*size*.6f+dy*size*.65f,ay-dy*size*.6f-dx*size*.65f);path.close();fill(canvas,Color.WHITE);
     }
     @Override public boolean onTouchEvent(android.view.MotionEvent e){
         scale.onTouchEvent(e);if(center==null)return true;
         if(e.getActionMasked()==MotionEvent.ACTION_DOWN){lastX=e.getX();lastY=e.getY();return true;}
-        if(e.getActionMasked()==MotionEvent.ACTION_MOVE){float x=e.getX(),y=e.getY();if(!scale.isInProgress()&&e.getPointerCount()==1){NativeMapProjection.Camera c=camera();center=c.unproject(c.anchorX+lastX-x,c.anchorY+lastY-y);invalidate();}lastX=x;lastY=y;return true;}
+        if(e.getActionMasked()==MotionEvent.ACTION_MOVE){if(gesture!=null)gesture.run();float x=e.getX(),y=e.getY();if(!scale.isInProgress()&&e.getPointerCount()==1){NativeMapProjection.Camera c=camera();center=c.unproject(c.anchorX+lastX-x,c.anchorY+lastY-y);invalidate();}lastX=x;lastY=y;return true;}
         return true;
     }
 }

@@ -101,6 +101,7 @@ public final class TomTomApi {
         String geometrySourceSha = "";
         List<Long> geometryWays = java.util.Collections.emptyList();
         DmUnifiedGeometry sharedGeometry;
+        NativeMapScene nativeScene;
         public final List<RouteIntelligence.LaneSection> laneSections;
         public final List<RouteIntelligence.SpeedSection> speedSections;
         public final List<RouteIntelligence.TrafficSection> trafficSections;

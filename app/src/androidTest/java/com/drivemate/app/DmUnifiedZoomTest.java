@@ -22,7 +22,7 @@ public class DmUnifiedZoomTest {
         DmTileEngine.Route sample=region.sample(true);
         TomTomApi.Route route=NativeRegionalRouter.convert(region,sample,sample.points.get(0),sample.points.get(sample.points.size()-1));
         assertEquals(NativeRegionalRouter.PROVIDER,route.provider);
-        assertEquals(sample.ways.size(),route.sharedGeometry.checkedEdges);
+        assertEquals(sample.ways.size(),route.nativeScene.checkedEdges);
         assertTrue(route.instructions.size()>=1);
         assertEquals("DESTINATION",route.instructions.get(route.instructions.size()-1).maneuver);
         double previous=-1;
