@@ -1,0 +1,22 @@
+name: Release readiness and map compatibility
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: readiness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tools -p test_release_workflow.py -v
+      - run: python3 tools/check_release_version.py && python3 tools/check_map_lock.py && python3 tools/check-apk-distribution.py
+      - name: Verify immutable remote map pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/verify_release_map_assets.py

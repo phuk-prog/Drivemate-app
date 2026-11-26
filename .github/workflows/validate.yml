@@ -1,7 +1,7 @@
 name: Validate DriveMate Android
 on:
   push:
-    branches: [main, 'feat/**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -21,6 +21,8 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v4
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
         with:
           gradle-version: '8.9'
       - name: Verify wrapper and release identity

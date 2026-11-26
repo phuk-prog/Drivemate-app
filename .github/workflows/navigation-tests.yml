@@ -2,7 +2,7 @@ name: Navigation replay and map integration
 on:
   pull_request:
   push:
-    branches: [main, 'feat/repository-consolidation-app']
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,6 +21,8 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v4
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
       - uses: actions/cache@v4
         with:
           path: app/src/main/assets/world-z0-6.pmtiles

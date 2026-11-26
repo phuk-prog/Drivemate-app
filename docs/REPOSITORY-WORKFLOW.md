@@ -31,3 +31,6 @@ Navigation start uses a separate tested GPS/provider policy; preview callbacks
 reject obsolete route references and independent routes no longer imply live traffic was checked.
 
 Owner delivery preference: use AES-256 password-encrypted APK ZIPs in the existing public repository; no private repository or activation system required. See docs/PRIVATE-DISTRIBUTION.md.
+
+## Workflow 3.0
+Main protection changes are included as a merge parent; historical raw APKs are removed by idempotent scheduled cleanup. Validation/security/replay use PR checks and main pushes rather than duplicate feature pushes where applicable. Release readiness checks version advancement, remote immutable map asset digests, and APK distribution. Run python3 tools/bump_release_version.py VERSION to preview and add --apply to update the registry and Gradle together. Never bypass published version checks. National routing remains preview-only, as the two exact-anchor cases still fail. Preserve encrypted last-known-good packages outside public raw artifacts; recovery builds must use higher version codes. Physical device validation and required-check configuration are owner actions.

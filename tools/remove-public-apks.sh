@@ -8,15 +8,26 @@ mode="${1:---dry-run}"
 [[ "$mode" == --dry-run || "$mode" == --delete ]] || exit 2
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-gh api --paginate "repos/$repo/actions/artifacts?per_page=100" --jq '.artifacts[] | select(.expired == false) | [.id,.name] | @tsv' > "$tmp/artifacts"
-gh api --paginate "repos/$repo/releases?per_page=100" --jq '.[].assets[] | [.id,.name] | @tsv' > "$tmp/assets"
+gh api --paginate "repos/$repo/actions/artifacts?per_page=100" --jq '.artifacts[] | select(.expired == false) | [.id,.name] | @tsv' | sort -u > "$tmp/artifacts"
+gh api --paginate "repos/$repo/releases?per_page=100" --jq '.[].assets[] | [.id,.name] | @tsv' | sort -u > "$tmp/assets"
+delete_if_present() {
+  local endpoint="$1" result
+  if result="$(gh api --method DELETE "$endpoint" --silent 2>&1)"; then
+    return 0
+  fi
+  if [[ "$result" == *"HTTP 404"* ]]; then
+    echo "Already absent: $endpoint"; return 0
+  fi
+  printf '%s\n' "$result" >&2
+  return 1
+}
 while IFS=$'\t' read -r id name; do
   [[ "$id" =~ ^[0-9]+$ ]] || continue
   lower="${name,,}"
   [[ "$lower" == *password-protected* || "$lower" == *encrypted* || "$lower" == *apksigner* ]] && continue
   if [[ "$lower" =~ (^|[-_.[:space:]])(apk|apks|xapk|apkm|aab)($|[-_.[:space:]]) || ( "$lower" == drivemate* && "$lower" =~ (^|[-_.])(debug|unsigned)($|[-_.]) ) ]]; then
     printf '%s Actions artifact %s: %s\n' "$mode" "$id" "$name"
-    if [[ "$mode" == --delete ]]; then gh api --method DELETE "repos/$repo/actions/artifacts/$id" --silent; fi
+    if [[ "$mode" == --delete ]]; then delete_if_present "repos/$repo/actions/artifacts/$id"; fi
   fi
 done < "$tmp/artifacts"
 while IFS=$'\t' read -r id name; do
@@ -24,7 +35,7 @@ while IFS=$'\t' read -r id name; do
   case "${name,,}" in
     *.apk|*.apks|*.xapk|*.apkm|*.aab)
       printf '%s release asset %s: %s\n' "$mode" "$id" "$name"
-      if [[ "$mode" == --delete ]]; then gh api --method DELETE "repos/$repo/releases/assets/$id" --silent; fi
+      if [[ "$mode" == --delete ]]; then delete_if_present "repos/$repo/releases/assets/$id"; fi
       ;;
   esac
 done < "$tmp/assets"
