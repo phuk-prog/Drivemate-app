@@ -60,6 +60,15 @@ public class DmTileEngineOverlayTest{
             assertTrue("route stays in downloaded cells",allowed.containsAll(over.cells));
         }
     }
+    @Test public void snapFlagsSayWhichJourneyEndMaySnap()throws Exception{
+        String[] cases={"[1,51000000,-2000000,[],[]]","[1,51000000,-2000000,[],[],1]","[1,51000000,-2000000,[],[],0]",
+                        "[1,51000000,-2000000,[],[],2]","[1,51000000,-2000000,[],[],3]"};
+        boolean[][] want={{true,true},{true,true},{false,false},{false,true},{true,false}};// {start, end}
+        for(int i=0;i<cases.length;i++){
+            DmTileEngine.Node n=new DmTileEngine.Node(new JSONArray(cases[i]),"1020_-40");
+            assertEquals(cases[i],want[i][0],n.startHere);assertEquals(cases[i],want[i][1],n.endHere);
+        }
+    }
     @Test public void corruptHierarchyPieceRejected()throws Exception{
         DmTileEngine e=engine(name->{byte[] raw=resource(name);if(name.endsWith(".dmo.gz"))raw[raw.length/2]^=1;return new ByteArrayInputStream(raw);});
         try{e.routeOverlay(new GeoMath.Point(51.001,-2.199),new GeoMath.Point(51.148,-2.052),null);fail("accepted corrupt overlay");}

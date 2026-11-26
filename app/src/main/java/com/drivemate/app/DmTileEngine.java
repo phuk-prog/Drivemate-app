@@ -30,6 +30,9 @@ public final class DmTileEngine {
     private final LinkedHashMap<String,Tile> cache=new LinkedHashMap<>(16,.75f,true);
     private final Set<String> pinned=new HashSet<>();
     private static final int CELL=50000,MAX_TILES=24,MAX_NODES=80000;
+    /** Furthest a journey end may snap to a road: usually metres, but a place surrounded by
+     *  private roads (an airport, an estate) can be further. Same as the map repository mirror. */
+    static final double SNAP_MAX_M=2000;
     public static final class CoverageException extends IOException{CoverageException(String s){super(s);}}
     static byte[] read(InputStream input,int max)throws IOException{
         try(InputStream in=input;ByteArrayOutputStream out=new ByteArrayOutputStream()){byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1){if(out.size()+n>max)throw new IOException("Tile size exceeds limit");out.write(b,0,n);}return out.toByteArray();}
@@ -87,9 +90,10 @@ public final class DmTileEngine {
     public Set<String> keys(){Set<String> out=new TreeSet<>();catalog.keys().forEachRemaining(out::add);return out;}
     static final class Node{
         final long id;final GeoMath.Point point;final JSONArray edges,rules;final String cell;
-        /** False for nodes in a tiny isolated road network; never used to snap a journey end. Older tiles omit field 5. */
-        final boolean snappable;
-        Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);snappable=a.length()<=5||a.getInt(5)!=0;this.cell=cell;}
+        /** May a journey start / end here? Field 5 (map compile_dmtiles_uk.snap_flags): 1 both, 0 neither
+         *  (an isolated road fragment), 2 end only (e.g. a one-way slip road), 3 start only. Older tiles omit it. */
+        final boolean startHere,endHere;
+        Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);int snap=a.length()>5?a.getInt(5):1;startHere=snap==1||snap==3;endHere=snap==1||snap==2;this.cell=cell;}
     }
     static final class Tile{
         final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places;
@@ -119,7 +123,7 @@ public final class DmTileEngine {
     public DmCellPlanner.Coverage coverage(Route route,double radiusKm,long budget)throws Exception{return planner.coverage(route.points,route.cells,radiusKm,budget);}
     private Node nearest(GeoMath.Point p,Set<String> allowed,boolean origin)throws Exception{
         int y=Math.floorDiv((int)Math.round(p.lat*1e6),CELL),x=Math.floorDiv((int)Math.round(p.lon*1e6),CELL);
-        Node best=null;double dist=350;
+        Node best=null;double dist=SNAP_MAX_M;
         if(!catalog.has(key(p.lat,p.lon))||(allowed!=null&&!allowed.contains(key(p.lat,p.lon))))throw new CoverageException("Position outside pilot map");
         Map<String,Tile> nearby=new HashMap<>();
         for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
@@ -131,7 +135,7 @@ public final class DmTileEngine {
             JSONArray e=n.edges.getJSONArray(i);if(nearby.containsKey(e.getString(2)))incoming.add(e.getLong(1));
         }
         for(Tile tile:nearby.values())for(Node n:tile.nodes.values()){
-            if(!n.snappable)continue;
+            if(origin?!n.startHere:!n.endHere)continue;
             if(origin){
                 boolean hasExit=false;for(int i=0;i<n.edges.length();i++){JSONArray e=n.edges.getJSONArray(i);if(allowed==null||allowed.contains(e.getString(2))){hasExit=true;break;}}
                 if(!hasExit)continue;
