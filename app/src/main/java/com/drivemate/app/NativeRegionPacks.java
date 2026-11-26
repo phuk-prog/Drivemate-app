@@ -61,13 +61,18 @@ final class NativeRegionPacks {
         return new DmUnifiedRegion(raw,e.manifestSha,n->new FileInputStream(new File(dir,n)),e.bounds);
     }
     DmUnifiedRegion select(GeoMath.Point from,GeoMath.Point to)throws Exception{
-        if(RouteMapPolicy.insideStockport(from)&&(to==null||RouteMapPolicy.insideStockport(to)))return new DmUnifiedRegion(app,true);
+        return candidates(from,to).get(0);
+    }
+    List<DmUnifiedRegion> candidates(GeoMath.Point from,GeoMath.Point to)throws Exception{
+        List<DmUnifiedRegion> regions=new ArrayList<>();
+        if(RouteMapPolicy.insideStockport(from)&&(to==null||RouteMapPolicy.insideStockport(to)))regions.add(new DmUnifiedRegion(app,true));
         // An independently compiled corridor pack may cover a journey that spans two
         // smaller extracts. Never splice graph fragments or guess at a boundary.
         List<Entry> choices=new ArrayList<>();
         for(Entry e:catalog())if(installed(e)&&e.covers(from)&&(to==null||e.covers(to)))choices.add(e);
         choices.sort(Comparator.comparingDouble(e->(e.bounds[2]-e.bounds[0])*(e.bounds[3]-e.bounds[1])));
-        if(!choices.isEmpty())return open(choices.get(0));
+        for(Entry e:choices)regions.add(open(e));
+        if(!regions.isEmpty())return regions;
         throw new IOException("No single verified downloaded region covers the journey. No external fallback.");
     }
     private HttpURLConnection connect(Entry e)throws Exception{

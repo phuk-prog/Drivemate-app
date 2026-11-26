@@ -11,10 +11,16 @@ final class NativeRegionalRouter {
     private final Context app;
     NativeRegionalRouter(Context context){app=context.getApplicationContext();}
     TomTomApi.Route preview(GeoMath.Point from,GeoMath.Point to)throws Exception{
-        DmUnifiedRegion region=new NativeRegionPacks(app).select(from,to);
-        DmTileEngine.Route path=region.engine.route(from,to);
-        for(GeoMath.Point p:path.points)if(!region.covers(p))throw new IOException("Route crosses unverified regional boundary. No external fallback.");
-        return convert(region,path,from,to);
+        List<DmUnifiedRegion> candidates=new NativeRegionPacks(app).candidates(from,to);
+        Exception last=null;
+        for(DmUnifiedRegion region:candidates){
+            try{
+                DmTileEngine.Route path=region.engine.route(from,to);
+                for(GeoMath.Point p:path.points)if(!region.covers(p))throw new DmTileEngine.CoverageException("Route crosses unverified regional boundary");
+                return convert(region,path,from,to);
+            }catch(DmTileEngine.CoverageException noPath){last=noPath;}
+        }
+        throw new IOException("No connected route within verified installed regional coverage. No external fallback.",last);
     }
     /** Explicit reroute preview, reconstructed using the same verified graph and destination.
      * Never returns an old path as a successful replacement on missing coverage. */
@@ -44,7 +50,7 @@ final class NativeRegionalRouter {
     RoadContext roadContext(GeoMath.Point p)throws Exception{
         DmUnifiedRegion region=new NativeRegionPacks(app).select(p,null);
         double[] regionBounds=region.regionBounds;
-        double[] bounds={Math.max(regionBounds[0],p.lon-.004),Math.max(regionBounds[1],p.lat-.003),Math.min(regionBounds[2],p.lon+.004),Math.min(regionBounds[3],p.lat+.003)};
+        double[] bounds=DmUnifiedRegion.localBounds(p,regionBounds);
         List<JSONArray> features=region.engine.boundedFeatures(region.engine.keys(),bounds,Collections.emptySet(),false,6000,100000);
         NativeMapScene geometry=NativeMapScene.browse(features,bounds);
         List<JSONArray> ways=new ArrayList<>();

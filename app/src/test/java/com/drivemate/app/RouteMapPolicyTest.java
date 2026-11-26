@@ -49,6 +49,15 @@ public class RouteMapPolicyTest {
         assertTrue(narrow[2]-narrow[0]<wide[2]-wide[0]);
         assertTrue(narrow[3]-narrow[1]<wide[3]-wide[1]);
     }
+    @Test public void localContextForLongRouteStaysWithinVerifiedRegion(){
+        double[] region={-2.333,53.382,-2.152,53.443};
+        GeoMath.Point start=new GeoMath.Point(53.383,-2.332);
+        double[] b=DmUnifiedRegion.localBounds(start,region);
+        assertTrue(RouteMapPolicy.insideBounds(start,b));
+        assertEquals(region[0],b[0],1e-10);assertEquals(region[1],b[1],1e-10);
+        assertTrue(b[2]-b[0]<=.008001);assertTrue(b[3]-b[1]<=.006001);
+        assertFalse(RouteMapPolicy.insideBounds(new GeoMath.Point(53.4,-2.16),b));
+    }
     @Test public void routeWidthIsBoundedAndZoomDependent(){
         assertEquals(4,RouteMapPolicy.rasterWidthDp(Double.NaN));
         assertTrue(RouteMapPolicy.rasterWidthDp(13)<RouteMapPolicy.rasterWidthDp(19));

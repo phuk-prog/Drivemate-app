@@ -29,7 +29,7 @@ public class NativeMapRendererDeviceTest {
                     assertTrue(a.scene.checkedEdges>0);assertTrue("No visible source roads at "+zoom,a.map.roadsDrawn()>0);
                     assertEquals(1,a.map.routeDrawn());
                 });
-                Bitmap shot=i.getUiAutomation().takeScreenshot();assertNotNull(shot);
+                Bitmap shot=NativeScreenshot.capture(i,a);assertNotNull(shot);
                 try(FileOutputStream f=new FileOutputStream(new File(dir,"native-"+(night?"night":"day")+"-"+zoom+".png"))){assertTrue(shot.compress(Bitmap.CompressFormat.PNG,100,f));}finally{shot.recycle();}
             }
             i.runOnMainSync(()->{
