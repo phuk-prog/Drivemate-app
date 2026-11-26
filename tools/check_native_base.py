@@ -12,7 +12,12 @@ assert "new NativeRegionalRouter(this).preview(start,end)" in main
 assert "new NativeRegionalRouter(this).search(query,near)" in main
 for forbidden in ("TomTomApi.route(","TomTomApi.search(","TomTomApi.parkingNearby(","DriveMateProvider.route(","DriveMateProvider.search(","DriveMateProvider.roadContext(","api.tomtom.com"):
     assert forbidden not in main, forbidden
-assert "map.setUseDataConnection(false)" in main
+assert "new NativeMapController(" in main
+assert "org.osmdroid" not in main and "new VectorDriveMap(" not in main and "new MapView(" not in main
+for name in ("NativeMapController.java","NativeMapView.java","NativeMvtDecoder.java","NativeMapScene.java","NativeTileSource.java","NativeMapProjection.java"):
+    code=(src/name).read_text()
+    assert "import org.maplibre" not in code and "import org.osmdroid" not in code,name
+assert "new DriveTileServer(app,false)" in (src/"NativeTileSource.java").read_text()
 assert "Style.Builder().fromJson(json)" in vector and ".fromUri(providerStyleUrl())" not in vector
 assert "DriveMateProvider.roadContext(" not in vector
 assert "TomTomApi.liveIncidents(key,p)" in main

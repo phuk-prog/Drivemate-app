@@ -15,6 +15,12 @@ public class NativeMainMapDeviceTest {
     @Test public void mainApplicationUsesOriginalMapWithoutNetwork()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
+        // Real bundled world PMTiles, not a synthetic decoder-only fixture.
+        try(NativeTileSource tiles=new NativeTileSource(app)){
+            NativeMapScene world=tiles.load(new GeoMath.Point(53.4,-2.16),5,320,480);
+            assertFalse("Bundled world map did not decode",world.shapes.isEmpty());
+            assertEquals(0,world.checkedEdges);
+        }
         DmUnifiedRegion region=new DmUnifiedRegion(app,true);DmTileEngine.Route path=region.sample(true);
         NativeMapScene scene=region.nativeScene(path);
         MainActivity a=(MainActivity)ins.startActivitySync(new Intent(app,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));

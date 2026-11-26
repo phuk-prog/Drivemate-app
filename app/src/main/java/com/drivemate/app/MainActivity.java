@@ -219,7 +219,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 paused ? CYAN : DARK));
         followButton.setTextColor(paused ? DARK : Color.WHITE);
     }
-    private DriveTileServer driveTiles;
     private NativeMapController vectorMap;
     private Bundle vectorSavedState;
     private boolean useLocalMap = true;
@@ -467,7 +466,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 settings.getFloat("last_map_lon", Float.NaN),
                 settings.getLong("last_map_at", 0L),
                 System.currentTimeMillis());
-        driveTiles = null; // Native regional scene reader needs no tile server.
         buildScreen();
         applyTheme();
         updateVoiceButton();
@@ -3853,7 +3851,6 @@ public final class MainActivity extends Activity implements LocationListener {
             speech.shutdown();
         }
         if (vectorMap != null) vectorMap.onDestroy();
-        if (driveTiles != null) driveTiles.close();
         super.onDestroy();
     }
 }

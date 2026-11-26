@@ -90,7 +90,7 @@ final class NativeMapController {
         if(disposed||p==null)return;
         if(verifiedRoute!=null&&verifiedRoute.covers(p)){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
         double zoom=view.zoom();
-        if(current!=null&&current.covers(p)&&Math.abs(lastZoom-zoom)<1)return;
+        if(current!=null&&current.covers(p)&&Math.abs(lastZoom-zoom)<1&&lastRequested!=null&&GeoMath.distance(lastRequested,p)<Math.max(100,4000/Math.pow(2,Math.max(0,zoom-13))))return;
         long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<2000)return;
         requestedAt=now;lastRequested=p;lastZoom=zoom;busy=true;int gen=generation,w=view.getWidth(),h=view.getHeight();
         worker.execute(()->{

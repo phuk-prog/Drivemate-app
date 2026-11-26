@@ -11,7 +11,6 @@ final class NativeTileSource implements AutoCloseable {
     private DriveTileServer uk;
     private PmTilesReader world;
     private AssetFileDescriptor worldAsset;
-    private RandomAccessFile worldFile; // not used; asset stream uses bounded positional channel
     private FileInputStream worldStream;
     private final LinkedHashMap<String,List<NativeMapScene.Shape>> cache=new LinkedHashMap<>(16,.75f,true);
     private int cachedVertices;
@@ -40,6 +39,7 @@ final class NativeTileSource implements AutoCloseable {
         if(count<=250000){cache.put(key,s);cachedVertices+=count;}return s;
     }
     NativeMapScene load(GeoMath.Point p,double zoom,int width,int height)throws IOException{
+        if(p==null||!Double.isFinite(p.lat)||!Double.isFinite(p.lon)||!Double.isFinite(zoom)||Math.abs(p.lat)>85||Math.abs(p.lon)>180)throw new IOException("Invalid viewport");
         int z=Math.max(2,Math.min(14,(int)Math.floor(zoom)));
         double cx=NativeMapProjection.x(p.lon),cy=NativeMapProjection.y(p.lat),scale=256*Math.pow(2,zoom);
         // Rotated viewport diagonal + margin; lower source zoom until tile count is bounded.
