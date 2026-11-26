@@ -3205,8 +3205,8 @@ public final class MainActivity extends Activity implements LocationListener {
             try {
                 TomTomApi.Route calculated = local?new LocalRoutingPack(this).preview(start,end):own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
                 if ("DriveMate".equals(calculated.provider)) {
-                    calculated.sharedGeometry = DmUnifiedRegion.matchLive(this, calculated);
-                    if(calculated.sharedGeometry==null)calculated.sharedGeometry=DriveMateProvider.sharedMap(own,calculated);
+                    calculated.sharedGeometry = DriveMateProvider.sharedMap(own,calculated);
+                    if(calculated.sharedGeometry==null)calculated.sharedGeometry=DmUnifiedRegion.matchLive(this,calculated);
                 }
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
