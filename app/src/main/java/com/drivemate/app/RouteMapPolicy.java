@@ -26,7 +26,8 @@ final class RouteMapPolicy {
         return 9;
     }
     // Inset avoids clipped road features at the regional extract boundary.
-    static boolean insideStockport(GeoMath.Point p){return p!=null&&p.lat>=53.367&&p.lat<=53.423&&p.lon>=-2.243&&p.lon<=-2.137;}
+    static double[] stockportBounds(){return new double[]{-2.243,53.367,-2.137,53.423};}
+    static boolean insideStockport(GeoMath.Point p){return insideBounds(p,stockportBounds());}
     static boolean insideStockport(List<GeoMath.Point> p){
         if(p==null||p.size()<2)return false;
         for(GeoMath.Point q:p)if(!insideStockport(q))return false;

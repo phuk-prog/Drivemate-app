@@ -53,6 +53,13 @@ public final class VectorDriveMap {
     private final DriveTileServer tiles;
     private MapLibreMap map;
     private GeoJsonSource routeSource;
+    private GeoJsonSource detailBuildingSource;
+    private final java.util.concurrent.ExecutorService buildingWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
+    private boolean buildingBusy;
+    private long lastBuildingRequest;
+    private int buildingGeneration;
+    private GeoMath.Point lastBuildingCenter;
+    private String buildingEndpoint="",buildingSourceSha="";
     private GeoJsonSource maneuverSource, routeTrafficLineSource;
     private double maneuverOffset=Double.NaN, followingManeuverOffset=Double.NaN;
     private DmUnifiedGeometry sharedRouteMap;
@@ -133,7 +140,7 @@ public final class VectorDriveMap {
     private final Runnable roadMonitor = new Runnable() {
         @Override public void run() {
             if (disposed) return;
-            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();expireRouteEvents();refreshLiveIncidents(false);}
+            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();updateDetailBuildings();expireRouteEvents();refreshLiveIncidents(false);}
             view.postDelayed(this, MONITOR_INTERVAL_MS);
         }
     };
@@ -157,7 +164,7 @@ public final class VectorDriveMap {
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE
                         && onUserGesture != null) onUserGesture.run();
             });
-            map.addOnCameraIdleListener(()->{updateSignals();updateRoadside();});
+            map.addOnCameraIdleListener(()->{updateSignals();updateRoadside();updateDetailBuildings();});
             loadStyle();
         });
         // A successfully downloaded tile can be empty or fail to render.
@@ -429,6 +436,7 @@ public final class VectorDriveMap {
                     GeoJsonSource mapped=style.getSourceAs("unified-points");if(mapped!=null)mapped.setGeoJson(shared.mappedPoints);
                 }
                 installOverlays(style);
+                installDetailBuildings(style,shared==null&&!remote);
                 styleReady = true;
                 updateSignals();updateRoadside();publishRouteEvents();refreshLiveIncidents(true);
                 setHighDetailEnabled(highDetailEnabled);
@@ -464,6 +472,63 @@ public final class VectorDriveMap {
                 org.maplibre.android.style.expressions.Expression.stop(10,low),
                 org.maplibre.android.style.expressions.Expression.stop(16,middle),
                 org.maplibre.android.style.expressions.Expression.stop(20,high));
+    }
+    /** Optional display-only building detail. Never replaces a route or mixes provider road geometry. */
+    void setBuildingContext(String endpoint,String source){
+        String ep=endpoint==null?"":endpoint,sha=source==null?"":source;
+        if(ep.equals(buildingEndpoint)&&sha.equals(buildingSourceSha))return;
+        buildingEndpoint=ep;buildingSourceSha=sha;buildingGeneration++;buildingBusy=false;
+        lastBuildingRequest=0;lastBuildingCenter=null;
+        if(ready()&&detailBuildingSource!=null)detailBuildingSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));
+    }
+    private void installDetailBuildings(Style style,boolean allowed){
+        detailBuildingSource=null;buildingGeneration++;buildingBusy=false;lastBuildingCenter=null;lastBuildingRequest=0;
+        if(!allowed||style.getLayer("uk-roads")==null)return;
+        detailBuildingSource=new GeoJsonSource("dm-detail-buildings",FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(detailBuildingSource);
+        org.maplibre.android.style.layers.FillLayer fill=new org.maplibre.android.style.layers.FillLayer("dm-detail-building-footprints","dm-detail-buildings");
+        fill.setMinZoom(15.5f);
+        fill.setProperties(PropertyFactory.fillColor(nightMode?"#354957":"#d3c9bb"),PropertyFactory.fillOpacity(.72f));
+        style.addLayerBelow(fill,"uk-roads");
+    }
+    private void updateDetailBuildings(){
+        if(!ready()||detailBuildingSource==null||providerStyle||sharedRouteMap!=null||disposed)return;
+        CameraPosition camera=map.getCameraPosition();
+        if(camera.target==null)return;
+        GeoMath.Point center=new GeoMath.Point(camera.target.getLatitude(),camera.target.getLongitude());
+        boolean regional=RouteMapPolicy.insideStockport(center);
+        boolean hosted=!buildingEndpoint.isEmpty()&&buildingSourceSha.matches("[a-f0-9]{64}");
+        if(camera.zoom<15.5||(!regional&&!hosted)){
+            if(lastBuildingCenter!=null||buildingBusy){buildingGeneration++;buildingBusy=false;lastBuildingCenter=null;lastBuildingRequest=0;
+                detailBuildingSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));}
+            return;
+        }
+        double moved=lastBuildingCenter==null?Double.POSITIVE_INFINITY:GeoMath.distance(lastBuildingCenter,center);
+        if(moved>900&&lastBuildingCenter!=null){detailBuildingSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));lastBuildingCenter=null;}
+        long now=SystemClock.elapsedRealtime();
+        if(buildingBusy||moved<200||(lastBuildingRequest>0&&now-lastBuildingRequest<(regional?4000:15000)))return;
+        final int generation=buildingGeneration,styleId=styleGeneration;
+        final String endpoint=buildingEndpoint,sha=buildingSourceSha;
+        lastBuildingRequest=now;buildingBusy=true;
+        buildingWorker.execute(()->{
+            FeatureCollection found=null;
+            try{
+                if(regional)found=MappedRegionalBuildings.load(activity.getApplicationContext(),center);
+                else if(hosted){
+                    DriveMateProvider.RoadContext context=DriveMateProvider.roadContext(endpoint,center);
+                    if(sha.equals(context.sourceSha)&&context.freshAt(center))found=MappedRegionalBuildings.onlyBuildings(context.map.areas);
+                }
+            }catch(Exception failure){Log.w(LOG_TAG,"Detailed building context unavailable");}
+            final FeatureCollection result=found;
+            view.post(()->{
+                if(disposed||generation!=buildingGeneration||styleId!=styleGeneration)return;
+                buildingBusy=false;
+                if(!ready()||detailBuildingSource==null||result==null||map.getCameraPosition().target==null||map.getCameraPosition().zoom<15.5)return;
+                LatLng target=map.getCameraPosition().target;
+                if(GeoMath.distance(center,new GeoMath.Point(target.getLatitude(),target.getLongitude()))>300)return;
+                detailBuildingSource.setGeoJson(result);lastBuildingCenter=center;
+            });
+        });
     }
     private void installOverlays(Style style) {
         routeSource = exactLineSource("dm-route");
@@ -1113,6 +1178,7 @@ public final class VectorDriveMap {
     public void onSaveInstanceState(Bundle state) { view.onSaveInstanceState(state); }
     public void onDestroy() {
         disposed = true;
+        buildingGeneration++;buildingWorker.shutdownNow();
         view.removeCallbacks(roadMonitor);
         view.onDestroy();
     }

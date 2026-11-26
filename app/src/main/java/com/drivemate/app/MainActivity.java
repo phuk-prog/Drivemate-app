@@ -3493,6 +3493,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         map.invalidate();
         if (vectorMap != null) {
+            vectorMap.setBuildingContext("DriveMate".equals(calculated.provider)?ownEndpoint():"",calculated.geometrySourceSha);
             vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points, calculated.provider);
             vectorMap.setRouteEvents(calculated.speedSections,calculated.trafficSections,metricUnits,calculated.fetchedAtMs);
             if (preview) {
@@ -4131,6 +4132,7 @@ public final class MainActivity extends Activity implements LocationListener {
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         map.setMapOrientation(0);
         if (vectorMap != null) {
+            vectorMap.setBuildingContext("","");
             vectorMap.setSharedRoute(null, null);
             vectorMap.setDestination(null);
         }

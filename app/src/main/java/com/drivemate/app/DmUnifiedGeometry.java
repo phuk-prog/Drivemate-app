@@ -76,10 +76,10 @@ final class DmUnifiedGeometry {
             &&Math.round(p.longitude()*1e6)==Math.round(g.lon*1e6);
     }
     DmUnifiedGeometry(List<JSONArray> features,DmTileEngine.Route path)throws Exception{
-        this(features,path.points,path.ways,path,1e6,new double[]{-2.188,53.392,-2.137,53.423});
+        this(features,path.points,path.ways,path,1e6,RouteMapPolicy.stockportBounds());
     }
     DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways)throws Exception{
-        this(features,points,ways,null,1e6,new double[]{-2.188,53.392,-2.137,53.423});
+        this(features,points,ways,null,1e6,RouteMapPolicy.stockportBounds());
     }
     DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways,double[] bounds)throws Exception{
         this(features,points,ways,null,1e7,bounds);
