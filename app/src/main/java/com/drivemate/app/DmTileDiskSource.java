@@ -15,21 +15,28 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
     public DmTileDiskSource(File root,byte[] manifest,String hash,long budget,DmTileEngine.Source upstream)throws Exception{
         if(!hash.matches("[a-f0-9]{64}")||!DmTileEngine.sha(manifest).equals(hash)||budget<=0)throw new IOException("Invalid cache identity");
         folder=new File(root,hash);if(!folder.isDirectory()&&!folder.mkdirs())throw new IOException("Cannot create tile cache");
-        JSONObject tiles=new JSONObject(new String(manifest,StandardCharsets.UTF_8)).getJSONObject("tiles");
-        for(Iterator<String> i=tiles.keys();i.hasNext();){
-            String k=i.next();JSONObject info=tiles.getJSONObject(k);String n=info.getString("name");
-            if(!k.matches("-?[0-9]+_-?[0-9]+")||!n.equals(k+".dmt.gz")||info.getLong("bytes")<=0||info.getLong("bytes")>8000000||!info.getString("sha256").matches("[a-f0-9]{64}"))throw new IOException("Invalid tile catalog");
-            byName.put(n,info);
-        }this.budget=budget;this.upstream=upstream;
+        JSONObject doc=new JSONObject(new String(manifest,StandardCharsets.UTF_8));
+        addCatalog(doc.getJSONObject("tiles"),".dmt.gz");
+        // Road hierarchy pieces are cached and verified exactly like tiles.
+        JSONObject overlay=doc.optJSONObject("overlay");if(overlay!=null)addCatalog(overlay.getJSONObject("cells"),".dmo.gz");
+        this.budget=budget;this.upstream=upstream;
         File pins=new File(folder,"journey-pins.json");if(pins.isFile()){
             JSONArray saved=new JSONArray(new String(DmTileEngine.read(new FileInputStream(pins),2_000_000),StandardCharsets.UTF_8));Set<String> cells=new HashSet<>();
             for(int i=0;i<saved.length();i++)cells.add(saved.getString(i));protect(cells);
         }
     }
+    private void addCatalog(JSONObject cells,String suffix)throws Exception{
+        for(Iterator<String> i=cells.keys();i.hasNext();){
+            String k=i.next();JSONObject info=cells.getJSONObject(k);String n=info.getString("name");
+            if(!k.matches("-?[0-9]+_-?[0-9]+")||!n.equals(k+suffix)||info.getLong("bytes")<=0||info.getLong("bytes")>8000000||!info.getString("sha256").matches("[a-f0-9]{64}"))throw new IOException("Invalid tile catalog");
+            byName.put(n,info);
+        }
+    }
     private boolean verified(byte[] raw,JSONObject info)throws Exception{return raw.length==info.getInt("bytes")&&DmTileEngine.sha(raw).equals(info.getString("sha256"));}
     public synchronized void protect(Set<String> cells)throws IOException{
         Set<String> next=new HashSet<>();long required=0;
-        for(String k:cells){String name=k+".dmt.gz";JSONObject info=byName.get(name);if(info==null)throw new IOException("Coverage not in catalog");required+=info.optLong("bytes");next.add(name);}
+        for(String k:cells){String name=k+".dmt.gz";JSONObject info=byName.get(name);if(info==null)throw new IOException("Coverage not in catalog");required+=info.optLong("bytes");next.add(name);
+            JSONObject hierarchy=byName.get(k+".dmo.gz");if(hierarchy!=null){required+=hierarchy.optLong("bytes");next.add(k+".dmo.gz");}}
         if(required>budget)throw new IOException("Journey coverage exceeds cache budget");
         protectedNames.clear();protectedNames.addAll(next);
     }
@@ -61,14 +68,18 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
         Set<String> out=new HashSet<>();
         for(Map.Entry<String,JSONObject> item:byName.entrySet()){
             File file=new File(folder,item.getKey());JSONObject meta=item.getValue();
-            if(file.isFile()&&file.length()==meta.getLong("bytes"))out.add(item.getKey().substring(0,item.getKey().length()-7));
+            // Only map tiles define coverage; cached hierarchy pieces do not.
+            if(item.getKey().endsWith(".dmt.gz")&&file.isFile()&&file.length()==meta.getLong("bytes"))out.add(item.getKey().substring(0,item.getKey().length()-7));
         }return out;
     }
     public synchronized void prefetch(Set<String> cells)throws Exception{
         Set<String> prior=new HashSet<>(protectedNames);protect(cells);
         try{
             protectedNames.addAll(prior);
-            for(String k:new TreeSet<>(cells))try(InputStream in=open(k+".dmt.gz")){}
+            for(String k:new TreeSet<>(cells)){
+                try(InputStream in=open(k+".dmt.gz")){}
+                if(byName.containsKey(k+".dmo.gz"))try(InputStream in=open(k+".dmo.gz")){}
+            }
             protect(cells);
             android.util.AtomicFile pins=new android.util.AtomicFile(new File(folder,"journey-pins.json"));
             FileOutputStream out=pins.startWrite();
@@ -82,17 +93,25 @@ public final class DmTileDiskSource implements DmTileEngine.Source {
         if(!"https".equals(root.getProtocol())||!"github.com".equals(root.getHost())||!root.getPath().matches("/phuk-prog/Drivemate-map/releases/download/dmtiles-[A-Za-z0-9._-]+/routing\\.dma")||root.getQuery()!=null||root.getRef()!=null)throw new IOException("Unpinned DriveMate archive URL");
         JSONObject doc=new JSONObject(new String(manifest,StandardCharsets.UTF_8)),tiles=doc.getJSONObject("tiles");long total=doc.getJSONObject("archive").getLong("bytes");
         if(total<=0)throw new IOException("Invalid archive size");
+        // Road hierarchy pieces come from overlay.dmo in the same pinned release.
+        JSONObject overlay=doc.optJSONObject("overlay");
+        if(overlay!=null&&(!"overlay.dmo".equals(overlay.getString("name"))||overlay.getLong("bytes")<=0))throw new IOException("Invalid road hierarchy archive");
+        final URL overlayRoot=overlay==null?null:new URL(root,"overlay.dmo");
+        final long overlayTotal=overlay==null?0:overlay.getLong("bytes");
         return name->{
-            if(!name.matches("-?[0-9]+_-?[0-9]+\\.dmt\\.gz"))throw new IOException("Invalid routing tile");
-            JSONObject meta=tiles.getJSONObject(name.substring(0,name.length()-7));
+            boolean hierarchy=name.matches("-?[0-9]+_-?[0-9]+\\.dmo\\.gz");
+            if(!hierarchy&&!name.matches("-?[0-9]+_-?[0-9]+\\.dmt\\.gz"))throw new IOException("Invalid routing tile");
+            if(hierarchy&&overlay==null)throw new IOException("No road hierarchy in catalog");
+            JSONObject meta=(hierarchy?overlay.getJSONObject("cells"):tiles).getJSONObject(name.substring(0,name.length()-7));
+            long all=hierarchy?overlayTotal:total;
             long offset=meta.getLong("offset");int len=meta.getInt("bytes");
-            if(offset<0||len<=0||len>8000000||offset>total-len)throw new IOException("Invalid archive range");
-            URL url=root;String range="bytes="+offset+"-"+(offset+len-1);
+            if(offset<0||len<=0||len>8000000||offset>all-len)throw new IOException("Invalid archive range");
+            URL url=hierarchy?overlayRoot:root;String range="bytes="+offset+"-"+(offset+len-1);
             for(int i=0;i<6;i++){
                 if(!"https".equals(url.getProtocol())||!(url.getHost().equals("github.com")||url.getHost().endsWith(".githubusercontent.com")))throw new IOException("Unexpected map host");
                 HttpURLConnection c=(HttpURLConnection)url.openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(10000);c.setReadTimeout(15000);c.setRequestProperty("Range",range);c.setRequestProperty("Accept-Encoding","identity");
                 try{int status=c.getResponseCode();if(status>=300&&status<400){String next=c.getHeaderField("Location");if(next==null)throw new IOException("Missing redirect");url=new URL(url,next);continue;}
-                    if(status!=206||!("bytes "+offset+"-"+(offset+len-1)+"/"+total).equals(c.getHeaderField("Content-Range")))throw new IOException("Archive range not honored");
+                    if(status!=206||!("bytes "+offset+"-"+(offset+len-1)+"/"+all).equals(c.getHeaderField("Content-Range")))throw new IOException("Archive range not honored");
                     byte[] raw=DmTileEngine.read(c.getInputStream(),len);if(raw.length!=len||!DmTileEngine.sha(raw).equals(meta.getString("sha256")))throw new IOException("Range digest mismatch");return new ByteArrayInputStream(raw);
                 }finally{c.disconnect();}
             }throw new IOException("Too many archive redirects");
