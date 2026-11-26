@@ -330,10 +330,22 @@ public final class VectorDriveMap {
         }catch(RuntimeException ignored){lastAlignment="unmeasured";}
     }
     public String routeAlignmentDiagnostic(){return lastAlignment;}
-    String geometryDescription(){return providerStyle?"TomTom vector roads and routing (same provider; geometry not independently verified)":providerStyleFailed?"Independent vector fallback · road alignment not verified":RouteMapPolicy.description(routeProvider,hasSharedRouteMap());}
+    String geometryDescription(){return sharedRouteMap!=null&&sharedRouteMap.checkedEdges==0?"DriveMate source-matched detailed browse map":providerStyle?"TomTom vector roads and routing (same provider; geometry not independently verified)":providerStyleFailed?"Independent vector fallback · road alignment not verified":RouteMapPolicy.description(routeProvider,hasSharedRouteMap());}
     private boolean requestProviderStyle(){return sharedRouteMap==null&&!providerStyleFailed&&RouteMapPolicy.useTomTomVector(routeProvider,!tomtomKey.isEmpty());}
     private String providerStyleUrl(){return "https://api.tomtom.com/style/1/style/20.3.4-6?key="+android.net.Uri.encode(tomtomKey)+"&map="+(nightMode?"basic_night":"basic_main")+"&poi=poi_main"+(trafficEnabled?"&traffic_flow="+(nightMode?"flow_relative0-dark":"flow_relative0"):"");}
-    boolean hasSharedRouteMap(){return sharedRouteMap!=null&&ready();}
+    boolean hasSharedRouteMap(){return sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0&&ready();}
+    public void setBrowseGeometry(DmUnifiedGeometry context){
+        if(pendingRoute!=null&&!pendingRoute.isEmpty())return;
+        if(context!=null&&context.checkedEdges!=0)return;
+        if(sharedRouteMap==context)return;
+        if(sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0)return;
+        // Reuse the active detailed style on context refresh, instead of flashing the map.
+        if(sharedRouteMap!=null&&context!=null&&ready()&&map.getStyle()!=null){
+            Style style=map.getStyle();GeoJsonSource roads=style.getSourceAs("unified-roads"),areas=style.getSourceAs("unified-areas"),points=style.getSourceAs("unified-points");
+            if(roads!=null&&areas!=null){sharedRouteMap=context;roads.setGeoJson(context.roads);areas.setGeoJson(context.areas);if(points!=null)points.setGeoJson(context.mappedPoints);return;}
+        }
+        sharedRouteMap=context;loadStyle();
+    }
     /** Instrumentation checks the same road and route layers used by live guidance. */
     boolean sharedRouteRendered(double zoom){
         if(!hasSharedRouteMap()||view.getWidth()<100||view.getHeight()<100||Math.abs(currentZoom()-zoom)>.2)return false;
