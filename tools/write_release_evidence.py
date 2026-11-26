@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Generate public non-secret provenance for an encrypted review artifact."""
+"""Generate public non-secret provenance for a certificate-verified review artifact."""
 import argparse, hashlib, json, os, subprocess
 from pathlib import Path
 def main():
     p=argparse.ArgumentParser();p.add_argument("--directory",required=True,type=Path);a=p.parse_args()
     version=json.loads(Path("release/version.json").read_text())
     pin=json.loads(Path("release/map-lock.json").read_text())
-    files=list(a.directory.glob("*.zip"))
-    if len(files)!=1:raise SystemExit("Expected exactly one encrypted ZIP")
+    files=list(a.directory.glob("*-signed.apk"))
+    if len(files)!=1:raise SystemExit("Expected exactly one signed APK")
     archive=files[0]
     with archive.open("rb") as stream:digest=hashlib.file_digest(stream,"sha256").hexdigest()
-    version.update(commit=os.environ["GITHUB_SHA"],run_id=os.environ["GITHUB_RUN_ID"],encrypted_zip=archive.name,sha256=digest,map=pin,road_validated=False)
+    version.update(commit=os.environ["GITHUB_SHA"],run_id=os.environ["GITHUB_RUN_ID"],signed_apk=archive.name,artifact_ttl_target_seconds=3600,artifact_native_retention_days=1,certificate_sha256="9f11804f0c28f61be2588fc6e1663514cfcca6ad4da4e31e19e4186c029b1a38",sha256=digest,map=pin,road_validated=False)
     (a.directory/"release-manifest.json").write_text(json.dumps(version,indent=2)+"\n")
     # The known signed 2.0.1 build is the initial reviewed changelog baseline.
     baseline="c6b6ee6ff7c841f88dcb88f4b995c9a1ea15cbc6"

@@ -1,14 +1,14 @@
-name: Remove historical unprotected APK downloads
+name: Expire signed APK downloads and remove unapproved binaries
 on:
   push:
     branches: [main]
-    paths: ['.github/workflows/remove-public-apks.yml', 'tools/remove-public-apks.sh']
+    paths: ['.github/workflows/remove-public-apks.yml', 'tools/remove-public-apks.sh', 'tools/apk_artifact_policy.py']
   schedule:
-    - cron: '17 4 * * *'
+    - cron: '3/5 * * * *'
   workflow_dispatch:
     inputs:
       delete:
-        description: Delete matching historical APK artifacts and raw release assets (unchecked = report only)
+        description: Delete expired official APK artifacts and unapproved binaries (unchecked = report only)
         type: boolean
         default: false
         required: true
@@ -23,8 +23,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.repository == 'phuk-prog/Drivemate-app'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Audit or remove historical APK downloads
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Enforce one-hour APK artifact cleanup target
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
