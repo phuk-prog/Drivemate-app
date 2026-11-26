@@ -1,0 +1,2 @@
+# RC4 empty route handling
+Report from installed RC3: "TomTom route geometry is empty." No live response, API key or device GPS accuracy available. Request explicit polyline, retry once without optional metadata if geometry is empty or existing 400/403 metadata error occurs. For persistent zero-length nearby response give actionable wording, never confirm arrival or manufacture geometry. For persistent missing geometry fail closed. Unit tests use synthetic response fixtures and do not establish the actual provider response. Private signing gated as before.

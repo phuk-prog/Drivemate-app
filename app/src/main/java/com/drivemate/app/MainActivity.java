@@ -104,7 +104,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
-                    if (topTurnTitle != null) topTurnTitle.setText("GPS LOST · WAIT FOR SIGNAL");
+                    suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
                     if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
@@ -371,6 +371,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private double lastCameraBearing = Double.NaN;
     private double lastTravelBearing = Double.NaN;
     private double lastOffRouteMetres = Double.NaN;
+    private String lastMatchReason="not matched";
+    private boolean guidancePositionConfirmed;
     /** Real Home/Work drive times from TomTom, refreshed at most every 5 minutes. */
     private String homeEtaLabel;
     /** Whether the highlighted junction is a roundabout (its diagram stays visible). */
@@ -806,7 +808,8 @@ public final class MainActivity extends Activity implements LocationListener {
         repeatButton.setContentDescription("Repeat next spoken turn");
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
-            if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
+            if (!guidancePositionConfirmed || gpsLost || currentLocation==null || System.currentTimeMillis()-currentLocation.getTime()>10000) showError("Position not confirmed · check road signs.");
+            else if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
             else if (voiceMode == DrivingVoicePolicy.SILENT)
                 Toast.makeText(this, "Enable voice guidance to repeat a turn",
                         Toast.LENGTH_SHORT).show();
@@ -1416,7 +1419,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
                 "Independent map survey drafts",
                 "Offline routing · UK experimental preview",
-                "Offline visual map · download full UK"
+                "Offline visual map · download full UK",
+                "DriveMate original stack · Wells pilot"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1557,6 +1561,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 26: showSurveyNotes(); break;
                         case 27: showOfflineRouting(); break;
                         case 28: showOfflineDisplay(); break;
+                        case 29: if(!active) DmPilotScreen.show(this); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -2661,7 +2666,9 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setContentDescription("End navigation");
         setStatus("Navigating with "+route.provider+" · "+destination.title);
         mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
-        say("Navigation started. Follow the directions.");
+        guidancePositionConfirmed=false;
+        nextInstruction="";
+        say("Navigation started.");
         lastCameraUpdate = 0;
         previousInstructionIndex = 0;
         stabilizedAlong = -1;
@@ -2909,6 +2916,8 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         s.satellitesUsed = satellitesUsed;
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
+        s.matchReason=lastMatchReason;
+        s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
         s.cameraMode = cameraModeName();
         s.followingCar = followLocation;
         s.highDetailTiles = highDetailOnline
@@ -3241,16 +3250,39 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
+    private void suspendPositionGuidance(String title,String reason) {
+        boolean wasConfirmed=guidancePositionConfirmed;
+        guidancePositionConfirmed=false;nextInstruction="";
+        if(wasConfirmed&&speech!=null)speech.stop();
+        if(repeatButton!=null)repeatButton.setEnabled(false);
+        if(topTurnTitle!=null)topTurnTitle.setText(title);
+        if(topInstructionText!=null)topInstructionText.setText(reason);
+        if(tripEtaValue!=null)tripEtaValue.setText("—");
+        if(tripMinutesValue!=null)tripMinutesValue.setText("—");
+        if(tripDistanceValue!=null)tripDistanceValue.setText("—");
+        if(topTurnArrow!=null)topTurnArrow.setVisibility(View.INVISIBLE);
+        if(topDistanceText!=null)topDistanceText.setVisibility(View.GONE);
+        if(topNextTurnText!=null)topNextTurnText.setVisibility(View.GONE);
+        if(laneGuidanceText!=null)laneGuidanceText.setVisibility(View.GONE);
+        if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
+        if(trafficNoticeText!=null)trafficNoticeText.setVisibility(View.GONE);
+        clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
+    }
+
     private void updateGuidance(Location fix) {
         if (!active || route == null || destination == null) return;
         GeoMath.Point current = gpsPoint(fix);
         long now = SystemClock.elapsedRealtime();
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
-        if (System.currentTimeMillis() - fix.getTime() > 10000) return;
+        if (System.currentTimeMillis() - fix.getTime() > 10000) {
+            suspendPositionGuidance("POSITION UNCERTAIN · CHECK ROAD SIGNS","Waiting for a fresh position");return;
+        }
         if (navigationMatch == null) navigationMatch = new NavigationMatch(route.points);
         NavigationMatch.State matched = navigationMatch.match(current, accuracy,
                 fix.hasSpeed() ? fix.getSpeed() : 0f,
-                fix.hasBearing() ? fix.getBearing() : Double.NaN, fix.getTime());
+                fix.hasBearing() && (!fix.hasBearingAccuracy() || fix.getBearingAccuracyDegrees() <= 30) ? fix.getBearing() : Double.NaN, fix.getTime());
+        if(matched.reason==NavigationMatch.Reason.DUPLICATE)return;
+        lastMatchReason=matched.reason.name();
         GeoMath.Progress projected = matched.progress;
         lastOffRouteMetres = projected.offRouteMetres;
 
@@ -3265,6 +3297,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 offRouteSince = 0;
                 lastRerouteAttempt = now;
                 setStatus("Off route · recalculating safely…");
+                suspendPositionGuidance("OFF ROUTE · CHECK ROAD SIGNS","Recalculating your route");
                 say("Recalculating your route.");
                 planRoute(false);
                 return;
@@ -3274,21 +3307,20 @@ public final class MainActivity extends Activity implements LocationListener {
         }
 
         if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {
-            topTurnTitle.setText("POSITION UNCERTAIN · CHECK ROAD SIGNS");
-            topInstructionText.setText("Waiting for reliable GPS");
-            topTurnArrow.setVisibility(View.INVISIBLE);
-            topDistanceText.setVisibility(View.GONE);
-            topNextTurnText.setVisibility(View.GONE);
-            if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
-            if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
-            if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
-            clearJunctionHighlight();
-            stopSmoothLoop();
-            smoothFollow = null;
-            lastCameraUpdate = 0;
+            String reason=matched.reason==NavigationMatch.Reason.POOR_ACCURACY ? "GPS accuracy too low · "+Math.round(accuracy)+" m" : matched.reason==NavigationMatch.Reason.AMBIGUOUS ? "Matching position to nearby roads" : matched.reason==NavigationMatch.Reason.RECOVERING ? "Confirming position on route" : "Position not confirmed on route";
+            if(matched.reason==NavigationMatch.Reason.OUTSIDE_WINDOW && accuracy<=35 && fix.hasSpeed() && fix.getSpeed()<1.5f && GeoMath.distance(current,route.points.get(0))<=100 && projected.offRouteMetres<=100) {
+                reason="Near route start · follow signs to the highlighted road";
+            }
+            suspendPositionGuidance("POSITION UNCERTAIN · CHECK ROAD SIGNS",reason);
             return;
         }
+        guidancePositionConfirmed=true;
+        if(repeatButton!=null)repeatButton.setEnabled(true);
         double along = projected.alongMetres;
+        if(matched.reacquired){
+            while(previousInstructionIndex<route.instructions.size()-1 && route.instructions.get(previousInstructionIndex).routeOffsetMetres+8<along)previousInstructionIndex++;
+            spokenDistanceIndex=-1;spokenCloseIndex=-1;spokenNowIndex=-1;
+        }
         stabilizedAlong = along;
         if ("DriveMate".equals(route.provider)) { requestComparison(); if(comparisonPermitted()) mapReview.observe(route,comparisonRoute,along); }
         topTurnArrow.setVisibility(View.VISIBLE);
@@ -3653,6 +3685,7 @@ public final class MainActivity extends Activity implements LocationListener {
         networkLost = false;
         lastRerouteAttempt = 0;
         nextInstruction = "";
+        guidancePositionConfirmed=false;
         clearPendingRoute();
         clearJunctionHighlight();
         if (routeLine != null) {
