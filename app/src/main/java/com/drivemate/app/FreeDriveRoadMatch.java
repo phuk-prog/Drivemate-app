@@ -41,7 +41,7 @@ final class FreeDriveRoadMatch {
                 distances.put(id,Math.min(distances.getOrDefault(id,Double.POSITIVE_INFINITY),g.offRouteMetres));
                 if(g.offRouteMetres>Math.min(7,accuracy)||g.offRouteMetres>=closest)continue;
                 double heading=GeoMath.bearingDegrees(p,q);
-                double forward=Math.abs((bearing-heading+540)%360-180),reverse=Math.abs((bearing-heading-180+720)%360-180);
+                double forward=Math.abs((bearing-heading+540)%360-180),reverse=Math.abs((bearing-heading-180+540)%360-180);
                 String one=tags.optString("oneway");
                 boolean f=one.isEmpty()||"no".equals(one)||"yes".equals(one)||"1".equals(one)||"true".equals(one);
                 boolean r="no".equals(one)||"-1".equals(one)||one.isEmpty()&&!"roundabout".equals(tags.optString("junction"))&&!"motorway".equals(highway);
