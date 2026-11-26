@@ -39,3 +39,6 @@ This stacked change preserves the in-flight replay on PR #53. A route that excee
 
 ## Merge validation correction
 The parent and corridor replay jobs failed at the real screenshot capture assertion, after road/route drawing checks reached the capture step. Added bounded retries and an Android PixelCopy actual-window compositor fallback. Missing images still fail the test; no synthetic view painting, removed geometry assertions or waived gates. This must pass fresh replay before native stack consolidation.
+
+## Consolidation onto current main
+This merge reconciles the original native stack (PRs #51/#53/#54) with the repository documentation/archive from #52, the reviewed JSON update from #46, and explicit-dispatch signing from #55. The native MainActivity implementation wins the overlapping provider-era refactor; the seven old split controllers are not compiled because their provider and raster references would reintroduce superseded behavior. Their full source remains in the merge parent. The native code is unchanged from the validated corridor merge apart from the JSON test dependency update. The release workflow is main-only explicit dispatch, with existing gates retained. This integration requires fresh build, replay and dependency checks. Do not sign before native road acceptance.
