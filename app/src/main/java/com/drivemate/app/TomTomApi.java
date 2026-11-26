@@ -401,6 +401,17 @@ public final class TomTomApi {
                 laneSections, speedSections, trafficSections);
     }
 
+    /** Current area incidents for display on the provider-matched map only. */
+    static List<LiveTrafficIncidents.Event> liveIncidents(String key,GeoMath.Point centre)throws IOException,JSONException{
+        if(key==null||key.isEmpty()||centre==null||!Double.isFinite(centre.lat)||!Double.isFinite(centre.lon)
+                ||centre.lat<49||centre.lat>61||centre.lon< -9||centre.lon>3)throw new IOException("No eligible UK incident area");
+        String bbox=coordinate(centre.lon-.045)+","+coordinate(centre.lat-.028)+","+coordinate(centre.lon+.045)+","+coordinate(centre.lat+.028);
+        String fields="{incidents{type,geometry{type,coordinates},properties{id,iconCategory,timeValidity,endTime}}}";
+        String url="https://api.tomtom.com/traffic/services/5/incidentDetails?key="+encode(key)
+                +"&bbox="+bbox+"&fields="+encode(fields)+"&language=en-GB&timeValidityFilter=present";
+        return LiveTrafficIncidents.parse(requestJson(url),System.currentTimeMillis());
+    }
+
     private static String coordinate(double value) {
         return String.format(Locale.US, "%.6f", value);
     }
@@ -412,6 +423,7 @@ public final class TomTomApi {
 
     private static JSONObject requestJson(String url) throws IOException, JSONException {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setInstanceFollowRedirects(false);
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(15000);
         connection.setRequestProperty("Accept", "application/json");
