@@ -32,6 +32,11 @@ public class NativeMapRendererDeviceTest {
                 Bitmap shot=i.getUiAutomation().takeScreenshot();assertNotNull(shot);
                 try(FileOutputStream f=new FileOutputStream(new File(dir,"native-"+(night?"night":"day")+"-"+zoom+".png"))){assertTrue(shot.compress(Bitmap.CompressFormat.PNG,100,f));}finally{shot.recycle();}
             }
+            i.runOnMainSync(()->{
+                assertTrue(a.map.frameCount()>0);
+                assertTrue(a.map.meanDrawNanos()>0);
+                android.util.Log.i("UnifiedZoom","DriveMate native CPU draw frames="+a.map.frameCount()+" meanNs="+a.map.meanDrawNanos()+" maxNs="+a.map.maxDrawNanos());
+            });
         }finally{i.runOnMainSync(a::finish);}
     }
 }

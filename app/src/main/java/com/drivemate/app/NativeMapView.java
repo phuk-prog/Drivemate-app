@@ -25,6 +25,10 @@ final class NativeMapView extends View {
     private final ArrayList<NativeMapScene.Shape> visibleShapes=new ArrayList<>();
     private final float[] corner=new float[2];
     private boolean extrude=true;
+    private long frameCount,drawTotalNanos,drawMaxNanos;
+    long frameCount(){return frameCount;}
+    long meanDrawNanos(){return frameCount==0?0:drawTotalNanos/frameCount;}
+    long maxDrawNanos(){return drawMaxNanos;}
     private boolean night;
     private int roadsDrawn,routeDrawn,buildingsDrawn;
     private float lastX,lastY;
@@ -72,7 +76,7 @@ final class NativeMapView extends View {
     private void point(NativeMapProjection.Camera c,GeoMath.Point p){c.screen(NativeMapProjection.x(p.lon),NativeMapProjection.y(p.lat),screen);}
     private boolean visible(NativeMapScene.Shape f,NativeMapProjection.Camera c){
         float minX=Float.POSITIVE_INFINITY,minY=minX,maxX=Float.NEGATIVE_INFINITY,maxY=maxX;
-        for(int i=0;i<4;i++){c.screen((i&1)==0?f.w:f.e,(i&2)==0?f.s:f.n,screen);minX=Math.min(minX,screen[0]);maxX=Math.max(maxX,screen[0]);minY=Math.min(minY,screen[1]);maxY=Math.max(maxY,screen[1]);}
+        for(int i=0;i<4;i++){c.screen((i&1)==0?f.w:f.e,(i&2)==0?f.s:f.n,screen);if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1]))return false;minX=Math.min(minX,screen[0]);maxX=Math.max(maxX,screen[0]);minY=Math.min(minY,screen[1]);maxY=Math.max(maxY,screen[1]);}
         return maxX>=-30&&minX<=getWidth()+30&&maxY>=-30&&minY<=getHeight()+30;
     }
     private void makePath(NativeMapScene.Shape f,NativeMapProjection.Camera c){
@@ -81,10 +85,11 @@ final class NativeMapView extends View {
     private void stroke(Canvas c,int color,float width){paint.setColor(color);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(width));c.drawPath(path,paint);}
     private void fill(Canvas c,int color){paint.setColor(color);paint.setStyle(Paint.Style.FILL);c.drawPath(path,paint);}
     private void routePath(Canvas canvas,NativeMapProjection.Camera c,List<GeoMath.Point> points,int color,float width){
-        if(points.size()<2)return;path.reset();boolean first=true;for(GeoMath.Point p:points){point(c,p);if(first){path.moveTo(screen[0],screen[1]);first=false;}else path.lineTo(screen[0],screen[1]);}
+        if(points.size()<2)return;path.reset();boolean first=true;for(GeoMath.Point p:points){point(c,p);if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1])){first=true;continue;}if(first){path.moveTo(screen[0],screen[1]);first=false;}else path.lineTo(screen[0],screen[1]);}
         stroke(canvas,color,width);
     }
     @Override protected void onDraw(Canvas canvas){
+        long frameStart=System.nanoTime();
         super.onDraw(canvas);canvas.drawColor(color(0xffeef1e9,0xff132634));roadsDrawn=routeDrawn=buildingsDrawn=0;
         if(center==null||getWidth()==0)return;
         NativeMapProjection.Camera c=camera();paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);occupied.clear();
@@ -144,17 +149,18 @@ final class NativeMapView extends View {
         marker(canvas,c,destination,0xffbf3038,"D");marker(canvas,c,entrance,0xff267a58,"E");marker(canvas,c,parked,0xff426987,"P");
         if(vehicle!=null){point(c,vehicle);float x=screen[0],y=screen[1];canvas.save();canvas.translate(x,y);canvas.rotate(Double.isFinite(vehicleBearing)?(float)(vehicleBearing-bearing):0);
             path.reset();path.moveTo(0,-dp(13));path.lineTo(dp(9),dp(10));path.lineTo(0,dp(5));path.lineTo(-dp(9),dp(10));path.close();fill(canvas,0xff007ac9);stroke(canvas,Color.WHITE,2);canvas.restore();}
-        if(scene==null){paint.setColor(color(0xff344451,0xfff1f4f5));paint.setTextSize(dp(12));paint.setStyle(Paint.Style.FILL);canvas.drawText("Regional detail unavailable",dp(10),getHeight()*.45f,paint);}
+        if(scene==null){paint.setColor(color(0xff344451,0xfff1f4f5));paint.setTextSize(dp(12));paint.setStyle(Paint.Style.FILL);canvas.drawText("Map coverage unavailable",dp(10),getHeight()*.45f,paint);}
+        long elapsed=System.nanoTime()-frameStart;frameCount++;drawTotalNanos+=elapsed;drawMaxNanos=Math.max(drawMaxNanos,elapsed);
         if(paintListener!=null)paintListener.run();
-        paint.setStyle(Paint.Style.FILL);paint.setTextSize(dp(10));paint.setColor(color(0xff344451,0xfff1f4f5));canvas.drawText("© OpenStreetMap contributors · DriveMate renderer preview",dp(8),getHeight()-dp(8),paint);
+        paint.setStyle(Paint.Style.FILL);paint.setTextSize(dp(10));paint.setColor(color(0xff344451,0xfff1f4f5));canvas.drawText("© OpenStreetMap contributors · DriveMate native",dp(8),getHeight()-dp(8),paint);
     }
     private void marker(Canvas canvas,NativeMapProjection.Camera c,GeoMath.Point p,int color,String text){
-        if(p==null)return;point(c,p);paint.setStyle(Paint.Style.FILL);paint.setColor(color);canvas.drawCircle(screen[0],screen[1],dp(9),paint);paint.setColor(Color.WHITE);paint.setTextSize(dp(10));canvas.drawText(text,screen[0]-paint.measureText(text)/2,screen[1]+dp(3),paint);
+        if(p==null)return;point(c,p);if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1]))return;paint.setStyle(Paint.Style.FILL);paint.setColor(color);canvas.drawCircle(screen[0],screen[1],dp(9),paint);paint.setColor(Color.WHITE);paint.setTextSize(dp(10));canvas.drawText(text,screen[0]-paint.measureText(text)/2,screen[1]+dp(3),paint);
     }
     private void arrow(Canvas canvas,NativeMapProjection.Camera c,double offset){
         if(route==null||!Double.isFinite(offset)||offset<=progress||offset>=route.length)return;
         GeoMath.Point p=route.at(offset),q=route.at(Math.min(route.length,offset+18));point(c,p);float ax=screen[0],ay=screen[1];point(c,q);
-        float dx=screen[0]-ax,dy=screen[1]-ay,len=(float)Math.hypot(dx,dy);if(len<=1)return;
+        float dx=screen[0]-ax,dy=screen[1]-ay,len=(float)Math.hypot(dx,dy);if(!Float.isFinite(len)||len<=1)return;
         dx/=len;dy/=len;float size=dp(11);path.reset();path.moveTo(ax+dx*size,ay+dy*size);path.lineTo(ax-dx*size*.6f-dy*size*.65f,ay-dy*size*.6f+dx*size*.65f);path.lineTo(ax-dx*size*.6f+dy*size*.65f,ay-dy*size*.6f-dx*size*.65f);path.close();fill(canvas,Color.WHITE);
     }
     @Override public boolean onTouchEvent(android.view.MotionEvent e){

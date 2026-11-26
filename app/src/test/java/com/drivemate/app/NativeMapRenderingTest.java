@@ -10,6 +10,15 @@ public class NativeMapRenderingTest {
         assertEquals(c.anchorX,out[0],.01);assertTrue(out[1]<c.anchorY);
         GeoMath.Point p=c.unproject(out[0],out[1]);assertEquals(53.4,p.lat,1e-7);assertEquals(-2.159,p.lon,1e-7);
     }
+    @Test public void perspectiveNearerObjectsAreLargerAndInverseIsStable(){
+        NativeMapProjection.Camera c=new NativeMapProjection.Camera(53.4,-2.16,17,0,45,1000,800);
+        double d=80/c.scale;float[] near=new float[2],far=new float[2];
+        c.screen(c.cx+d,c.cy+4*d,near);c.screen(c.cx+d,c.cy-4*d,far);
+        assertTrue(near[0]-c.anchorX>far[0]-c.anchorX);
+        GeoMath.Point p=c.unproject(near[0],near[1]);
+        assertEquals(NativeMapProjection.lon(c.cx+d),p.lon,1e-6);
+        assertEquals(NativeMapProjection.lat(c.cy+4*d),p.lat,1e-6);
+    }
     @Test public void exactSourceWaysRequired()throws Exception{
         JSONArray coords=new JSONArray().put(new JSONArray().put(53400000).put(-2160000)).put(new JSONArray().put(53400100).put(-2160000));
         JSONArray row=new JSONArray().put(5).put(new JSONObject().put("highway","residential")).put(coords).put(new JSONArray().put(10).put(11));

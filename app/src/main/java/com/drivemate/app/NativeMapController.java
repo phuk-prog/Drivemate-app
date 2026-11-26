@@ -96,7 +96,9 @@ final class NativeMapController {
         worker.execute(()->{
             NativeMapScene loaded=null;
             if(zoom>=15&&RouteMapPolicy.insideStockport(p))try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
-            if(loaded==null)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){}
+            if(loaded==null)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){
+                try{loaded=tileSource.load(p,Math.min(6,zoom),w,h);}catch(Exception unavailable){}
+            }
             final NativeMapScene result=loaded;
             activity.runOnUiThread(()->{busy=false;if(disposed||gen!=generation||result==null)return;
                 GeoMath.Point c=view.center();if(c!=null&&result.covers(c)&&Math.abs(view.zoom()-zoom)<1.5){current=result;view.setSceneOnly(result);view.setRoadside(Collections.emptyList());roadFurniture(result);}
@@ -104,7 +106,7 @@ final class NativeMapController {
         });
     }
     void prefetchRoute(List<GeoMath.Point> ahead){if(ahead!=null&&!ahead.isEmpty()&&view.center()!=null)prefetch(view.center());}
-    String cacheStats(){return "DriveMate regional detail + bounded GitHub vector tile range cache";}
+    String cacheStats(){return "DriveMate regional + GitHub vector cache · frames "+view.frameCount()+" · mean CPU draw "+String.format(java.util.Locale.ROOT,"%.1f ms",view.meanDrawNanos()/1e6)+" · max "+String.format(java.util.Locale.ROOT,"%.1f ms",view.maxDrawNanos()/1e6);}
     void onStart(){}void onResume(){}void onPause(){}void onStop(){}
     void onLowMemory(){if(route.isEmpty()){current=null;view.setSceneOnly(null);}}
     void onSaveInstanceState(Bundle state){}

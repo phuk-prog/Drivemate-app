@@ -248,6 +248,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private LinearLayout drivingTurnCard;
     private TextView drivingCompass;
     private Button drivingMore;
+    private Button overviewButton;
+    private long lastConfirmedMetricsAt=-1;
+    private String confirmedEta="",confirmedMinutes="",confirmedDistance="";
     private boolean drivingControlsExpanded;
     private LinearLayout previewTurnRow;
     private LinearLayout previewDetailsRow;
