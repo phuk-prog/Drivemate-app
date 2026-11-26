@@ -59,6 +59,10 @@ public final class VectorDriveMap {
     private GeoJsonSource signalSource;
     private MappedSignals signals;
     private GeoJsonSource roadsideSource, speedChangeSource, routeEventSource;
+    private GeoJsonSource incidentLineSource,incidentPointSource;
+    private List<LiveTrafficIncidents.Event> areaIncidents=java.util.Collections.emptyList();
+    private long areaIncidentFetchedAt;
+    private int areaIncidentCount=-1;
     private MappedRoadside roadside;
     private boolean roadsideAttempted;
     private double lastRoadsideLat=Double.NaN,lastRoadsideLon=Double.NaN,lastRoadsideZoom=Double.NaN;
@@ -127,7 +131,7 @@ public final class VectorDriveMap {
     private final Runnable roadMonitor = new Runnable() {
         @Override public void run() {
             if (disposed) return;
-            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();expireRouteEvents();}
+            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();expireRouteEvents();refreshLiveIncidents(false);}
             view.postDelayed(this, MONITOR_INTERVAL_MS);
         }
     };
@@ -366,7 +370,7 @@ public final class VectorDriveMap {
     public void setTomTomKey(String key) {
         String newKey = key == null ? "" : key;
         if (newKey.equals(tomtomKey)) return;
-        tomtomKey = newKey;providerStyleFailed=false;
+        tomtomKey = newKey;providerStyleFailed=false;setLiveIncidents(null,0);
         if (map != null) loadStyle();
     }
 
@@ -424,7 +428,7 @@ public final class VectorDriveMap {
                 }
                 installOverlays(style);
                 styleReady = true;
-                updateSignals();updateRoadside();publishRouteEvents();
+                updateSignals();updateRoadside();publishRouteEvents();refreshLiveIncidents(true);
                 setHighDetailEnabled(highDetailEnabled);
                 setBuildings3D(buildings3d);
                 setNavigationDetail(navigationDetail);
@@ -501,6 +505,7 @@ public final class VectorDriveMap {
         installSignalOverlay(style);
         installRoadsideOverlay(style);
         installRouteEvents(style);
+        installLiveIncidents(style);
         CircleLayer dest = new CircleLayer("dm-dest-dot", "dm-destination");
         dest.setProperties(PropertyFactory.circleColor("#E14343"),
                 PropertyFactory.circleRadius(8f),
@@ -629,6 +634,51 @@ public final class VectorDriveMap {
         style.addLayer(notice);
     }
 
+    boolean supportsLiveIncidents(){return ready()&&providerStyle&&trafficEnabled;}
+    void setLiveIncidents(List<LiveTrafficIncidents.Event> events,long fetchedAt){
+        areaIncidents=events==null?java.util.Collections.emptyList():new ArrayList<>(events);
+        areaIncidentFetchedAt=fetchedAt;refreshLiveIncidents(true);
+    }
+    private void installLiveIncidents(Style style){
+        incidentLineSource=exactLineSource("dm-live-incident-lines");
+        incidentPointSource=new GeoJsonSource("dm-live-incident-points",FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(incidentLineSource);style.addSource(incidentPointSource);
+        LineLayer lines=new LineLayer("dm-live-incident-extent","dm-live-incident-lines");
+        lines.setMinZoom(12f);lines.setProperties(PropertyFactory.lineColor("#bd341e"),PropertyFactory.lineWidth(5f),
+            PropertyFactory.lineOpacity(.85f),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+        style.addLayerBelow(lines,"dm-route-travelled");
+        CircleLayer points=new CircleLayer("dm-live-incident-dot","dm-live-incident-points");
+        points.setMinZoom(12f);points.setProperties(PropertyFactory.circleColor("#b83122"),
+            PropertyFactory.circleRadius(7f),PropertyFactory.circleStrokeWidth(2f),PropertyFactory.circleStrokeColor("#ffffff"));
+        style.addLayer(points);
+        SymbolLayer labels=new SymbolLayer("dm-live-incident-label","dm-live-incident-points");
+        labels.setMinZoom(14f);labels.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("label")),
+            PropertyFactory.textSize(12f),PropertyFactory.textColor("#ffffff"),PropertyFactory.textHaloColor("#70261c"),
+            PropertyFactory.textHaloWidth(2f),PropertyFactory.textOffset(new Float[]{0f,-1.5f}));
+        style.addLayer(labels);
+    }
+    private void refreshLiveIncidents(boolean force){
+        if(!ready()||incidentLineSource==null||incidentPointSource==null)return;
+        long now=System.currentTimeMillis(),age=now-areaIncidentFetchedAt;
+        boolean valid=supportsLiveIncidents()&&age>=0&&age<=LiveTrafficIncidents.MAX_AGE_MS;
+        int count=0;
+        if(valid)for(LiveTrafficIncidents.Event event:areaIncidents)if(event.present(now))count++;
+        if(!force&&count==areaIncidentCount)return;
+        areaIncidentCount=count;
+        ArrayList<Feature> lines=new ArrayList<>(),points=new ArrayList<>();
+        if(valid)for(LiveTrafficIncidents.Event event:areaIncidents){
+            if(!event.present(now)||event.points.isEmpty())continue;
+            GeoMath.Point first=event.points.get(0);
+            Feature marker=Feature.fromGeometry(Point.fromLngLat(first.lon,first.lat));
+            marker.addStringProperty("label","TomTom: "+event.label);points.add(marker);
+            if(event.points.size()>1){
+                ArrayList<Point> geometry=new ArrayList<>();for(GeoMath.Point p:event.points)geometry.add(Point.fromLngLat(p.lon,p.lat));
+                lines.add(Feature.fromGeometry(LineString.fromLngLats(geometry)));
+            }
+        }
+        incidentLineSource.setGeoJson(FeatureCollection.fromFeatures(lines.toArray(new Feature[0])));
+        incidentPointSource.setGeoJson(FeatureCollection.fromFeatures(points.toArray(new Feature[0])));
+    }
     private void expireRouteEvents(){
         long age=System.currentTimeMillis()-routeEventsFetchedAt;
         if(!routeEventsExpired && (age<0||age>480000)){routeEventsExpired=true;publishRouteEvents();}
@@ -971,6 +1021,7 @@ public final class VectorDriveMap {
 
     public void setTraffic(boolean visible) {
         boolean changed=trafficEnabled!=visible;trafficEnabled = visible;
+        if(!visible)setLiveIncidents(null,0);
         if(changed&&requestProviderStyle()){loadStyle();return;}
         if (!ready()) return;
         org.maplibre.android.style.layers.Layer layer =
