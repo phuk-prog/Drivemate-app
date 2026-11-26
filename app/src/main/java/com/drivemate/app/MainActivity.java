@@ -2617,7 +2617,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (calculated.trafficDelaySeconds > 0) {
             detail += " · traffic +" + NavigationUnits.duration(calculated.trafficDelaySeconds);
         } else {
-            detail += " · traffic checked";
+            detail += NavigationStartPolicy.trafficStatus(calculated.provider);
         }
         return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.sharedGeometry != null);
     }
@@ -2630,7 +2630,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
-        instructionText.setText("DriveMate local preview".equals(calculated.provider)?"Experimental route preview — not for driving.":"Review your route before driving.");
+        instructionText.setText(NavigationStartPolicy.previewOnly(calculated.provider)?"Experimental route preview — not for driving.":"Review your route before driving.");
         maneuverIcon.setVisibility(View.GONE);
         nextTurnText.setVisibility(View.GONE);
         distanceText.setText("Distance: " + NavigationUnits.displayDistance(
@@ -2639,9 +2639,9 @@ public final class MainActivity extends Activity implements LocationListener {
         etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
                 .format(new Date(System.currentTimeMillis()
                         + calculated.timeSeconds * 1000L)));
-        startButton.setVisibility("DriveMate local preview".equals(calculated.provider)?View.GONE:View.VISIBLE);
+        startButton.setVisibility(NavigationStartPolicy.previewOnly(calculated.provider)?View.GONE:View.VISIBLE);
         saveButton.setVisibility(View.VISIBLE);
-        if (previewParkingButton != null) previewParkingButton.setVisibility("DriveMate local preview".equals(calculated.provider)?View.GONE:View.VISIBLE);
+        if (previewParkingButton != null) previewParkingButton.setVisibility(NavigationStartPolicy.previewOnly(calculated.provider)?View.GONE:View.VISIBLE);
         saveButton.setText(places.isFavorite(destination) ? "★ Saved" : "★ Save");
         repeatButton.setVisibility(View.GONE);
         refreshButton.setVisibility(View.GONE);
@@ -2649,13 +2649,13 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setContentDescription("Cancel route preview");
         stopButton.setVisibility(View.VISIBLE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setStatus("DriveMate local preview".equals(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready");
+        setStatus(NavigationStartPolicy.previewOnly(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready");
     }
 
     private void startNavigation() {
         if (route == null || destination == null) return;
-        if ("DriveMate local preview".equals(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
-        if (currentLocation == null || System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+        if (NavigationStartPolicy.previewOnly(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
+        if (currentLocation == null || !NavigationStartPolicy.freshFix(currentLocation.getLatitude(), currentLocation.getLongitude(), currentLocation.getTime(), System.currentTimeMillis(), currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.NaN)) {
             showError("Waiting for a fresh GPS position before starting.");
             return;
         }
@@ -3255,7 +3255,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 // sits between the search bar and the bottom panel.
                 final List<GeoMath.Point> previewPoints = calculated.points;
                 navigationPanel.post(() -> {
-                    if (vectorMap == null || active) return;
+                    if (vectorMap == null || active || route != calculated) return;
                     int top = (topMapOverlay != null && topMapOverlay.getHeight() > 0
                             ? topMapOverlay.getHeight() : dp(170)) + dp(28);
                     int bottom = (navigationPanel.getHeight() > 0

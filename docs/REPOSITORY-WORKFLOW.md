@@ -22,3 +22,10 @@ uses environment `drivemate-release`; the owner must configure its reviewers,
 main-only deployment policy and environment-scoped secrets, and remove legacy
 repository-level signing secrets only after preserving secure backups.
 See [stability acceptance](STABILITY-ACCEPTANCE.md).
+
+Host dependency lock resolved by CI run 45766894580, job 139729840249:
+132 Maven coordinates, zero OSV findings at scan time; generated lock SHA-256
+d13fb793b28097cbca613ee7e20f3ebfad7d0a8161bcddbf813fa4a329db62ac.
+The new commit still requires ordinary security, validation and replay gates.
+Navigation start uses a separate tested GPS/provider policy; preview callbacks
+reject obsolete route references and independent routes no longer imply live traffic was checked.
