@@ -36,3 +36,6 @@ Map PR #27 now builds a third continuous corridor candidate and optional exact r
 
 ## Corridor coverage and bounded display fallback
 This stacked change preserves the in-flight replay on PR #53. A route that exceeds the neighborhood display budget keeps its exact source ways, plus a local viewport when possible; a route-only scene does not assert surrounding coverage. The controller can request local detail as the camera moves and avoids generalized national tiles as a substitute for exact route roads. When a smaller installed graph has no connected path, a larger installed overlapping candidate may be tried; corruption and other unexpected errors still fail closed. General multi-pack graph stitching remains deliberately unsupported. Map PR #28 adds manually approved main-only GitHub release publication with archive re-verification. No published catalog or new APK is claimed. Production driving guard remains intact.
+
+## Merge validation correction
+The parent and corridor replay jobs failed at the real screenshot capture assertion, after road/route drawing checks reached the capture step. Added bounded retries and an Android PixelCopy actual-window compositor fallback. Missing images still fail the test; no synthetic view painting, removed geometry assertions or waived gates. This must pass fresh replay before native stack consolidation.

@@ -56,7 +56,7 @@ public class DmUnifiedZoomTest {
             for(double zoom:new double[]{17,19,21}){
                 ins.runOnMainSync(()->live.setCamera(center,zoom,0));
                 waitForPaint(ins,(NativeMapView)live.view(),zoom);
-                capture(ins,app,"live-zoom-"+(int)zoom+".png");
+                capture(ins,app,a,"live-zoom-"+(int)zoom+".png");
             }
         }finally{ins.runOnMainSync(a::finish);}
     }
@@ -70,7 +70,7 @@ public class DmUnifiedZoomTest {
             assertTrue("Exact source scene failed to load",ready.get());
             for(boolean night:new boolean[]{false,true})for(double zoom:new double[]{14,17,19,21}){
                 ins.runOnMainSync(()->a.position(zoom,night,zoom>=17));
-                waitForPaint(ins,a.map,zoom);capture(ins,app,(night?"night-":"day-")+"zoom-"+(int)zoom+".png");
+                waitForPaint(ins,a.map,zoom);capture(ins,app,a,(night?"night-":"day-")+"zoom-"+(int)zoom+".png");
                 android.util.Log.i("UnifiedZoom","PASS native Stockport "+(night?"night":"day")+" zoom "+zoom+" roads and verified route");
             }
         }finally{ins.runOnMainSync(a::finish);}
@@ -85,9 +85,9 @@ public class DmUnifiedZoomTest {
         }
         assertTrue("No actual native rendered roads and route at zoom "+zoom,ok.get());
     }
-    private static void capture(Instrumentation ins,Context app,String name)throws Exception{
+    private static void capture(Instrumentation ins,Context app,android.app.Activity activity,String name)throws Exception{
         File dir=new File(app.getExternalFilesDir(null),"unified-zoom");assertTrue(dir.isDirectory()||dir.mkdirs());
-        Bitmap shot=ins.getUiAutomation().takeScreenshot();assertNotNull(shot);
+        Bitmap shot=NativeScreenshot.capture(ins,activity);assertNotNull(shot);
         try(FileOutputStream out=new FileOutputStream(new File(dir,name))){assertTrue(shot.compress(Bitmap.CompressFormat.PNG,100,out));}finally{shot.recycle();}
     }
 }
