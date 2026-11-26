@@ -55,7 +55,7 @@ final class NativeMapController {
         double zoom=junctionContext.isEmpty()?f.zoom:JunctionFraming.fitZoom(f.zoom,f.center,f.vehicle,junctionContext,view.getWidth(),view.getHeight(),viewportTop,viewportBottom,20);
         view.setCamera(f.center,zoom,f.bearing,f.tilt);view.setVehicle(f.vehicle,f.travelBearing);prefetch(f.center);}
     void setFollowViewport(int top,int bottom,GeoMath.Point junction,List<GeoMath.Point> context){viewportTop=top;viewportBottom=bottom;junctionContext=context==null?Collections.emptyList():new ArrayList<>(context);if(junction!=null){junctionContext=new ArrayList<>(junctionContext);junctionContext.add(junction);}}
-    void previewRoute(List<GeoMath.Point> p,int top,int bottom,int side){view.fit(p,top,bottom,side);}
+    void previewRoute(List<GeoMath.Point> p,int top,int bottom,int side){view.fit(p,top,bottom,side);prefetch(view.center());}
     void setConfirmedRouteProgress(double p){view.setProgressOnly(p);}
     void setManeuverOffsets(double a,double b){view.setTurns(a,b);}
     void setManeuverOffset(double a){view.setTurns(a,Double.NaN);}
@@ -88,15 +88,18 @@ final class NativeMapController {
     }
     void prefetch(GeoMath.Point p){
         if(disposed||p==null)return;
-        if(verifiedRoute!=null&&verifiedRoute.covers(p)){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
+        if(verifiedRoute!=null&&verifiedRoute.covers(p)&&verifiedRoute.bounds[2]>verifiedRoute.bounds[0]&&verifiedRoute.bounds[3]>verifiedRoute.bounds[1]){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
         double zoom=view.zoom();
         if(current!=null&&current.covers(p)&&Math.abs(lastZoom-zoom)<1&&lastRequested!=null&&GeoMath.distance(lastRequested,p)<Math.max(100,4000/Math.pow(2,Math.max(0,zoom-13))))return;
         long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<2000)return;
         requestedAt=now;lastRequested=p;lastZoom=zoom;busy=true;int gen=generation,w=view.getWidth(),h=view.getHeight();
+        final NativeMapScene verified=verifiedRoute;final boolean routePresent=!route.isEmpty();
         worker.execute(()->{
             NativeMapScene loaded=null;
             if(zoom>=15)try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
-            if(loaded==null)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){
+            // Never replace the verified route road geometry with independently generalized national tiles.
+            if(loaded==null&&routePresent)loaded=verified;
+            if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){
                 try{loaded=tileSource.load(p,Math.min(6,zoom),w,h);}catch(Exception unavailable){}
             }
             final NativeMapScene result=loaded;

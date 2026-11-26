@@ -147,7 +147,7 @@ public final class DmTileEngine {
                     if(buildingsOnly&&(!tags.has("building")||"no".equals(tags.optString("building"))))continue;
                     JSONArray coords=row.getJSONArray(2);
                     boolean mandatory=required.contains(id);
-                    if(!mandatory&&!intersects(coords,bounds))continue;
+                    if(!mandatory&&(bounds==null||!intersects(coords,bounds)))continue;
                     if(coords.length()>maxVertices-vertices||result.size()>=maxFeatures)
                         throw new CoverageException("Display region exceeds bounded geometry budget");
                     result.put(id,row);vertices+=coords.length();

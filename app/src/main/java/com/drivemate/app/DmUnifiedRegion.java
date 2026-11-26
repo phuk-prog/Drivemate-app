@@ -61,7 +61,21 @@ final class DmUnifiedRegion {
                 android.util.Log.w("UnifiedRegion","Regional context unavailable at margin "+margin+": "+dense.getMessage());
             }
         }
-        throw new IOException("No verified regional context fits display bounds",last);
+        // Route correctness is independent of the display context budget.
+        // Preserve every original required way, plus a small local viewport if it fits.
+        double[] local=localBounds(points.get(0),regionBounds);
+        try{
+            return new DisplayContext(local,engine.boundedFeatures(engine.keys(),local,required,false,16000,160000));
+        }catch(DmTileEngine.CoverageException dense){
+            // No claim of area coverage: only route ways are present.
+            double[] origin={points.get(0).lon,points.get(0).lat,points.get(0).lon,points.get(0).lat};
+            return new DisplayContext(origin,engine.boundedFeatures(engine.keys(),null,required,false,16000,160000));
+        }
+    }
+    static double[] localBounds(GeoMath.Point p,double[] limit){
+        double[] b={p.lon-.004,p.lat-.003,p.lon+.004,p.lat+.003};
+        if(limit!=null){b[0]=Math.max(b[0],limit[0]);b[1]=Math.max(b[1],limit[1]);b[2]=Math.min(b[2],limit[2]);b[3]=Math.min(b[3],limit[3]);}
+        return b;
     }
     /** Raw source geometry for the original DriveMate rendering library. */
     NativeMapScene nativeScene(DmTileEngine.Route route)throws Exception{
