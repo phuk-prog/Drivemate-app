@@ -5,12 +5,15 @@ import java.util.*;
 
 /** Original renderer model, no MapLibre/GeoJSON/osmdroid objects. Exact source way/node proof. */
 final class NativeMapScene {
-    static final int LAND=0,WATER=1,BUILDING=2,PATH=3,LOCAL=4,MAIN=5,MOTORWAY=6,RAIL=7;
+    static final int LAND=0,WATER=1,BUILDING=2,PATH=3,LOCAL=4,MAIN=5,MOTORWAY=6,RAIL=7,LABEL=8;
     static final class Shape {
         final long id;final int kind;final double[] xy;final String name;final double w,s,e,n;
-        final boolean bridge,tunnel;final boolean area;
+        final boolean bridge,tunnel;final boolean area;final double height;final int[] parts;
         Shape(long id,int kind,double[] xy,String name,boolean bridge,boolean tunnel,boolean area){
-            this.id=id;this.kind=kind;this.xy=xy;this.name=name;this.bridge=bridge;this.tunnel=tunnel;this.area=area;
+            this(id,kind,xy,name,bridge,tunnel,area,0,new int[]{0});
+        }
+        Shape(long id,int kind,double[] xy,String name,boolean bridge,boolean tunnel,boolean area,double height,int[] parts){
+            this.id=id;this.kind=kind;this.xy=xy;this.name=name;this.bridge=bridge;this.tunnel=tunnel;this.area=area;this.height=height;this.parts=parts;
             double w=2,s=2,e=-1,n=-1;
             for(int i=0;i<xy.length;i+=2){w=Math.min(w,xy[i]);e=Math.max(e,xy[i]);s=Math.min(s,xy[i+1]);n=Math.max(n,xy[i+1]);}
             this.w=w;this.s=s;this.e=e;this.n=n;
@@ -57,7 +60,7 @@ final class NativeMapScene {
                 xy[2*i]=NativeMapProjection.x(lon);xy[2*i+1]=NativeMapProjection.y(lat);
             }
             String name=tags.optString("name",tags.optString("ref"));if(name.length()>120)name="";
-            shapes.add(new Shape(row.getLong(0),kind,xy,name,yes(tags.optString("bridge")),yes(tags.optString("tunnel")),closed&&(kind==LAND||kind==WATER||kind==BUILDING)&&!tags.has("waterway")));
+            shapes.add(new Shape(row.getLong(0),kind,xy,name,yes(tags.optString("bridge")),yes(tags.optString("tunnel")),closed&&(kind==LAND||kind==WATER||kind==BUILDING)&&!tags.has("waterway"),kind==BUILDING?MapDetailPolicy.heightMetres(tags.optString("height"),tags.optString("building:levels")):0,new int[]{0}));
         }
         for(int i=0;i<ways.size();i++){
             JSONArray row=exact.get(ways.get(i));if(row==null||row.getJSONObject(1).optString("highway").isEmpty())throw new IOException("Route road missing");
@@ -76,6 +79,7 @@ final class NativeMapScene {
     static NativeMapScene browse(List<JSONArray> rows,double[] bounds)throws Exception{
         return create(rows,Collections.emptyList(),Collections.emptyList(),Collections.emptyList(),bounds);
     }
+    static NativeMapScene tiles(List<Shape> shapes,double[] bounds){return new NativeMapScene(new ArrayList<>(shapes),Collections.emptyList(),0,bounds);}
     boolean covers(GeoMath.Point p){return RouteMapPolicy.insideBounds(p,bounds);}
     private static boolean matches(JSONArray p,GeoMath.Point q)throws JSONException{
         return p.getLong(0)==Math.round(q.lat*1e6)&&p.getLong(1)==Math.round(q.lon*1e6);

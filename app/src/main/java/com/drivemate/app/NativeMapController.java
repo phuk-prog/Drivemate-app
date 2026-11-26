@@ -13,6 +13,13 @@ final class NativeMapController {
     private final Activity activity;private final NativeMapView view;private final Listener listener;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private NativeMapScene current;
+    private final NativeTileSource tileSource;
+    private NativeMapScene verifiedRoute;
+    private MappedRoadside roadside;
+    private MappedSignals signals;
+    private double lastZoom=-1;
+    private int viewportTop,viewportBottom;
+    private List<GeoMath.Point> junctionContext=Collections.emptyList();
     private List<GeoMath.Point> route=Collections.emptyList();
     private GeoMath.Point destination,entrance,parked,center;
     private boolean night,traffic,disposed,busy;
@@ -21,7 +28,8 @@ final class NativeMapController {
     private GeoMath.Point lastRequested;
     private RoadDisplayHealth.State reported;
     NativeMapController(Activity activity,Listener listener){
-        this.activity=activity;this.listener=listener;view=new NativeMapView(activity);
+        this.activity=activity;this.listener=listener;view=new NativeMapView(activity);tileSource=new NativeTileSource(activity);
+        view.setCameraChanged(()->prefetch(view.center()));
         view.setPaintListener(()->{
             RoadDisplayHealth.State state=view.roadsDrawn()>0?RoadDisplayHealth.State.READY:RoadDisplayHealth.State.FAILED;
             if(state!=reported){reported=state;view.post(()->{if(!disposed)listener.status(state,view.roadsDrawn());});}
@@ -43,13 +51,15 @@ final class NativeMapController {
     void setBrowseCamera(GeoMath.Point p,double z,double bearing,double pitch,double vehicleBearing){center=p;view.setCamera(p,z,bearing,pitch);prefetch(p);}
     void setVehicle(GeoMath.Point p){view.setVehicle(p,Double.NaN);}
     void setUnsnappedVehicle(GeoMath.Point p,double bearing){view.setVehicle(p,bearing);}
-    void followFrame(SmoothFollowCamera.Frame f){center=f.center;view.setCamera(f.center,f.zoom,f.bearing,f.tilt);view.setVehicle(f.vehicle,f.travelBearing);}
-    void setFollowViewport(int top,int bottom,GeoMath.Point junction,List<GeoMath.Point> context){}
+    void followFrame(SmoothFollowCamera.Frame f){center=f.center;
+        double zoom=junctionContext.isEmpty()?f.zoom:JunctionFraming.fitZoom(f.zoom,f.center,f.vehicle,junctionContext,view.getWidth(),view.getHeight(),viewportTop,viewportBottom,20);
+        view.setCamera(f.center,zoom,f.bearing,f.tilt);view.setVehicle(f.vehicle,f.travelBearing);prefetch(f.center);}
+    void setFollowViewport(int top,int bottom,GeoMath.Point junction,List<GeoMath.Point> context){viewportTop=top;viewportBottom=bottom;junctionContext=context==null?Collections.emptyList():new ArrayList<>(context);if(junction!=null){junctionContext=new ArrayList<>(junctionContext);junctionContext.add(junction);}}
     void previewRoute(List<GeoMath.Point> p,int top,int bottom,int side){view.fit(p,top,bottom,side);}
     void setConfirmedRouteProgress(double p){view.setProgressOnly(p);}
     void setManeuverOffsets(double a,double b){view.setTurns(a,b);}
     void setManeuverOffset(double a){view.setTurns(a,Double.NaN);}
-    void clearJunctionFraming(){}
+    void clearJunctionFraming(){junctionContext=Collections.emptyList();}
     void updateCurrentRoad(GeoMath.Point p){}
     void clearCurrentRoad(){}
     void setBuildingContext(String endpoint,String source){}
@@ -63,29 +73,41 @@ final class NativeMapController {
     void setLiveIncidents(List<LiveTrafficIncidents.Event> rows,long at){view.setIncidents(rows,at);}
     void setSharedRoute(NativeMapScene scene,List<GeoMath.Point> path){setSharedRoute(scene,path,"");}
     void setSharedRoute(NativeMapScene scene,List<GeoMath.Point> path,String provider){
-        generation++;current=scene;route=path==null?Collections.emptyList():path;view.setSceneOnly(scene);view.setRoute(route);
+        generation++;verifiedRoute=scene;current=scene;route=path==null?Collections.emptyList():path;view.setSceneOnly(scene);view.setRoute(route);view.setRoadside(Collections.emptyList());if(scene!=null)roadFurniture(scene);
         if(scene==null&&route.isEmpty()){requestedAt=0;prefetch(center);}
     }
-    void setBrowseGeometry(NativeMapScene scene){if(!route.isEmpty())return;current=scene;view.setSceneOnly(scene);}
+    void setBrowseGeometry(NativeMapScene scene){if(!route.isEmpty())return;current=scene;view.setSceneOnly(scene);if(scene!=null)roadFurniture(scene);}
+    private void roadFurniture(NativeMapScene s){
+        int gen=generation;worker.execute(()->{try{
+            if(roadside==null)roadside=MappedRoadside.load(activity);if(signals==null)signals=MappedSignals.load(activity);
+            double[] b=s.bounds;List<int[]> rows=roadside.nativePoints(b[1],b[0],b[3],b[2]);Set<String> seen=new HashSet<>();
+            for(int[] row:rows)if(row[2]==4)seen.add(row[0]+":"+row[1]);
+            for(int[] row:signals.nearby(b[1],b[0],b[3],b[2],1000))if(seen.add(row[0]+":"+row[1]))rows.add(new int[]{row[0],row[1],4});
+            activity.runOnUiThread(()->{if(!disposed&&gen==generation&&current==s)view.setRoadside(rows);});
+        }catch(Exception ignored){}});
+    }
     void prefetch(GeoMath.Point p){
-        if(disposed||p==null||!route.isEmpty())return;
-        if(!RouteMapPolicy.insideStockport(p)){if(current!=null){current=null;view.setSceneOnly(null);}return;}
-        if(current!=null&&current.covers(p))return;
-        long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<5000&&lastRequested!=null&&GeoMath.distance(lastRequested,p)<250)return;
-        requestedAt=now;lastRequested=p;busy=true;int gen=generation;
+        if(disposed||p==null)return;
+        if(verifiedRoute!=null&&verifiedRoute.covers(p)){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
+        double zoom=view.zoom();
+        if(current!=null&&current.covers(p)&&Math.abs(lastZoom-zoom)<1)return;
+        long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<2000)return;
+        requestedAt=now;lastRequested=p;lastZoom=zoom;busy=true;int gen=generation,w=view.getWidth(),h=view.getHeight();
         worker.execute(()->{
-            NativeMapScene loaded=null;try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
+            NativeMapScene loaded=null;
+            if(zoom>=15&&RouteMapPolicy.insideStockport(p))try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
+            if(loaded==null)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){}
             final NativeMapScene result=loaded;
-            activity.runOnUiThread(()->{busy=false;if(disposed||gen!=generation||!route.isEmpty()||result==null)return;
-                GeoMath.Point c=view.center();if(c!=null&&result.covers(c)){current=result;view.setSceneOnly(result);}
+            activity.runOnUiThread(()->{busy=false;if(disposed||gen!=generation||result==null)return;
+                GeoMath.Point c=view.center();if(c!=null&&result.covers(c)&&Math.abs(view.zoom()-zoom)<1.5){current=result;view.setSceneOnly(result);view.setRoadside(Collections.emptyList());roadFurniture(result);}
             });
         });
     }
-    void prefetchRoute(List<GeoMath.Point> ahead){}
-    String cacheStats(){return "Verified packaged Cheadle/Stockport regional data; nationwide tile decoding pending.";}
+    void prefetchRoute(List<GeoMath.Point> ahead){if(ahead!=null&&!ahead.isEmpty()&&view.center()!=null)prefetch(view.center());}
+    String cacheStats(){return "DriveMate regional detail + bounded GitHub vector tile range cache";}
     void onStart(){}void onResume(){}void onPause(){}void onStop(){}
     void onLowMemory(){if(route.isEmpty()){current=null;view.setSceneOnly(null);}}
     void onSaveInstanceState(Bundle state){}
-    void onDestroy(){disposed=true;generation++;worker.shutdownNow();}
+    void onDestroy(){disposed=true;generation++;worker.execute(tileSource::close);worker.shutdown();}
     static Bitmap makeVehicleArrow(){Bitmap b=Bitmap.createBitmap(100,100,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);Path path=new Path();path.moveTo(50,6);path.lineTo(84,87);path.lineTo(50,68);path.lineTo(16,87);path.close();p.setColor(0xff007ac9);c.drawPath(path,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(6);p.setColor(Color.WHITE);c.drawPath(path,p);return b;}
 }

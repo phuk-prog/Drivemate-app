@@ -20,7 +20,11 @@ final class NativeMapView extends View {
     private List<RouteIntelligence.SpeedSection> speeds=Collections.emptyList();
     private List<LiveTrafficIncidents.Event> incidents=Collections.emptyList();
     private long incidentAt;
-    private Runnable gesture,paintListener;
+    private Runnable gesture,paintListener,cameraChanged;
+    private List<int[]> roadside=Collections.emptyList();
+    private final ArrayList<NativeMapScene.Shape> visibleShapes=new ArrayList<>();
+    private final float[] corner=new float[2];
+    private boolean extrude=true;
     private boolean night;
     private int roadsDrawn,routeDrawn,buildingsDrawn;
     private float lastX,lastY;
@@ -40,7 +44,9 @@ final class NativeMapView extends View {
     void setTurns(double a,double b){turn=a;secondTurn=b;invalidate();}
     void setEvents(List<RouteIntelligence.SpeedSection> s,boolean metric){speeds=s==null?Collections.emptyList():s;this.metric=metric;invalidate();}
     void setIncidents(List<LiveTrafficIncidents.Event> data,long at){incidents=data==null?Collections.emptyList():data;incidentAt=at;invalidate();}
-    void setBuildings(boolean value){showBuildings=value;invalidate();}
+    void setBuildings(boolean value){extrude=value;invalidate();}
+    void setRoadside(List<int[]> points){roadside=points;invalidate();}
+    void setCameraChanged(Runnable r){cameraChanged=r;}
     void setGesture(Runnable callback){gesture=callback;}
     void setPaintListener(Runnable callback){paintListener=callback;}
     GeoMath.Point center(){return center;}
@@ -54,7 +60,7 @@ final class NativeMapView extends View {
         double actual=256*Math.pow(2,z),cy=(n+s)/2-(top-bottom)/(2.0*actual);
         setCamera(new GeoMath.Point(NativeMapProjection.lat(cy),NativeMapProjection.lon((w+e)/2)),z,0,0);
     }
-    void setZoom(double value){zoom=Math.max(2,Math.min(21,value));invalidate();}
+    void setZoom(double value){zoom=Math.max(2,Math.min(21,value));invalidate();if(cameraChanged!=null)cameraChanged.run();}
     double zoom(){return zoom;}
     void setNight(boolean value){night=value;invalidate();}
     void setCamera(GeoMath.Point p,double z,double bearing,double tilt){if(p==null)return;center=p;zoom=Math.max(2,Math.min(21,z));this.bearing=bearing;this.tilt=tilt;invalidate();}
@@ -66,11 +72,11 @@ final class NativeMapView extends View {
     private void point(NativeMapProjection.Camera c,GeoMath.Point p){c.screen(NativeMapProjection.x(p.lon),NativeMapProjection.y(p.lat),screen);}
     private boolean visible(NativeMapScene.Shape f,NativeMapProjection.Camera c){
         float minX=Float.POSITIVE_INFINITY,minY=minX,maxX=Float.NEGATIVE_INFINITY,maxY=maxX;
-        for(double x:new double[]{f.w,f.e})for(double y:new double[]{f.s,f.n}){c.screen(x,y,screen);minX=Math.min(minX,screen[0]);maxX=Math.max(maxX,screen[0]);minY=Math.min(minY,screen[1]);maxY=Math.max(maxY,screen[1]);}
+        for(int i=0;i<4;i++){c.screen((i&1)==0?f.w:f.e,(i&2)==0?f.s:f.n,screen);minX=Math.min(minX,screen[0]);maxX=Math.max(maxX,screen[0]);minY=Math.min(minY,screen[1]);maxY=Math.max(maxY,screen[1]);}
         return maxX>=-30&&minX<=getWidth()+30&&maxY>=-30&&minY<=getHeight()+30;
     }
     private void makePath(NativeMapScene.Shape f,NativeMapProjection.Camera c){
-        path.reset();for(int i=0;i<f.xy.length;i+=2){c.screen(f.xy[i],f.xy[i+1],screen);if(i==0)path.moveTo(screen[0],screen[1]);else path.lineTo(screen[0],screen[1]);}if(f.area)path.close();
+        path.reset();path.setFillType(Path.FillType.EVEN_ODD);for(int j=0;j<f.parts.length;j++){int start=f.parts[j],end=j+1<f.parts.length?f.parts[j+1]:f.xy.length;for(int i=start;i<end;i+=2){c.screen(f.xy[i],f.xy[i+1],screen);if(i==start)path.moveTo(screen[0],screen[1]);else path.lineTo(screen[0],screen[1]);}if(f.area)path.close();}
     }
     private void stroke(Canvas c,int color,float width){paint.setColor(color);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(width));c.drawPath(path,paint);}
     private void fill(Canvas c,int color){paint.setColor(color);paint.setStyle(Paint.Style.FILL);c.drawPath(path,paint);}
@@ -82,11 +88,17 @@ final class NativeMapView extends View {
         super.onDraw(canvas);canvas.drawColor(color(0xffeef1e9,0xff132634));roadsDrawn=routeDrawn=buildingsDrawn=0;
         if(center==null||getWidth()==0)return;
         NativeMapProjection.Camera c=camera();paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);occupied.clear();
-        ArrayList<NativeMapScene.Shape> visible=new ArrayList<>();
+        ArrayList<NativeMapScene.Shape> visible=visibleShapes;visible.clear();
         if(scene!=null)for(NativeMapScene.Shape f:scene.shapes){if(f.kind==NativeMapScene.BUILDING&&(!showBuildings||zoom<15)||!visible(f,c))continue;visible.add(f);}
         for(NativeMapScene.Shape f:visible){
             if(!f.area)continue;makePath(f,c);
-            if(f.kind==NativeMapScene.BUILDING){fill(canvas,color(0xffd7cbb9,0xff334654));stroke(canvas,color(0xffc2b6a3,0xff455867),.7f);buildingsDrawn++;}
+            if(f.kind==NativeMapScene.BUILDING){fill(canvas,color(0xffd7cbb9,0xff334654));stroke(canvas,color(0xffc2b6a3,0xff455867),.7f);buildingsDrawn++;
+                // Oblique height-based extrusion, bounded for readability. Not a perspective GPU mesh.
+                if(extrude&&tilt>10&&zoom>=16&&f.height>0&&f.parts.length==1){
+                    float h=(float)Math.min(dp(85),f.height*c.scale/(40075016.7*Math.max(.15,Math.cos(Math.toRadians(center.lat))))*Math.sin(Math.toRadians(tilt)));
+                    if(h>1){for(int i=0;i<f.xy.length-2;i+=2){c.screen(f.xy[i],f.xy[i+1],screen);c.screen(f.xy[i+2],f.xy[i+3],corner);path.reset();path.moveTo(screen[0],screen[1]);path.lineTo(corner[0],corner[1]);path.lineTo(corner[0],corner[1]-h);path.lineTo(screen[0],screen[1]-h);path.close();fill(canvas,color(0xffb7aa97,0xff283b4a));}makePath(f,c);path.offset(0,-h);fill(canvas,color(0xffe0d4c3,0xff425869));stroke(canvas,color(0xffc2b6a3,0xff526575),.7f);}
+                }
+            }
             else if(f.kind==NativeMapScene.WATER)fill(canvas,color(0xffa6d5e9,0xff254d6b));
             else fill(canvas,color(0xffdce9ce,0xff243c37));
         }
@@ -94,16 +106,16 @@ final class NativeMapView extends View {
             if(f.area||f.bridge!=(pass==1))continue;makePath(f,c);
             if(f.kind==NativeMapScene.WATER){stroke(canvas,color(0xff8bc6e2,0xff376989),2);continue;}
             if(f.kind==NativeMapScene.RAIL){stroke(canvas,color(0xff969c9e,0xff687782),1);continue;}
-            if(f.kind<NativeMapScene.PATH)continue;
+            if(f.kind<NativeMapScene.PATH||f.kind==NativeMapScene.LABEL)continue;
             float width=f.kind==NativeMapScene.MOTORWAY?7:f.kind==NativeMapScene.MAIN?5:f.kind==NativeMapScene.LOCAL?3.4f:1.2f;
             width*=Math.max(.7f,Math.min(1.6f,(float)(1+(zoom-16)*.12)));
             stroke(canvas,color(0xffb1b8b9,0xff10202d),width+1.7f);
             stroke(canvas,f.tunnel?color(0xffd6d8d6,0xff465461):f.kind==NativeMapScene.MOTORWAY?color(0xfff1cd9d,0xffa18b68):f.kind==NativeMapScene.MAIN?color(0xffffe7a7,0xff667178):color(0xffffffff,0xff50616d),width);
             roadsDrawn++;
         }
-        if(zoom>=15){paint.setTextSize(dp(11));paint.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));paint.setStyle(Paint.Style.FILL);
+        if(zoom>=2){paint.setTextSize(dp(11));paint.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));paint.setStyle(Paint.Style.FILL);
             for(NativeMapScene.Shape f:visible){
-                if(f.name.isEmpty()||f.kind<NativeMapScene.LOCAL||f.kind>NativeMapScene.MOTORWAY||occupied.size()>=160)continue;
+                if(f.name.isEmpty()||(f.kind!=NativeMapScene.LABEL&&(zoom<15||f.kind<NativeMapScene.LOCAL||f.kind>NativeMapScene.MOTORWAY))||occupied.size()>=160)continue;
                 int i=(f.xy.length/4)*2;c.screen(f.xy[i],f.xy[i+1],screen);float x=screen[0],y=screen[1],w=paint.measureText(f.name);
                 RectF box=new RectF(x-w/2-dp(3),y-dp(12),x+w/2+dp(3),y+dp(3));if(box.left<0||box.right>getWidth()||box.top<0||box.bottom>getHeight())continue;
                 boolean collision=false;for(RectF other:occupied)if(RectF.intersects(other,box)){collision=true;break;}if(collision)continue;
@@ -121,8 +133,14 @@ final class NativeMapView extends View {
                 paint.setColor(0xff192635);paint.setTextSize(dp(9));String t=String.valueOf(metric?section.kmh:(int)Math.round(section.kmh/1.609344));canvas.drawText(t,screen[0]-paint.measureText(t)/2,screen[1]+dp(3),paint);
             }
         }
+        if(zoom>=14)for(int[] row:roadside){
+            point(c,new GeoMath.Point(row[0]/1e7,row[1]/1e7));float x=screen[0],y=screen[1];if(x<0||x>getWidth()||y<0||y>getHeight()||(zoom<15&&row[2]!=4&&row[2]!=1))continue;
+            paint.setStyle(Paint.Style.FILL);paint.setColor(0xff263d50);canvas.drawRoundRect(x-dp(7),y-dp(9),x+dp(7),y+dp(9),dp(3),dp(3),paint);
+            if(row[2]==4){paint.setColor(0xffe84545);canvas.drawCircle(x,y-dp(4),dp(1.7f),paint);paint.setColor(0xffefb33f);canvas.drawCircle(x,y,dp(1.7f),paint);paint.setColor(0xff4eb477);canvas.drawCircle(x,y+dp(4),dp(1.7f),paint);}
+            else{String t=row[2]==1?"C":row[2]==3?"~":row[2]==5?"Z":row[2]==6?"Pe":row[2]==7?"Pu":row[2]==8?"T":row[2]==9?"Pa":row[2]==10?"H":"P";paint.setColor(Color.WHITE);paint.setTextSize(dp(8));canvas.drawText(t,x-paint.measureText(t)/2,y+dp(3),paint);}
+        }
         if(System.currentTimeMillis()-incidentAt>=0&&System.currentTimeMillis()-incidentAt<=LiveTrafficIncidents.MAX_AGE_MS)
-            for(LiveTrafficIncidents.Event event:incidents)if(event.present(System.currentTimeMillis())&&!event.points.isEmpty())marker(canvas,c,event.points.get(0),0xffbd5426,"!");
+            for(LiveTrafficIncidents.Event event:incidents)if(event.present(System.currentTimeMillis())&&!event.points.isEmpty())marker(canvas,c,event.points.get(0),0xffbd5426,"T!");
         marker(canvas,c,destination,0xffbf3038,"D");marker(canvas,c,entrance,0xff267a58,"E");marker(canvas,c,parked,0xff426987,"P");
         if(vehicle!=null){point(c,vehicle);float x=screen[0],y=screen[1];canvas.save();canvas.translate(x,y);canvas.rotate(Double.isFinite(vehicleBearing)?(float)(vehicleBearing-bearing):0);
             path.reset();path.moveTo(0,-dp(13));path.lineTo(dp(9),dp(10));path.lineTo(0,dp(5));path.lineTo(-dp(9),dp(10));path.close();fill(canvas,0xff007ac9);stroke(canvas,Color.WHITE,2);canvas.restore();}
@@ -142,6 +160,7 @@ final class NativeMapView extends View {
     @Override public boolean onTouchEvent(android.view.MotionEvent e){
         scale.onTouchEvent(e);if(center==null)return true;
         if(e.getActionMasked()==MotionEvent.ACTION_DOWN){lastX=e.getX();lastY=e.getY();return true;}
+        if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){if(cameraChanged!=null)cameraChanged.run();return true;}
         if(e.getActionMasked()==MotionEvent.ACTION_MOVE){if(gesture!=null)gesture.run();float x=e.getX(),y=e.getY();if(!scale.isInProgress()&&e.getPointerCount()==1){NativeMapProjection.Camera c=camera();center=c.unproject(c.anchorX+lastX-x,c.anchorY+lastY-y);invalidate();}lastX=x;lastY=y;return true;}
         return true;
     }

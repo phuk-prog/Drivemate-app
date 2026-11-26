@@ -36,6 +36,11 @@ final class MappedRoadside {
         return new MappedRoadside(a,o,k);
     }
     private int first(int v){int l=0,r=lat.length;while(l<r){int m=(l+r)>>>1;if(lat[m]<v)l=m+1;else r=m;}return l;}
+    List<int[]> nativePoints(double south,double west,double north,double east){
+        if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)||south>north||west>east||north-south>.25||east-west>.25)return Collections.emptyList();
+        int a=(int)Math.floor(south*1e7),b=(int)Math.ceil(north*1e7),x=(int)Math.floor(west*1e7),y=(int)Math.ceil(east*1e7);
+        List<int[]> out=new ArrayList<>();for(int i=first(a);i<lat.length&&lat[i]<=b;i++)if(lon[i]>=x&&lon[i]<=y){if(out.size()>=1500)break;out.add(new int[]{lat[i],lon[i],kind[i]});}return out;
+    }
     FeatureCollection features(double south,double west,double north,double east,boolean detailed){
         ArrayList<Feature> out=new ArrayList<>();
         if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)

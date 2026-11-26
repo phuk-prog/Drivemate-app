@@ -58,16 +58,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.osmdroid.config.Configuration;
-import org.osmdroid.tileprovider.MapTileProviderBasic;
-import org.osmdroid.tileprovider.tilesource.XYTileSource;
-import org.osmdroid.util.GeoPoint;
-import org.osmdroid.util.BoundingBox;
-import org.osmdroid.util.MapTileIndex;
-import org.osmdroid.views.MapView;
-import org.osmdroid.views.overlay.Marker;
-import org.osmdroid.views.overlay.Polyline;
-import org.osmdroid.views.overlay.TilesOverlay;
 
 import java.text.DateFormat;
 import java.util.ArrayList;
@@ -169,33 +159,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     lastCameraBearing = frame.bearing;
                     if(drivingCompass!=null)drivingCompass.setRotation((float)-frame.bearing);
                     lastTravelBearing = frame.travelBearing;
-                    if (showingVector() && vectorMap != null) {
-                        vectorMap.followFrame(frame);
-                    } else {
-                        if (map != null) {
-                            if (userPin != null) {
-                                userPin.setPosition(new GeoPoint(
-                                        frame.vehicle.lat, frame.vehicle.lon));
-                                // A flat screen-facing arrow must show travel
-                                // direction *relative to* the moving map camera.
-                                userPin.setRotation(CameraHeadingPolicy.rasterMarkerRotation(
-                                        frame.travelBearing, frame.bearing));
-                            }
-                            map.getController().setCenter(new GeoPoint(
-                                    frame.center.lat, frame.center.lon));
-                            if (smoothTick % 3 == 0
-                                    && Math.abs(map.getZoomLevelDouble() - frame.zoom) >= 0.12)
-                                map.getController().setZoom(frame.zoom);
-                            float delta = (float) MapFollowPolicy.shortestHeadingDifference(
-                                    -frame.bearing, map.getMapOrientation());
-                            if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
-                                map.setMapOrientation(map.getMapOrientation() + delta);
-                            if (routeLine != null) routeLine.getOutlinePaint().setStrokeWidth(dp(RouteMapPolicy.rasterWidthDp(map.getZoomLevelDouble())));
-                            map.postInvalidateOnAnimation();
-                        }
-                        if (vectorMap != null && !matchingTomTomMap() && useLocalMap && !autoFallback
-                                && smoothTick % 5 == 0) vectorMap.followFrame(frame);
-                    }
+                    if(vectorMap!=null)vectorMap.followFrame(frame);
                     motionFrames++;
                 }
                 smoothTick++;
@@ -255,8 +219,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 paused ? CYAN : DARK));
         followButton.setTextColor(paused ? DARK : Color.WHITE);
     }
-
-    private MapView map;
     private DriveTileServer driveTiles;
     private NativeMapController vectorMap;
     private Bundle vectorSavedState;
@@ -417,13 +379,11 @@ public final class MainActivity extends Activity implements LocationListener {
     private final DeadReckoner deadReckoner = new DeadReckoner();
     private final Runnable deadReckonTick = new Runnable() {
         @Override public void run() {
-            if (foreground && userPin != null) {
+            if (foreground && displayGps != null) {
                 GeoMath.Point estimate = deadReckoner.estimate(System.currentTimeMillis());
                 // While guidance runs, SmoothFollowCamera owns the marker position.
                 if (estimate != null && (!active || smoothFollow == null)) {
-                    userPin.setPosition(new GeoPoint(estimate.lat, estimate.lon));
                     if (vectorMap != null && useLocalMap) vectorMap.setVehicle(estimate);
-                    map.postInvalidateOnAnimation();
                 }
             }
             gpsHandler.postDelayed(this, 500);
@@ -440,16 +400,9 @@ public final class MainActivity extends Activity implements LocationListener {
             satellitesUsed = used;
         }
     };
-    private Marker userPin;
-    private Marker destinationPin;
-    private Marker entrancePin;
-    private Marker parkedCarPin;
-    private Polyline routeLine;
-    private RasterRouteAwareness rasterAwareness;
     private long lastSpeechAt=-1;
     private List<GeoMath.Point> junctionFramePoints = java.util.Collections.emptyList();
     private int highlightedJunctionIndex = -1;
-    private TilesOverlay trafficTiles;
     private TextToSpeech speech;
     private boolean speechReady;
     private boolean trafficEnabled = false;
@@ -480,19 +433,6 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Configure osmdroid before constructing MapView. Cache tiles in the
-        // app-private cache, and allow additional parallel tile downloads.
-        // TomTom traffic remains a separate, optional overlay.
-        Configuration.getInstance().setUserAgentValue(getPackageName());
-        File mapCache = new File(getCacheDir(), "drivemate-map-tiles");
-        if (!mapCache.exists()) mapCache.mkdirs();
-        Configuration.getInstance().setOsmdroidBasePath(mapCache);
-        Configuration.getInstance().setOsmdroidTileCache(new File(mapCache, "tiles"));
-        Configuration.getInstance().setCacheMapTileCount((short) 36);
-        Configuration.getInstance().setTileDownloadThreads((short) 4);
-        Configuration.getInstance().setTileDownloadMaxQueueSize((short) 60);
-        Configuration.getInstance().setTileFileSystemCacheMaxBytes(180L * 1024L * 1024L);
-        Configuration.getInstance().setTileFileSystemCacheTrimBytes(140L * 1024L * 1024L);
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
         apiKey = ""; // Native-only candidate: ignore saved external service credentials.
         metricUnits = settings.getBoolean("metric_units", false);
@@ -560,36 +500,8 @@ public final class MainActivity extends Activity implements LocationListener {
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
-        map = new MapView(this);
-        // Keep the legacy overlay/camera object offline and hidden; osmdroid's default
-        // tile source must not issue external map requests in the independent candidate.
-        map.setUseDataConnection(false);
-        map.setMultiTouchControls(true);
-        final float[] touchAnchor = new float[2];
-        map.setOnTouchListener((v, event) -> {
-            if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
-                touchAnchor[0] = event.getX();
-                touchAnchor[1] = event.getY();
-            } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_MOVE
-                    && Math.hypot(event.getX() - touchAnchor[0],
-                            event.getY() - touchAnchor[1]) > dp(16)) {
-                disengageFollowForGesture();
-            }
-            return false;
-        });
-        map.setMinZoomLevel(2.0);
-        // Never initialise a UK navigation app at MapLibre's world-default
-        // camera. An approximate saved map area is DISPLAY ONLY, never GPS.
-        map.getController().setZoom(startupMapView.zoom);
-        map.getController().setCenter(new GeoPoint(
-                startupMapView.center.lat, startupMapView.center.lon));
-        map.setVisibility(View.INVISIBLE);
-        // Keep both map engines inside the SAME background-only host:
-        // the visible TomTom raster map covers MapLibre until actual UK roads
-        // (not merely an HTTP tile) are drawn. Control overlays remain on top.
-        FrameLayout mapHost = new FrameLayout(this);
-        frame.addView(mapHost, new FrameLayout.LayoutParams(-1, -1));
-        mapHost.addView(map, new FrameLayout.LayoutParams(-1, -1));
+        FrameLayout mapHost=new FrameLayout(this);
+        frame.addView(mapHost,new FrameLayout.LayoutParams(-1,-1));
         vectorMap=new NativeMapController(this,(status,roads)->{
             vectorRoadsReady=status==RoadDisplayHealth.State.READY;
             if(!active&&route==null&&status==RoadDisplayHealth.State.FAILED)
@@ -1033,7 +945,6 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void updateMapVisibility(){
         if(vectorMap!=null)vectorMap.setVisible(true);
-        if(map!=null){map.setUseDataConnection(false);map.setVisibility(View.INVISIBLE);}
     }
 
     /**
@@ -1208,16 +1119,7 @@ public final class MainActivity extends Activity implements LocationListener {
         followLocation=false;stopSmoothLoop();updateFollowButton();
         List<GeoMath.Point> remaining=GeoMath.slice(route.points,Math.max(0,stabilizedAlong),GeoMath.length(route.points));
         if(remaining.size()<2)remaining=route.points;
-        if(showingVector()&&vectorMap!=null){
-            int top=(topMapOverlay!=null?topMapOverlay.getHeight():dp(140))+dp(18);
-            int bottom=navigationPanel.getHeight()+dp(18);
-            vectorMap.previewRoute(remaining,top,bottom,dp(36));
-        }else{
-            double n=-90,s=90,e=-180,w=180;
-            for(GeoMath.Point p:remaining){n=Math.max(n,p.lat);s=Math.min(s,p.lat);e=Math.max(e,p.lon);w=Math.min(w,p.lon);}
-            if(n-s<.0001){n+=.0001;s-=.0001;}if(e-w<.0001){e+=.0001;w-=.0001;}
-            map.setMapOrientation(0);map.zoomToBoundingBox(new BoundingBox(n,e,s,w),true,dp(100));
-        }
+        if(vectorMap!=null){int top=(topMapOverlay!=null?topMapOverlay.getHeight():dp(140))+dp(18);int bottom=navigationPanel.getHeight()+dp(18);vectorMap.previewRoute(remaining,top,bottom,dp(36));}
     }
     private void applyNavigationChrome() {
         boolean navigating = active;
@@ -1504,7 +1406,6 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 5:
                             metricUnits = !metricUnits;
                             if(vectorMap!=null && route!=null)vectorMap.setRouteEvents(route.speedSections,route.trafficSections,metricUnits,route.fetchedAtMs);
-                            if(rasterAwareness!=null)rasterAwareness.setMetric(metricUnits);
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("metric_units", metricUnits).apply();
                             if (currentLocation != null) {
@@ -1545,7 +1446,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             updateMapVisibility();
                             if (useLocalMap && currentLocation != null) {
                                 vectorMap.setCamera(gpsPoint(currentLocation),
-                                        map.getZoomLevelDouble(), 0);
+                                        vectorMap.currentZoom(), 0);
                                 vectorMap.prefetch(gpsPoint(currentLocation));
                             }
                             break;
@@ -1774,7 +1675,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
                         updateGuidance(currentLocation);
                     } else if (which == DrivingDisplayPolicy.CAMERA_NORTH_2D) {
-                        map.setMapOrientation(0);
+                        if(vectorMap!=null&&displayGps!=null)vectorMap.setCamera(displayGps,vectorMap.currentZoom(),0);
                     }
                     dialog.dismiss();
                 }).setNegativeButton("Cancel", null).show();
@@ -2036,14 +1937,9 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void showKeyDialog(){showOfflineRouting();}
 
-    private XYTileSource tileSource(String name,String prefix){
-        throw new IllegalStateException("External base map disabled");
-    }
-
     private void configureTiles(){updateMapVisibility();}
 
     private void configureTrafficTiles(){
-        if(trafficTiles!=null){map.getOverlays().remove(trafficTiles);trafficTiles=null;}
         if(vectorMap!=null)vectorMap.setTraffic(trafficEnabled);
         if(!trafficEnabled)clearLiveIncidents();
     }
@@ -2152,8 +2048,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 chosen.getLatitude(), chosen.getLongitude());
         double zoom = chosen.hasAccuracy() && chosen.getAccuracy() > 1000
                 ? 11.0 : 13.5;
-        map.getController().setZoom(zoom);
-        map.getController().setCenter(new GeoPoint(preview.lat, preview.lon));
         if (vectorMap != null) vectorMap.setCamera(preview, zoom, 0);
         // No blue GPS marker is created: this is historical positioning only.
         setStatus("Showing last known area · waiting for live GPS");
@@ -2297,26 +2191,11 @@ public final class MainActivity extends Activity implements LocationListener {
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fix.hasSpeed() ? fix.getSpeed() : 0f);
         displayGps = smoothed;
-        GeoPoint point = new GeoPoint(smoothed.lat, smoothed.lon);
-        if (userPin == null) {
-            userPin = new Marker(map);
-            userPin.setTitle("Your live GPS position");
-            userPin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER);
-            userPin.setFlat(true);
-            userPin.setIcon(makeCarIcon());
-            map.getOverlays().add(userPin);
-        }
-        // The independent frame clock owns the moving marker while driving.
-        // Never teleport it back to each noisy 1Hz GPS fix.
-        if (!active || smoothFollow == null || !followLocation) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
             if (!active || smoothFollow == null || !followLocation) vectorMap.setUnsnappedVehicle(smoothed,
                     fix.hasBearing()&&fix.hasSpeed()&&fix.getSpeed()>1.5f?fix.getBearing():Double.NaN);
             if (!autoFallback && !active) vectorMap.prefetch(gpsPoint(fix));
         }
-        if ((!active || smoothFollow == null || !followLocation) && fix.hasBearing()
-                && fix.hasSpeed() && fix.getSpeed() > 1.5f)
-            userPin.setRotation(-fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
@@ -2347,7 +2226,6 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (active && route != null) updateGuidance(fix);
         else if(active&&joiningRoute&&followLocation&&lastJoinCameraAt>=0&&SystemClock.elapsedRealtime()-lastJoinCameraAt>=1000){centreOnLocation(false);lastJoinCameraAt=SystemClock.elapsedRealtime();}
-        if (!showingVector()) map.postInvalidateOnAnimation();
     }
 
     /** Maps a fix's provider to its FixQualityPolicy rank. */
@@ -2504,23 +2382,11 @@ public final class MainActivity extends Activity implements LocationListener {
                         position.lon+Math.sin(rad)*ahead/(111320*Math.max(.15,Math.cos(Math.toRadians(position.lat)))));
             }
             if(vector)vectorMap.setBrowseCamera(centre,cameraZoom,bearing,pitch,heading);
-            else {map.setMapOrientation((float)-bearing);map.getController().setZoom(cameraZoom);map.getController().setCenter(new GeoPoint(centre.lat,centre.lon));}
             lastCameraCenter=position;return;
         }
-        double zoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
-        if (forceZoom || zoom < 14.0) zoom = 16.5;
-        if (vector) {
-            vectorMap.setCamera(position, zoom, 0);
-        } else {
-            if (Math.abs(map.getZoomLevelDouble() - zoom) > 0.1)
-                map.getController().setZoom(zoom);
-            map.getController().setCenter(new GeoPoint(position.lat, position.lon));
-            if (useLocalMap && !autoFallback && vectorMap != null) {
-                // The candidate map needs the same real UK camera position
-                // in order to request and *render* street tiles for verification.
-                vectorMap.setCamera(position, zoom, 0);
-            }
-        }
+        double zoom=vectorMap!=null?vectorMap.currentZoom():16.5;
+        if(forceZoom||zoom<14)zoom=16.5;
+        if(vectorMap!=null)vectorMap.setCamera(position,zoom,0);
         lastCameraCenter = position;
     }
 
@@ -2542,7 +2408,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // SmoothFollowCamera itself ignores untrustworthy ones.
         boolean cameraStarted = smoothFollow != null && smoothFollow.initialized();
         if (!active || !followLocation || route == null || gpsLost
-                || map.getHeight() < dp(350)) return;
+                || vectorMap.view().getHeight() < dp(350)) return;
         if (cameraStarted && (progress.offRouteMetres > 110
                 || (fix.hasAccuracy() && fix.getAccuracy() > 75))) return;
         long now = SystemClock.elapsedRealtime();
@@ -2558,7 +2424,7 @@ public final class MainActivity extends Activity implements LocationListener {
         float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
-                velocity, map.getHeight(), headerHeight, bottomPanelHeight,
+                velocity, vectorMap.view().getHeight(), headerHeight, bottomPanelHeight,
                 closeZoom || highlightedJunctionIndex >= 0);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
@@ -2582,7 +2448,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     shortTrip?cameraContext:distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
         }
         boolean frameJunction=!junctionFramePoints.isEmpty()&&target.junctionMetres<=260;
-        double fittedZoom=(frameJunction||shortTrip)?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,map.getWidth(),map.getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
+        double fittedZoom=(frameJunction||shortTrip)?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,vectorMap.view().getWidth(),vectorMap.view().getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
         target = new NavigationCamera.Frame(target.center, fittedZoom,
                 target.roadBearingDegrees, target.junctionMetres,
                 target.cameraCenterAlongMetres,
@@ -2857,33 +2723,14 @@ public final class MainActivity extends Activity implements LocationListener {
         updateFollowButton();
         destinationInput.setText(selected.title, false);
         destinationInput.dismissDropDown();
-        if (destinationPin == null) {
-            destinationPin = new Marker(map);
-            destinationPin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-            map.getOverlays().add(destinationPin);
-        }
-        destinationPin.setPosition(new GeoPoint(selected.point.lat, selected.point.lon));
-        if (vectorMap != null) vectorMap.setDestination(selected.point);
-        destinationPin.setTitle(selected.toString());
+        if(vectorMap!=null)vectorMap.setDestination(selected.point);
         planRoute(true);
     }
 
     /** Only a provider-listed POI main entry point is marked as an entrance. */
     private void displayEntranceMarker(TomTomApi.Destination selected) {
-        if (entrancePin != null) {
-            map.getOverlays().remove(entrancePin);
-            entrancePin = null;
-        }
-        GeoMath.Point entry = selected == null ? null : selected.mainEntrance;
-        if (vectorMap != null) vectorMap.setEntrance(entry);
-        if (entry != null) {
-            entrancePin = new Marker(map);
-            entrancePin.setPosition(new GeoPoint(entry.lat, entry.lon));
-            entrancePin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-            entrancePin.setTitle("Map-listed main entrance · verify road access");
-            map.getOverlays().add(entrancePin);
-        }
-        map.invalidate();
+        GeoMath.Point entry=selected==null?null:selected.mainEntrance;
+        if(vectorMap!=null)vectorMap.setEntrance(entry);
     }
 
     private void showArrivalApproach(ArrivalPolicy.State state) {
@@ -3012,18 +2859,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // GPS fix immediately drag the map back to the driver's location.
         followLocation = false;
         updateFollowButton();
-        if (parkedCarPin != null) map.getOverlays().remove(parkedCarPin);
-        parkedCarPin = new Marker(map);
-        parkedCarPin.setPosition(new GeoPoint(saved.lat, saved.lon));
-        parkedCarPin.setTitle("Saved parked-car position · GPS estimate");
-        map.getOverlays().add(parkedCarPin);
-        if (vectorMap != null) {
-            vectorMap.setParkedCar(saved);
-            vectorMap.setCamera(saved, 17.0, 0);
-        }
-        map.getController().setZoom(17.0);
-        map.getController().setCenter(new GeoPoint(saved.lat, saved.lon));
-        map.invalidate();
+        if(vectorMap!=null){vectorMap.setParkedCar(saved);vectorMap.setCamera(saved,17,0);}
         new AlertDialog.Builder(this).setTitle("Parked car · saved on this phone")
                 .setMessage("Showing the GPS position you explicitly saved. "
                         + "It may not be an exact parking bay. "
@@ -3031,13 +2867,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 .setPositiveButton("Done", null)
                 .setNeutralButton("Clear saved position", (dialog, which) -> {
                     places.clearParkedCar();
-                    if (parkedCarPin != null) {
-                        map.getOverlays().remove(parkedCarPin);
-                        parkedCarPin = null;
-                    }
                     if (vectorMap != null) vectorMap.setParkedCar(null);
                     refreshHomePanel();
-                    map.invalidate();
                 }).show();
     }
 
@@ -3249,36 +3080,6 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void showRoute(TomTomApi.Route calculated, boolean preview) {
         clearJunctionHighlight();
-        if (routeLine != null) map.getOverlays().remove(routeLine);
-        if(rasterAwareness!=null)map.getOverlays().remove(rasterAwareness);
-        routeLine = new Polyline();
-        // Preserve every supplied road vertex on the raster fallback too.
-        List<GeoMath.Point> displayPoints = calculated.points;
-        List<GeoPoint> geometry = new ArrayList<>(displayPoints.size());
-        for (GeoMath.Point point : displayPoints)
-            geometry.add(new GeoPoint(point.lat, point.lon));
-        routeLine.setPoints(geometry);
-        routeLine.getOutlinePaint().setColor(0xff007dbb);
-        routeLine.getOutlinePaint().setStrokeWidth(dp(RouteMapPolicy.rasterWidthDp(map.getZoomLevelDouble())));
-        routeLine.getOutlinePaint().setStrokeCap(Paint.Cap.ROUND);
-        routeLine.getOutlinePaint().setStrokeJoin(Paint.Join.ROUND);
-        map.getOverlays().add(routeLine);
-        rasterAwareness=new RasterRouteAwareness(calculated.points,calculated.speedSections,calculated.trafficSections,calculated.fetchedAtMs,metricUnits);
-        map.getOverlays().add(rasterAwareness);
-        // Keep the vehicle marker and destination pin above the route line.
-        if (destinationPin != null) {
-            map.getOverlays().remove(destinationPin);
-            map.getOverlays().add(destinationPin);
-        }
-        if (entrancePin != null) {
-            map.getOverlays().remove(entrancePin);
-            map.getOverlays().add(entrancePin);
-        }
-        if (userPin != null) {
-            map.getOverlays().remove(userPin);
-            map.getOverlays().add(userPin);
-        }
-        map.invalidate();
         if (vectorMap != null) {
             vectorMap.setBuildingContext("DriveMate".equals(calculated.provider)?ownEndpoint():"",calculated.geometrySourceSha);
             vectorMap.setSharedRoute(calculated.nativeScene, calculated.points, calculated.provider);
@@ -3297,23 +3098,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 });
             }
         }
-        if (preview && !showingVector()) {
-            map.setMapOrientation(0);
-            double north = -90, south = 90, east = -180, west = 180;
-            for (GeoMath.Point point : calculated.points) {
-                north = Math.max(north, point.lat);
-                south = Math.min(south, point.lat);
-                east = Math.max(east, point.lon);
-                west = Math.min(west, point.lon);
-            }
-            final BoundingBox box = new BoundingBox(north, east, south, west);
-            map.post(() -> map.zoomToBoundingBox(box, true, dp(80)));
-        }
     }
-
-    private long lastConfirmedMetricsAt=-1;
-    private String confirmedEta="",confirmedMinutes="",confirmedDistance="";
-    private Button overviewButton;
 
     private void suspendPositionGuidance(String title,String reason) {
         boolean wasConfirmed=guidancePositionConfirmed;
@@ -3352,9 +3137,7 @@ public final class MainActivity extends Activity implements LocationListener {
         clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
         // Place the unsnapped accepted fix immediately, never infer a road position.
         if(!gpsLost&&displayGps!=null){
-            if(userPin!=null)userPin.setPosition(new GeoPoint(displayGps.lat,displayGps.lon));
             if(vectorMap!=null)vectorMap.setUnsnappedVehicle(displayGps,currentLocation!=null&&currentLocation.hasBearing()&&currentLocation.hasSpeed()&&currentLocation.getSpeed()>1.5f?currentLocation.getBearing():Double.NaN);
-            if(!showingVector())map.postInvalidateOnAnimation();
         }
     }
 
@@ -3556,7 +3339,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 secondary=after.routeOffsetMetres;
         }
         if(vectorMap!=null)vectorMap.setManeuverOffsets(primary,secondary);
-        if(rasterAwareness!=null)rasterAwareness.update(along,primary,secondary,metricUnits);
         if(previewJunction&&!currentJunctionPath.isEmpty())junctionFramePoints=JunctionIntelligence.context(currentJunctionPath,junctionKind);
         boolean showPath=previewJunction&&JunctionIntelligence.complex(junctionKind)
                 && getResources().getConfiguration().screenHeightDp>=740
@@ -3866,7 +3648,6 @@ public final class MainActivity extends Activity implements LocationListener {
         if(junctionPathView!=null)junctionPathView.setVisibility(View.GONE);
         junctionFramePoints=java.util.Collections.emptyList();highlightedJunctionIndex=-1;
         if(vectorMap!=null){vectorMap.clearJunctionFraming();vectorMap.setManeuverOffset(Double.NaN);}
-        if(rasterAwareness!=null)rasterAwareness.update(stabilizedAlong,Double.NaN,Double.NaN,metricUnits);
     }
 
     private void stopNavigation(boolean arrived) {
@@ -3900,24 +3681,10 @@ public final class MainActivity extends Activity implements LocationListener {
         guidancePositionConfirmed=false;
         clearPendingRoute();
         clearJunctionHighlight();
-        if (routeLine != null) {
-            map.getOverlays().remove(routeLine);
-            routeLine = null;
-        }
-        if(rasterAwareness!=null){map.getOverlays().remove(rasterAwareness);rasterAwareness=null;}
-        if (destinationPin != null) {
-            map.getOverlays().remove(destinationPin);
-            destinationPin = null;
-        }
-        if (entrancePin != null) {
-            map.getOverlays().remove(entrancePin);
-            entrancePin = null;
-        }
         if (vectorMap != null) vectorMap.setEntrance(null);
         if (arrivalHintText != null && arrivalHintText.getTag() instanceof View)
             ((View) arrivalHintText.getTag()).setVisibility(View.GONE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        map.setMapOrientation(0);
         if (vectorMap != null) {
             vectorMap.setBuildingContext("","");
             vectorMap.setSharedRoute(null, null);
@@ -3956,7 +3723,6 @@ public final class MainActivity extends Activity implements LocationListener {
             setStatus("Ready to navigate");
             if (speech != null) speech.stop();
         }
-        map.invalidate();
         if (reviewAvailable && !isFinishing()) {
             // Never open the review UI when the car is still moving or speed is unknown.
             if (currentLocation != null && currentLocation.hasSpeed() && currentLocation.getSpeed() < 0.5f
@@ -4042,7 +3808,6 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override public void onResume() {
         super.onResume();
         foreground = true;
-        if (map != null) map.onResume();
         if (vectorMap != null) vectorMap.onResume();
         applyTheme();
         startLocation();
@@ -4070,7 +3835,6 @@ public final class MainActivity extends Activity implements LocationListener {
             }
             locationSubscribed = false;
         }
-        if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
         super.onPause();
     }
@@ -4090,7 +3854,6 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if (vectorMap != null) vectorMap.onDestroy();
         if (driveTiles != null) driveTiles.close();
-        if (map != null) map.onDetach();
         super.onDestroy();
     }
 }
