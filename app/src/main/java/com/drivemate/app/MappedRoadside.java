@@ -37,7 +37,7 @@ final class MappedRoadside {
     FeatureCollection features(double south,double west,double north,double east,boolean detailed){
         ArrayList<Feature> out=new ArrayList<>();
         if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)
-            ||south>north||west>east||north-south>.25||east-west>.25)return FeatureCollection.fromFeatures(out);
+            ||south>north||west>east||north-south>.25||east-west>.25)return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
         int a=(int)Math.floor(south*1e7),b=(int)Math.ceil(north*1e7),x=(int)Math.floor(west*1e7),y=(int)Math.ceil(east*1e7);
         for(int i=first(a);i<lat.length&&lat[i]<=b;i++){
             if(lon[i]<x||lon[i]>y||kind[i]==4||(!detailed&&kind[i]!=1))continue;
@@ -46,6 +46,6 @@ final class MappedRoadside {
             f.addStringProperty("icon",kind[i]==1?"dm-mapped-camera":kind[i]==2?"dm-mapped-crossing":"dm-mapped-calming");
             out.add(f);
         }
-        return FeatureCollection.fromFeatures(out);
+        return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
     }
 }
