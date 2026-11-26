@@ -26,7 +26,7 @@ final class MappedRegionalBuildings {
         for(double y:new double[]{south,center.lat,north})for(double x:new double[]{west,center.lon,east})keys.add(DmTileEngine.key(y,x));
         keys.retainAll(engine.keys());
         List<Feature> buildings=new ArrayList<>();int vertices=0;
-        for(JSONArray way:engine.features(keys)){
+        for(JSONArray way:engine.boundedFeatures(keys,new double[]{west,south,east,north},Collections.emptySet(),true,12000,120000)){
             if(buildings.size()>=4000||vertices>=60000)break;
             JSONObject tags=way.getJSONObject(1);
             if(!tags.has("building")||"no".equals(tags.optString("building")))continue;

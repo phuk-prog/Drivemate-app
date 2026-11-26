@@ -35,7 +35,7 @@ public final class DmUnifiedPreviewActivity extends Activity {
         view.getMapAsync(m->{if(isDestroyed())return;map=m;map.setMinZoomPreference(11);map.setMaxZoomPreference(21);render();});
         new Thread(()->{try{
             DmUnifiedRegion region=new DmUnifiedRegion(this,stockport);DmTileEngine.Route result=region.sample(stockport);
-            DmUnifiedGeometry verified=new DmUnifiedGeometry(region.features,result);
+            DmUnifiedGeometry verified=region.geometry(result);
             runOnUiThread(()->{if(isFinishing()||isDestroyed())return;route=result;geometry=verified;
                 status.setText((stockport?"Stockport":"Wells")+" · "+Math.round(route.metres)+" m · "+verified.checkedEdges+" shared edges\nFull source geometry · preview only");render();});
         }catch(Exception e){runOnUiThread(()->{if(!isDestroyed())status.setText("Preview unavailable: "+e.getMessage());});}},"dm-unified-region").start();

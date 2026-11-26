@@ -19,7 +19,7 @@ public class DmUnifiedZoomTest {
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
         final DmTileEngine.Route sample;final DmUnifiedGeometry geometry;
         { DmUnifiedRegion region=new DmUnifiedRegion(app,true);sample=region.sample(true);
-          geometry=new DmUnifiedGeometry(region.features,sample.points,sample.ways); }
+          geometry=region.geometry(sample); }
         // No second preview loader; no graph object is needed once route geometry is verified.
         GeoMath.Point center=GeoMath.pointAtDistance(sample.points,sample.metres*.4);
         assertTrue(RouteMapPolicy.insideStockport(center));

@@ -84,6 +84,12 @@ final class DmUnifiedGeometry {
     DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways,double[] bounds)throws Exception{
         this(features,points,ways,null,1e7,bounds);
     }
+    static DmUnifiedGeometry regional(List<JSONArray> features,DmTileEngine.Route path,double[] bounds)throws Exception{
+        return new DmUnifiedGeometry(features,path.points,path.ways,path,1e6,bounds);
+    }
+    static DmUnifiedGeometry regional(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways,double[] bounds)throws Exception{
+        return new DmUnifiedGeometry(features,points,ways,null,1e6,bounds);
+    }
     static DmUnifiedGeometry browse(List<JSONArray> features,double[] bounds)throws Exception{
         return new DmUnifiedGeometry(features,Collections.emptyList(),Collections.emptyList(),null,1e7,bounds);
     }

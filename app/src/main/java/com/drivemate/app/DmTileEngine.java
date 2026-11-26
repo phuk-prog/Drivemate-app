@@ -129,6 +129,41 @@ public final class DmTileEngine {
     public List<JSONArray> features(Set<String> cells)throws Exception{
         Map<Long,JSONArray> out=new LinkedHashMap<>();for(String k:new TreeSet<>(cells)){JSONArray a=load(k).features;for(int i=0;i<a.length();i++){JSONArray row=a.getJSONArray(i);out.put(row.getLong(0),row);}}return new ArrayList<>(out.values());
     }
+    /** Display-only bounded scan. Release graph and unrelated tile JSON before converting to GPU features.
+     * Complete original ways are retained, never simplified or clipped to the viewport. */
+    List<JSONArray> boundedFeatures(Set<String> cells,double[] bounds,Set<Long> required,boolean buildingsOnly,
+                                    int maxFeatures,int maxVertices)throws Exception{
+        pinned.clear();cache.clear();
+        Map<Long,JSONArray> result=new LinkedHashMap<>();int vertices=0;
+        try{
+            for(String k:new TreeSet<>(cells)){
+                JSONArray rows=load(k).features;
+                for(int i=0;i<rows.length();i++){
+                    JSONArray row=rows.getJSONArray(i);long id=row.getLong(0);
+                    if(result.containsKey(id))continue;
+                    JSONObject tags=row.getJSONObject(1);
+                    if(buildingsOnly&&(!tags.has("building")||"no".equals(tags.optString("building"))))continue;
+                    JSONArray coords=row.getJSONArray(2);
+                    boolean mandatory=required.contains(id);
+                    if(!mandatory&&!intersects(coords,bounds))continue;
+                    if(coords.length()>maxVertices-vertices||result.size()>=maxFeatures)
+                        throw new CoverageException("Display region exceeds bounded geometry budget");
+                    result.put(id,row);vertices+=coords.length();
+                }
+                cache.remove(k);
+            }
+            if(!result.keySet().containsAll(required))throw new CoverageException("Route way outside available display region");
+            return new ArrayList<>(result.values());
+        }finally{cache.clear();}
+    }
+    static boolean intersects(JSONArray coords,double[] bounds)throws JSONException{
+        double west=180,east=-180,south=90,north=-90;
+        for(int i=0;i<coords.length();i++){
+            JSONArray p=coords.getJSONArray(i);double y=p.getInt(0)/1e6,x=p.getInt(1)/1e6;
+            west=Math.min(west,x);east=Math.max(east,x);south=Math.min(south,y);north=Math.max(north,y);
+        }
+        return coords.length()>0&&west<=bounds[2]&&east>=bounds[0]&&south<=bounds[3]&&north>=bounds[1];
+    }
     public JSONObject wayTags(long id,Set<String> cells)throws Exception{
         for(JSONArray f:features(cells))if(f.getLong(0)==id)return f.getJSONObject(1);
         return new JSONObject();
