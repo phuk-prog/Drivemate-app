@@ -30,9 +30,14 @@ final class MappedEnforcement {
             Iterator<String> keys=tags.keys();while(keys.hasNext())if(keys.next().contains(":conditional"))conditional=true;
             if(conditional)continue;
             long from=-1,to=-1;boolean bad=false;Set<Long> devices=new HashSet<>();
+            List<Long> section=new ArrayList<>();
             for(int j=0;j<members.length();j++){
                 JSONArray m=members.optJSONArray(j);
-                if(m==null||m.length()!=3||!"n".equals(m.optString(1))){bad=true;break;}
+                if(m==null||m.length()!=3){bad=true;break;}
+                if("section".equals(m.optString(0))&&"w".equals(m.optString(1))){
+                    long wayId=m.optLong(2,-1);if(wayId<=0||section.contains(wayId)){bad=true;break;}section.add(wayId);continue;
+                }
+                if(!"n".equals(m.optString(1))){bad=true;break;}
                 long node=m.optLong(2,-1);if(node<=0){bad=true;break;}
                 switch(m.optString(0)){
                     case "from":if(from!=-1)bad=true;else from=node;break;
@@ -44,18 +49,21 @@ final class MappedEnforcement {
             if(bad||from<=0||devices.isEmpty())continue;
             boolean average="average_speed".equals(kind);
             if(average&&(to<=0||devices.size()<2))continue;
+            if(!average&&!section.isEmpty())continue;
             if(to<=0&&devices.size()==1)to=devices.iterator().next();
             if(to<=0||from==to||ambiguous.contains(from)||ambiguous.contains(to))continue;
             Double start=nodes.get(from),end=nodes.get(to);
             if(start==null||end==null||!Double.isFinite(start)||!Double.isFinite(end)||end-start<3)continue;
-            // A detour, crossing or reversed direction is not the enforcement corridor.
-            // Require every traversed segment between anchors to belong to one original way.
-            long way=-1;boolean valid=true;
+            // Require exact directed anchors plus uninterrupted source-way identity.
+            // Multi-way corridors require explicit section members in the same order.
+            List<Long> traversed=new ArrayList<>();
             for(int j=0;j<ways.size();j++){
                 if(offsets[j+1]<=start+.01||offsets[j]>=end-.01)continue;
-                if(way<0)way=ways.get(j);else if(way!=ways.get(j)){valid=false;break;}
+                long way=ways.get(j);
+                if(traversed.isEmpty()||traversed.get(traversed.size()-1)!=way)traversed.add(way);
             }
-            if(!valid||way<=0)continue;
+            if(traversed.isEmpty()||traversed.get(0)<=0)continue;
+            if(section.isEmpty()?traversed.size()!=1:!section.equals(traversed))continue;
             if(average){
                 result.zones.add(new Zone(id,start,end));
                 result.notices.add(new RouteRoadsideAwareness.Event(-id*4,start,"Mapped average-speed zone starts"));
