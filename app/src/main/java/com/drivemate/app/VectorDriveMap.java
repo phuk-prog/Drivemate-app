@@ -62,6 +62,8 @@ public final class VectorDriveMap {
     private MappedRoadside roadside;
     private boolean roadsideAttempted;
     private double lastRoadsideLat=Double.NaN,lastRoadsideLon=Double.NaN,lastRoadsideZoom=Double.NaN;
+    private long routeEventsFetchedAt;
+    private boolean routeEventsMetric, routeEventsExpired;
     private List<RouteIntelligence.SpeedSection> pendingSpeedSections=java.util.Collections.emptyList();
     private List<RouteIntelligence.TrafficSection> pendingTrafficSections=java.util.Collections.emptyList();
     private boolean signalsAttempted;
@@ -125,7 +127,7 @@ public final class VectorDriveMap {
     private final Runnable roadMonitor = new Runnable() {
         @Override public void run() {
             if (disposed) return;
-            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();}
+            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();expireRouteEvents();}
             view.postDelayed(this, MONITOR_INTERVAL_MS);
         }
     };
@@ -585,7 +587,8 @@ public final class VectorDriveMap {
         roadsideSource.setGeoJson(roadside.features(lat-span,lon-span,lat+span,lon+span,z>=16));
     }
 
-    public void setRouteEvents(List<RouteIntelligence.SpeedSection> speed,List<RouteIntelligence.TrafficSection> traffic){
+    public void setRouteEvents(List<RouteIntelligence.SpeedSection> speed,List<RouteIntelligence.TrafficSection> traffic,boolean metric,long fetchedAt){
+        routeEventsMetric=metric;routeEventsFetchedAt=fetchedAt;routeEventsExpired=false;
         pendingSpeedSections=speed==null?java.util.Collections.emptyList():new ArrayList<>(speed);
         pendingTrafficSections=traffic==null?java.util.Collections.emptyList():new ArrayList<>(traffic);
         publishRouteEvents();
@@ -614,10 +617,15 @@ public final class VectorDriveMap {
         style.addLayer(notice);
     }
 
+    private void expireRouteEvents(){
+        long age=System.currentTimeMillis()-routeEventsFetchedAt;
+        if(!routeEventsExpired && (age<0||age>480000)){routeEventsExpired=true;publishRouteEvents();}
+    }
     private void publishRouteEvents(){
         if(!ready()||speedChangeSource==null||routeEventSource==null)return;
         ArrayList<Feature> speed=new ArrayList<>(),traffic=new ArrayList<>();
-        if(pendingRoute!=null&&pendingRoute.size()>1){
+        long age=System.currentTimeMillis()-routeEventsFetchedAt;
+        if(!routeEventsExpired && age>=0 && age<=480000 && pendingRoute!=null&&pendingRoute.size()>1){
             for(RouteIntelligence.SpeedSection section:pendingSpeedSections){
                 if(speed.size()>=500)break;
                 if(section==null||section.end<=0||section.end>routeLength||section.end-section.start<8)continue;
@@ -625,7 +633,7 @@ public final class VectorDriveMap {
                 if(change==null)continue;
                 GeoMath.Point p=exactGeometry.at(change.offset);
                 if(p!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(p.lon,p.lat));
-                    f.addStringProperty("value",String.valueOf(Math.round(change.kmh/1.609344)));speed.add(f);}
+                    f.addStringProperty("value",String.valueOf(routeEventsMetric?change.kmh:Math.round(change.kmh/1.609344)));speed.add(f);}
             }
             // Traffic labels are only supplied route events, never synthetic hazards.
             for(RouteIntelligence.TrafficSection section:pendingTrafficSections){
@@ -681,7 +689,7 @@ public final class VectorDriveMap {
 
     public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path){setSharedRoute(shared,path,"");}
     public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path,String provider){
-        if(path==null){pendingSpeedSections=java.util.Collections.emptyList();pendingTrafficSections=java.util.Collections.emptyList();}
+        pendingSpeedSections=java.util.Collections.emptyList();pendingTrafficSections=java.util.Collections.emptyList();routeEventsExpired=true;
         String next=provider==null||path==null?"":provider;
         boolean changedProvider=!next.equals(routeProvider);
         boolean change=sharedRouteMap!=shared||changedProvider;
