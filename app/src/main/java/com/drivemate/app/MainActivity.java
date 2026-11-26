@@ -94,6 +94,11 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private final ExecutorService packWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService incidentWorker=Executors.newSingleThreadExecutor();
+    private long lastIncidentRequest;
+    private GeoMath.Point lastIncidentCentre;
+    private int incidentGeneration;
+    private boolean incidentBusy;
     private boolean downloadingLocalPack;
     private final Handler gpsHandler = new Handler(Looper.getMainLooper());
     private boolean gpsLost;
@@ -2163,6 +2168,7 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().add(0, trafficTiles);
         }
         if (vectorMap != null) vectorMap.setTraffic(trafficEnabled);
+        if(!trafficEnabled)clearLiveIncidents();
         map.invalidate();
     }
 
@@ -2436,6 +2442,7 @@ public final class MainActivity extends Activity implements LocationListener {
             }
         }
         if(freeDriving&&!active&&!routing)updateFreeRoadIntelligence(fix);
+        updateLiveIncidents(fix);
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
                     + (fix.hasAccuracy() ? "±" + Math.round(fix.getAccuracy()) + " m" : "unknown")
@@ -2468,6 +2475,36 @@ public final class MainActivity extends Activity implements LocationListener {
         return new BitmapDrawable(getResources(),scaled);
     }
 
+    private void clearLiveIncidents(){
+        incidentGeneration++;lastIncidentRequest=0;lastIncidentCentre=null;
+        if(vectorMap!=null)vectorMap.setLiveIncidents(null,0);
+    }
+    private void updateLiveIncidents(Location fix){
+        if(!foreground||!active||route==null||!"TomTom".equals(route.provider)||!trafficEnabled
+                ||apiKey.isEmpty()||gpsLost||!showingVector()||!vectorMap.supportsLiveIncidents())return;
+        if(!fix.hasAccuracy()||fix.getAccuracy()>50||incidentBusy)return;
+        long now=SystemClock.elapsedRealtime();
+        GeoMath.Point p=gpsPoint(fix);
+        if(lastIncidentRequest!=0 && (now-lastIncidentRequest<45000 ||
+                now-lastIncidentRequest<120000 && lastIncidentCentre!=null && GeoMath.distance(p,lastIncidentCentre)<1000))return;
+        lastIncidentRequest=now;lastIncidentCentre=p;incidentBusy=true;
+        final int generation=incidentGeneration;
+        final String key=apiKey;
+        incidentWorker.execute(()->{
+            List<LiveTrafficIncidents.Event> data;
+            try{data=TomTomApi.liveIncidents(key,p);}catch(Exception ignored){data=null;}
+            final List<LiveTrafficIncidents.Event> result=data;
+            final long fetched=System.currentTimeMillis();
+            runOnUiThread(()->{
+                incidentBusy=false;
+                if(generation!=incidentGeneration||!foreground||!active||route==null||!"TomTom".equals(route.provider)
+                    ||!trafficEnabled||!key.equals(apiKey)||vectorMap==null||!vectorMap.supportsLiveIncidents()||gpsLost)return;
+                if(currentLocation==null||GeoMath.distance(p,gpsPoint(currentLocation))>2000)return;
+                if(result!=null)vectorMap.setLiveIncidents(result,fetched);
+                // On failure the last successful snapshot expires independently; never imply clear roads.
+            });
+        });
+    }
     private void clearFreeRoadContext(){
         freeContextGeneration++;freeContextBusy=false;freeContextRequestedAt=0;freeRoadContext=null;
         freeRoadMatch.reset();freeLastLimit=-1;freeLastLimitAt=0;freeAdvanceNode=-1;freeContextEndpoint="";
@@ -3922,6 +3959,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void stopNavigation(boolean arrived) {
+        clearLiveIncidents();
         dismissUpcoming();
         boolean reviewAvailable=active&&!mapReview.snapshot().isEmpty();
         reviewGeneration++;comparisonBusy=false;comparisonRoute=null;
@@ -4101,6 +4139,7 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override public void onPause() {
         dismissUpcoming();
         foreground = false;
+        clearLiveIncidents();
         stopSmoothLoop();
         gpsHandler.removeCallbacks(deadReckonTick);
         if (active) {
@@ -4129,7 +4168,7 @@ public final class MainActivity extends Activity implements LocationListener {
             locationManager.unregisterGnssStatusCallback(gnssCallback);
         }
         ++requestGeneration;
-        network.shutdownNow();
+        network.shutdownNow();incidentWorker.shutdownNow();
         if (speech != null) {
             speech.stop();
             speech.shutdown();
