@@ -1492,6 +1492,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             break;
                         case 5:
                             metricUnits = !metricUnits;
+                            if(vectorMap!=null && route!=null)vectorMap.setRouteEvents(route.speedSections,route.trafficSections,metricUnits,route.fetchedAtMs);
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("metric_units", metricUnits).apply();
                             if (currentLocation != null) {
@@ -3271,6 +3272,7 @@ public final class MainActivity extends Activity implements LocationListener {
         map.invalidate();
         if (vectorMap != null) {
             vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points, calculated.provider);
+            vectorMap.setRouteEvents(calculated.speedSections,calculated.trafficSections,metricUnits,calculated.fetchedAtMs);
             if (preview) {
                 // Fit once the preview panel has laid out, so the whole route
                 // sits between the search bar and the bottom panel.
