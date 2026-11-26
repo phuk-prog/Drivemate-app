@@ -275,6 +275,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private String spokenLanePrompt = "";
     private int traceInstructionIndex = -1;
     private float[] currentRoundaboutTrace;
+    private List<GeoMath.Point> currentJunctionPath = java.util.Collections.emptyList();
+    private JunctionManeuverView junctionPathView;
     private AlertDialog upcomingDialog;
     private int reassuranceIndex=-1;
     /** Large distance to the next manoeuvre, on its own line above the road. */
@@ -1101,6 +1103,13 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout.LayoutParams contentPos = new LinearLayout.LayoutParams(-1, -2);
         contentPos.topMargin = dp(2);
         turnCard.addView(content, contentPos);
+        junctionPathView = new JunctionManeuverView(this);
+        junctionPathView.setVisibility(View.GONE);
+        junctionPathView.setNightMode(true);
+        junctionPathView.setContentDescription("Calculated route path only; other roads are not shown");
+        LinearLayout.LayoutParams pathParams = new LinearLayout.LayoutParams(-1,dp(92));
+        pathParams.topMargin=dp(4);
+        turnCard.addView(junctionPathView,pathParams);
 
         topNextTurnText = text("", 15, Color.rgb(201, 231, 239), true);
         topNextTurnText.setBackground(rounded(0xff17394c,8));topNextTurnText.setPadding(dp(8),dp(3),dp(8),dp(3));
@@ -3205,7 +3214,7 @@ public final class MainActivity extends Activity implements LocationListener {
         spokenCloseIndex = -1;
         spokenNowIndex = -1;
         spokenLaneIndex = -1; spokenLanePrompt = ""; currentLanePrompt = "";
-        traceInstructionIndex = -1; currentRoundaboutTrace = null; reassuranceIndex=-1;
+        traceInstructionIndex = -1; currentRoundaboutTrace = null; currentJunctionPath=java.util.Collections.emptyList(); reassuranceIndex=-1;
         lastTrafficWarningStart = -1;
         lastTrafficWarningAt = 0;
         lastSpeedWarningAt = 0;
@@ -3291,7 +3300,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(topInstructionText!=null)topInstructionText.setText(reason);
         if(topRoadText!=null)topRoadText.setVisibility(View.GONE);
         if(lanePromptText!=null)lanePromptText.setVisibility(View.GONE);
-        currentLanePrompt=""; traceInstructionIndex=-1; currentRoundaboutTrace=null;
+        currentLanePrompt=""; traceInstructionIndex=-1; currentRoundaboutTrace=null; currentJunctionPath=java.util.Collections.emptyList();
         if(verifiedJunctionRoad!=null)verifiedJunctionRoad.setVisibility(View.GONE);
         if(tripEtaValue!=null)tripEtaValue.setText("—");
         if(tripMinutesValue!=null)tripMinutesValue.setText("—");
@@ -3455,8 +3464,8 @@ public final class MainActivity extends Activity implements LocationListener {
         double untilTurn = Math.max(0, step.routeOffsetMetres - along);
         updateRoadIntelligence(fix, along, projected.offRouteMetres,
                 accuracy, untilTurn);
-        String glyph = GuidanceLogic.symbol(step.maneuver, step.junctionType,
-                step.turnAngleDegrees);
+        JunctionIntelligence.Kind junctionKind = JunctionIntelligence.classify(step.maneuver,step.junctionType);
+        String glyph = JunctionIntelligence.glyph(step,junctionKind);
         boolean roundabout = "↻".equals(glyph);
         int shownExit = roundabout ? JunctionFraming.reportedExit(step.exitNumber) : 0;
         String direction = IntelligentGuidance.direction(step, glyph, shownExit);
@@ -3465,7 +3474,7 @@ public final class MainActivity extends Activity implements LocationListener {
         maneuverIcon.update(glyph, shownExit);
         maneuverIcon.setVisibility(View.VISIBLE);
         topTurnArrow.update(glyph, shownExit);
-        boolean fork = "BIFURCATION".equalsIgnoreCase(step.junctionType);
+        boolean fork = junctionKind==JunctionIntelligence.Kind.FORK;
         int roundaboutDirection=roundabout?IntelligentGuidance.roundaboutDirection(step):0;
         topTurnArrow.setRoundaboutDirection(roundaboutDirection,step.drivingSide);
         if(traceInstructionIndex!=next) {
@@ -3473,14 +3482,26 @@ public final class MainActivity extends Activity implements LocationListener {
             double following=next+1<route.instructions.size()?route.instructions.get(next+1).routeOffsetMetres:Double.POSITIVE_INFINITY;
             currentRoundaboutTrace=roundabout?IntelligentGuidance.roundaboutTrace(route.points,step.routeOffsetMetres,previous,following):null;
             if(!IntelligentGuidance.traceAgrees(currentRoundaboutTrace,roundaboutDirection))currentRoundaboutTrace=null;
+            currentJunctionPath=JunctionIntelligence.path(route.points,step.routeOffsetMetres,previous,following,junctionKind);
             traceInstructionIndex=next;
         }
         topTurnArrow.setRouteTrace(currentRoundaboutTrace);
-        updateJunctionHighlight(next, DrivingDisplayPolicy.junctionPreview(roundabout || fork, untilTurn));
+        boolean previewJunction=JunctionIntelligence.preview(junctionKind,untilTurn,speedNow);
+        updateJunctionHighlight(next, previewJunction);
+        if(previewJunction&&!currentJunctionPath.isEmpty())junctionFramePoints=JunctionIntelligence.context(currentJunctionPath,junctionKind);
+        boolean showPath=previewJunction&&JunctionIntelligence.complex(junctionKind)
+                && getResources().getConfiguration().screenHeightDp>=740
+                && getResources().getConfiguration().fontScale<=1.2f
+                && laneGuidanceText.getVisibility()!=View.VISIBLE
+                && (roundabout?currentRoundaboutTrace!=null:JunctionIntelligence.pathAgrees(currentJunctionPath,glyph,junctionKind));
+        if(junctionPathView!=null){
+            if(showPath)junctionPathView.setRoute(currentJunctionPath,roundabout,shownExit);
+            else junctionPathView.setVisibility(View.GONE);
+        }
         String sign=step.signpost==null?"":step.signpost.trim();
         verifiedJunctionRoad.setText("SIGNS · "+sign);
         verifiedJunctionRoad.setVisibility(!sign.isEmpty() && untilTurn<=DrivingDisplayPolicy.signpostHorizon(speedNow)?View.VISIBLE:View.GONE);
-        topTurnTitle.setText(roundabout ? "ROUNDABOUT" : !IntelligentGuidance.highwayExit(step).isEmpty()?"MOTORWAY EXIT":fork ? "ROAD FORK" : "NEXT TURN");
+        topTurnTitle.setText(junctionKind.title);
         int iconSide = dp(getResources().getConfiguration().screenWidthDp<360 ? 60 : 68);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
             android.view.ViewGroup.LayoutParams iconParams = topTurnArrow.getLayoutParams();
@@ -3506,13 +3527,13 @@ public final class MainActivity extends Activity implements LocationListener {
         if (next + 1 < route.instructions.size()) {
             TomTomApi.Instruction after = route.instructions.get(next+1);
             double gap=Math.max(0,after.routeOffsetMetres-step.routeOffsetMetres);
-            String afterGlyph=GuidanceLogic.symbol(after.maneuver,after.junctionType,after.turnAngleDegrees);
+            String afterGlyph=JunctionIntelligence.glyph(after,JunctionIntelligence.classify(after.maneuver,after.junctionType));
             int afterExit="↻".equals(afterGlyph)?JunctionFraming.reportedExit(after.exitNumber):0;
             String followingTurn=IntelligentGuidance.thenLine(after,gap,metricUnits);
-            boolean showThen=DrivingDisplayPolicy.showFollowingTurn(untilTurn,gap,speedNow)
-                    && laneGuidanceText.getVisibility()!=View.VISIBLE
-                    && verifiedJunctionRoad.getVisibility()!=View.VISIBLE
-                    && getResources().getConfiguration().screenHeightDp>=560;
+            boolean showThen=JunctionIntelligence.showFollowing(untilTurn,gap,speedNow,
+                    getResources().getConfiguration().screenHeightDp,
+                    laneGuidanceText.getVisibility()==View.VISIBLE||verifiedJunctionRoad.getVisibility()==View.VISIBLE);
+            if(showThen&&junctionPathView!=null)junctionPathView.setVisibility(View.GONE);
             topNextTurnText.setText(showThen?DrivingRoadLabel.highlight(followingTurn):"");
             topNextTurnText.setVisibility(showThen?View.VISIBLE:View.GONE);
             if(IntelligentGuidance.closeFollowing(gap,speedNow))
@@ -3707,6 +3728,7 @@ public final class MainActivity extends Activity implements LocationListener {
         highlightedJunctionIndex=instructionIndex;
     }
     private void clearJunctionHighlight(){
+        if(junctionPathView!=null)junctionPathView.setVisibility(View.GONE);
         junctionFramePoints=java.util.Collections.emptyList();highlightedJunctionIndex=-1;
         if(vectorMap!=null)vectorMap.clearJunctionFraming();
     }

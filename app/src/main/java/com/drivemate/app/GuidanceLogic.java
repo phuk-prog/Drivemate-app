@@ -15,7 +15,7 @@ public final class GuidanceLogic {
         // not a sharp turn. Do not use a turn icon for this junction type.
         if ("BIFURCATION".equals(j))
             return angle < 0 ? "↖" : angle > 0 ? "↗" : "↑";
-        if (m.contains("UTURN") || m.contains("U_TURN")) return "⤺";
+        if (m.contains("UTURN") || m.contains("U_TURN")) return m.contains("RIGHT") ? "⤻" : "⤺";
         if ("KEEP_LEFT".equals(m)||"BEAR_LEFT".equals(m)||"MOTORWAY_EXIT_LEFT".equals(m)) return "↖";
         if ("KEEP_RIGHT".equals(m)||"BEAR_RIGHT".equals(m)||"MOTORWAY_EXIT_RIGHT".equals(m)) return "↗";
         if (m.contains("ARRIVE") || m.contains("DESTINATION")) return "⚑";
