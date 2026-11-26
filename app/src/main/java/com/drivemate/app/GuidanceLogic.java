@@ -13,11 +13,16 @@ public final class GuidanceLogic {
         if ("ROUNDABOUT".equals(j) || m.contains("ROUNDABOUT")) return "↻";
         // TomTom's verified BIFURCATION means keep left/right at a fork,
         // not a sharp turn. Do not use a turn icon for this junction type.
-        if ("BIFURCATION".equals(j))
+        if ("BIFURCATION".equals(j) || "FORK".equals(j) || "Y_JUNCTION".equals(j)) {
+            // Explicit direction is authoritative; the geometric angle is only a fallback.
+            if (m.contains("LEFT")) return "↖";
+            if (m.contains("RIGHT")) return "↗";
+            if ("STRAIGHT".equals(m) || "CONTINUE".equals(m) || "GO_STRAIGHT".equals(m)) return "↑";
             return angle < 0 ? "↖" : angle > 0 ? "↗" : "↑";
+        }
         if (m.contains("UTURN") || m.contains("U_TURN")) return m.contains("RIGHT") ? "⤻" : "⤺";
-        if ("KEEP_LEFT".equals(m)||"BEAR_LEFT".equals(m)||"MOTORWAY_EXIT_LEFT".equals(m)) return "↖";
-        if ("KEEP_RIGHT".equals(m)||"BEAR_RIGHT".equals(m)||"MOTORWAY_EXIT_RIGHT".equals(m)) return "↗";
+        if ("KEEP_LEFT".equals(m)||"BEAR_LEFT".equals(m)||"SLIGHT_LEFT".equals(m)||"MOTORWAY_EXIT_LEFT".equals(m)) return "↖";
+        if ("KEEP_RIGHT".equals(m)||"BEAR_RIGHT".equals(m)||"SLIGHT_RIGHT".equals(m)||"MOTORWAY_EXIT_RIGHT".equals(m)) return "↗";
         if (m.contains("ARRIVE") || m.contains("DESTINATION")) return "⚑";
         if (m.contains("LEFT") || (m.contains("TURN") && angle < -20)) return "↰";
         if (m.contains("RIGHT") || (m.contains("TURN") && angle > 20)) return "↱";
