@@ -3,7 +3,7 @@
 Orientation so sessions don't need to rediscover the repo. Keep this file short.
 
 ## Where things are
-- `app/src/main/java/com/drivemate/app/` — all app code. `MainActivity.java` is ~4,300 lines: never read it whole; use Grep, then Read with offset/limit.
+- `app/src/main/java/com/drivemate/app/` — all app code. `MainActivity.java` (~3,200 lines) still holds guidance/location state; settings, destinations, parking, review, home panel, road context and guidance dialogs live in `*Controller.java` / `GuidanceDialogs.java` (they reach activity state through field `a`). Grep first, then Read with offset/limit.
 - `app/src/test`, `app/src/androidTest` — unit / instrumented tests.
 - `tools/` — release, version and lab scripts (Python/shell). `tools/test_*.py` are their tests.
 - `docs/` — ~60 historical design notes. Read only the one named in the task; start from `docs/REPOSITORY-WORKFLOW.md`.
