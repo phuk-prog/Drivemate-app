@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   signed-apk:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: github.event.repository.private == true && github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
     env:
@@ -169,6 +169,7 @@ jobs:
           fi
 
       - name: Upload privately signed installable APK
+        if: github.event.repository.private == true
         uses: actions/upload-artifact@v4
         with:
           name: DriveMate-${{ env.VERSION }}-signed-APK
@@ -177,7 +178,7 @@ jobs:
           retention-days: 30
 
       - name: Publish versioned APK and verification evidence
-        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+        if: github.event.repository.private == true && github.event_name == 'workflow_dispatch' && inputs.publish == true
         shell: bash
         run: |
           set -euo pipefail

@@ -192,6 +192,8 @@ This is a **first-build candidate**, not a tested or certified navigation device
 
 ## Ownership and license
 
+**Proprietary, source-visible software. All rights reserved for original DriveMate materials.** See [licence](LICENSE.md), [evaluation terms (draft)](docs/EULA.md), [branding](docs/BRANDING.md), [contributions](CONTRIBUTING.md) and [private distribution](docs/PRIVATE-DISTRIBUTION.md). Public viewing and GitHub forking rights and third-party licences are unaffected.
+
 This repository is the DriveMate Android app code. TomTom data and APIs remain subject to TomTom's terms; osmdroid is an open-source Android map renderer subject to its own license. This repo is independent of the archived offline-routing research in `phuk-prog/Drivemate--app` and data in `phuk-prog/Drivemate-map`.
 
 ## Verification

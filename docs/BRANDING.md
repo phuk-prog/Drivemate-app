@@ -1,0 +1,2 @@
+# DriveMate branding
+DriveMate names, logos and original visual assets are reserved to their respective rights holders. Do not imply official affiliation, endorsement or approval, or distribute misleadingly branded proprietary builds. Accurate factual references, legally permitted comparative or nominative use and third-party licence rights are unaffected. This policy does not assert that a trade mark has been registered. Contact the repository owner for written branding permission.
