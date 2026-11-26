@@ -1,12 +1,10 @@
 name: Build privately signed DriveMate update APK
 
-# Runs on every push to main (the owner wants a signed APK for each change)
-# and can still be started by hand. Signing secrets are never exposed to
+# Manual only while the historical APK cleanup is being applied; do not
+# generate another obsolete version on a policy-only merge. Signing secrets are never exposed to
 # pull_request events or other branches: there is no pull_request trigger,
 # and the job refuses any ref other than main.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -20,6 +18,7 @@ concurrency:
 jobs:
   signed-apk:
     if: github.ref == 'refs/heads/main'
+    environment: drivemate-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -140,11 +139,16 @@ jobs:
           echo "DRIVEMATE_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Signed APK: DriveMate-$VERSION.apk"
 
-      - name: Upload privately signed installable APK
+      - name: Encrypt verified signed APK
+        env:
+          DRIVEMATE_ZIP_PASSWORD: ${{ secrets.DRIVEMATE_ZIP_PASSWORD }}
+        run: |
+          bash tools/encrypt-apk.sh "app/build/outputs/apk/release/DriveMate-$DRIVEMATE_VERSION.apk" "release-output/DriveMate-$DRIVEMATE_VERSION-signed.zip"
+      - name: Upload encrypted signed APK ZIP only
         uses: actions/upload-artifact@v4
         with:
-          name: DriveMate-${{ env.DRIVEMATE_VERSION }}-signed-APK
-          path: app/build/outputs/apk/release/DriveMate-${{ env.DRIVEMATE_VERSION }}.apk
+          name: DriveMate-${{ env.DRIVEMATE_VERSION }}-password-protected
+          path: release-output/DriveMate-${{ env.DRIVEMATE_VERSION }}-signed.zip
           if-no-files-found: error
           retention-days: 30
 

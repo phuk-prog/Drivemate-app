@@ -29,10 +29,3 @@ jobs:
           test -x "$AAPT"
           "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | grep -F "package: name='com.drivemate.android.stage1'"
           "$AAPT" dump badging app/build/outputs/apk/debug/app-debug.apk | grep -F "application-label:'DriveMate Stage 1 Test'"
-      - name: Upload distinct Stage 1 debug APK only
-        uses: actions/upload-artifact@v4
-        with:
-          name: DriveMate-Stage1-test-debug-APK-not-for-release
-          path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
