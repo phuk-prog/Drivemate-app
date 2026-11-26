@@ -23,7 +23,7 @@ final class DmUnifiedGeometry {
     }
     private static void retainTags(Feature f,JSONObject tags){
         // The authoritative database retains all raw tags. The GPU source needs only display attributes.
-        for(String k:new String[]{"name","ref","highway","amenity","shop","tourism","aeroway","railway","public_transport","surface","service","landuse","leisure","natural","building","height","building:levels","min_height","addr:housenumber","entrance","traffic_calming","junction","layer","width","lanes"}){
+        for(String k:new String[]{"name","ref","highway","amenity","shop","tourism","aeroway","railway","public_transport","surface","service","landuse","leisure","natural","building","height","building:levels","min_height","addr:housenumber","entrance","traffic_calming","crossing","crossing_ref","crossing:signals","crossing:markings","junction","layer","width","lanes"}){
             if(tags.has(k)){String value=tags.optString(k,"");if(value.length()<=512)f.addStringProperty(k,value);}
         }
         if(tags.has("railway"))f.addStringProperty("kind",tags.optString("railway"));
@@ -56,7 +56,8 @@ final class DmUnifiedGeometry {
             boolean conditional=false;Iterator<String> keys=tags.keys();while(keys.hasNext()){
                 String key=keys.next();if(key.contains(":conditional")||key.contains(":forward")||key.contains(":backward"))conditional=true;
             }
-            String label=RouteRoadsideAwareness.label(tags.optString("highway"),tags.optString("traffic_calming"),direction,conditional);
+            String label=RouteRoadsideAwareness.label(tags.optString("highway"),tags.optString("traffic_calming"),direction,conditional,
+                    tags.optString("crossing_ref"),tags.optString("crossing"),tags.optString("crossing:signals"));
             if(!label.isEmpty())notices.add(new RouteRoadsideAwareness.Event(id,offset,label));
         }
         routeRoadside=Collections.unmodifiableList(notices);

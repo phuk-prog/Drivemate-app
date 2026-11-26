@@ -445,6 +445,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private Marker entrancePin;
     private Marker parkedCarPin;
     private Polyline routeLine;
+    private RasterRouteAwareness rasterAwareness;
+    private long lastSpeechAt=-1;
     private List<GeoMath.Point> junctionFramePoints = java.util.Collections.emptyList();
     private int highlightedJunctionIndex = -1;
     private TilesOverlay trafficTiles;
@@ -1557,6 +1559,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 5:
                             metricUnits = !metricUnits;
                             if(vectorMap!=null && route!=null)vectorMap.setRouteEvents(route.speedSections,route.trafficSections,metricUnits,route.fetchedAtMs);
+                            if(rasterAwareness!=null)rasterAwareness.setMetric(metricUnits);
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("metric_units", metricUnits).apply();
                             if (currentLocation != null) {
@@ -2404,7 +2407,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (gpsLost) {
             gpsLost = false;
             if (active) {
-                setStatus("GPS signal restored · guidance resumed");
+                setStatus("GPS signal restored · checking route position");
                 saySystemWarning("GPS signal restored.");
             }
         }
@@ -2448,7 +2451,8 @@ public final class MainActivity extends Activity implements LocationListener {
         // Never teleport it back to each noisy 1Hz GPS fix.
         if (!active || smoothFollow == null || !followLocation) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
-            if (!active || smoothFollow == null || !followLocation) vectorMap.setVehicle(smoothed);
+            if (!active || smoothFollow == null || !followLocation) vectorMap.setUnsnappedVehicle(smoothed,
+                    fix.hasBearing()&&fix.hasSpeed()&&fix.getSpeed()>1.5f?fix.getBearing():Double.NaN);
             if (!autoFallback && !active) vectorMap.prefetch(gpsPoint(fix));
         }
         if ((!active || smoothFollow == null || !followLocation) && fix.hasBearing()
@@ -2482,9 +2486,9 @@ public final class MainActivity extends Activity implements LocationListener {
                     + satelliteSuffix()
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
-        if (active && route != null && (!routing || guidancePositionConfirmed)) updateGuidance(fix);
+        if (active && route != null) updateGuidance(fix);
         else if(active&&joiningRoute&&followLocation&&lastJoinCameraAt>=0&&SystemClock.elapsedRealtime()-lastJoinCameraAt>=1000){centreOnLocation(false);lastJoinCameraAt=SystemClock.elapsedRealtime();}
-        if (!active && !showingVector()) map.postInvalidateOnAnimation();
+        if (!showingVector()) map.postInvalidateOnAnimation();
     }
 
     /** Maps a fix's provider to its FixQualityPolicy rank. */
@@ -2703,7 +2707,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // request zero pitch instead of abandoning the smooth-follow engine.
         double remaining=Math.max(0,GeoMath.length(route.points)-along);
         boolean shortTrip=RoadTestDisplayPolicy.wideApproach(remaining,nextJunctionOffsetMetres-along)
-                && !closeZoom && highlightedJunctionIndex<0;
+                && highlightedJunctionIndex<0 && (!closeZoom||nextJunctionOffsetMetres-along>420);
         List<GeoMath.Point> cameraContext=junctionFramePoints;
         if(shortTrip){
             cameraContext=new ArrayList<>();
@@ -3459,6 +3463,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void showRoute(TomTomApi.Route calculated, boolean preview) {
         clearJunctionHighlight();
         if (routeLine != null) map.getOverlays().remove(routeLine);
+        if(rasterAwareness!=null)map.getOverlays().remove(rasterAwareness);
         routeLine = new Polyline();
         // Preserve every supplied road vertex on the raster fallback too.
         List<GeoMath.Point> displayPoints = calculated.points;
@@ -3471,6 +3476,8 @@ public final class MainActivity extends Activity implements LocationListener {
         routeLine.getOutlinePaint().setStrokeCap(Paint.Cap.ROUND);
         routeLine.getOutlinePaint().setStrokeJoin(Paint.Join.ROUND);
         map.getOverlays().add(routeLine);
+        rasterAwareness=new RasterRouteAwareness(calculated.points,calculated.speedSections,calculated.trafficSections,calculated.fetchedAtMs,metricUnits);
+        map.getOverlays().add(rasterAwareness);
         // Keep the vehicle marker and destination pin above the route line.
         if (destinationPin != null) {
             map.getOverlays().remove(destinationPin);
@@ -3524,6 +3531,8 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean wasConfirmed=guidancePositionConfirmed;
         joiningRoute=false;
         guidancePositionConfirmed=false;nextInstruction="";
+        speedChangeAwareness.clearEntry();arrivalPolicy.reset();
+        showArrivalApproach(ArrivalPolicy.State.EN_ROUTE);
         setTripMetricLabels(false);
         dismissUpcoming();
         if(wasConfirmed&&speech!=null)speech.stop();
@@ -3553,6 +3562,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if(upcomingSpeedText!=null)upcomingSpeedText.setVisibility(View.GONE);
         if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
         clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
+        // Place the unsnapped accepted fix immediately, never infer a road position.
+        if(!gpsLost&&displayGps!=null){
+            if(userPin!=null)userPin.setPosition(new GeoPoint(displayGps.lat,displayGps.lon));
+            if(vectorMap!=null)vectorMap.setUnsnappedVehicle(displayGps,currentLocation!=null&&currentLocation.hasBearing()&&currentLocation.hasSpeed()&&currentLocation.getSpeed()>1.5f?currentLocation.getBearing():Double.NaN);
+            if(!showingVector())map.postInvalidateOnAnimation();
+        }
     }
 
     private void setTripMetricLabels(boolean planned){
@@ -3625,7 +3640,9 @@ public final class MainActivity extends Activity implements LocationListener {
             suspendPositionGuidance("POSITION UNCERTAIN · CHECK ROAD SIGNS",reason);
             return;
         }
+        boolean justConfirmed=!guidancePositionConfirmed;
         guidancePositionConfirmed=true;confirmedSinceRouteInstall=true;joiningRoute=false;setTripMetricLabels(false);
+        if(justConfirmed)setStatus("Position confirmed · guidance active");
         if(repeatButton!=null)repeatButton.setEnabled(true);
         double along = projected.alongMetres;
         if(matched.reacquired){
@@ -3701,6 +3718,8 @@ public final class MainActivity extends Activity implements LocationListener {
             topTurnArrow.setVisibility(View.INVISIBLE);
             topNextTurnText.setVisibility(View.GONE);
             clearJunctionHighlight();
+            updateDrivingCamera(fix,projected,Math.max(along,projected.totalMetres));
+            announceEnteredSpeed(Double.POSITIVE_INFINITY,along);
             return;
         }
         previousInstructionIndex = next;
@@ -3739,8 +3758,17 @@ public final class MainActivity extends Activity implements LocationListener {
         topTurnArrow.setRouteTrace(currentRoundaboutTrace);
         boolean previewJunction=JunctionIntelligence.preview(junctionKind,untilTurn,speedNow);
         updateJunctionHighlight(next, previewJunction);
-        if(vectorMap!=null)vectorMap.setManeuverOffset(
-                RoadTestDisplayPolicy.showManeuver(glyph,untilTurn,speedNow)?step.routeOffsetMetres:Double.NaN);
+        double primary=step.routeOffsetMetres>=along&&RoadTestDisplayPolicy.showManeuver(glyph,untilTurn,speedNow)?step.routeOffsetMetres:Double.NaN;
+        double secondary=Double.NaN;
+        if(Double.isFinite(primary)&&next+1<route.instructions.size()){
+            TomTomApi.Instruction after=route.instructions.get(next+1);
+            double gap=after.routeOffsetMetres-primary;
+            if(gap>=20&&IntelligentGuidance.closeFollowing(gap,speedNow)
+                    &&RoadTestDisplayPolicy.showManeuver(JunctionIntelligence.glyph(after,JunctionIntelligence.classify(after.maneuver,after.junctionType)),after.routeOffsetMetres-along,speedNow))
+                secondary=after.routeOffsetMetres;
+        }
+        if(vectorMap!=null)vectorMap.setManeuverOffsets(primary,secondary);
+        if(rasterAwareness!=null)rasterAwareness.update(along,primary,secondary,metricUnits);
         if(previewJunction&&!currentJunctionPath.isEmpty())junctionFramePoints=JunctionIntelligence.context(currentJunctionPath,junctionKind);
         boolean showPath=previewJunction&&JunctionIntelligence.complex(junctionKind)
                 && getResources().getConfiguration().screenHeightDp>=740
@@ -3812,19 +3840,19 @@ public final class MainActivity extends Activity implements LocationListener {
         double early = NavigationMatch.earlyDistance(speedNow);
         if (untilTurn <= immediate && spokenNowIndex != next) {
             spokenNowIndex = next;
-            if (DrivingVoicePolicy.turn(voiceMode, 2)) say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,true,"",followingVoice)+speedAtTurn);
+            if (DrivingVoicePolicy.turn(voiceMode, 2)) say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,true,"",followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
         } else if (untilTurn > immediate && untilTurn <= approach && spokenCloseIndex != next
                 && spokenNowIndex != next) {
             spokenCloseIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 1)) {
-                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,followingVoice)+speedAtTurn);
+                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
                 if(!currentLanePrompt.isEmpty()){spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;}
             }
         } else if (untilTurn > approach && untilTurn <= early && spokenDistanceIndex != next
                 && spokenCloseIndex != next && spokenNowIndex != next) {
             spokenDistanceIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 0)) {
-                say(nextInstruction);
+                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,untilTurn<=30,currentLanePrompt,"")+linkedSpeedSpeech(speedAtTurn,turnChange));
                 if(!currentLanePrompt.isEmpty()){spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;}
             }
         } else if (untilTurn>immediate && !currentLanePrompt.isEmpty()
@@ -3836,6 +3864,21 @@ public final class MainActivity extends Activity implements LocationListener {
             reassuranceIndex=next;
             say("Continue along the highlighted route for "+NavigationUnits.spokenDistance(untilTurn,metricUnits));
         }
+        announceEnteredSpeed(untilTurn,along);
+    }
+    private String linkedSpeedSpeech(String phrase,SpeedChangeAwareness.Change change){
+        return !phrase.isEmpty()&&speechReady&&speech!=null&&speedChangeAwareness.shouldAnnounce(change)?phrase:"";
+    }
+    private boolean speechAvailable(){
+        return speechReady&&speech!=null&&!speech.isSpeaking()&&(lastSpeechAt<0||SystemClock.elapsedRealtime()-lastSpeechAt>=1500);
+    }
+    private void announceEnteredSpeed(double nextTurn,double along){
+        SpeedChangeAwareness.Change change=speedChangeAwareness.pendingEntry();
+        if(change==null||!advanceSpeedVoice||voiceMode==DrivingVoicePolicy.SILENT||!guidancePositionConfirmed
+                ||gpsLost||nextTurn<=65||along-change.offset>100||!speechAvailable())return;
+        int shown=metricUnits?change.kmh:(int)Math.round(change.kmh/1.609344);
+        speedChangeAwareness.entryAnnounced();
+        speak("Mapped speed limit is now "+shown+(metricUnits?" kilometres per hour.":" miles per hour.")+" Check road signs.");
     }
 
     /**
@@ -3860,6 +3903,9 @@ public final class MainActivity extends Activity implements LocationListener {
         if(lanePromptText!=null){lanePromptText.setText(currentLanePrompt);lanePromptText.setVisibility(currentLanePrompt.isEmpty()?View.GONE:View.VISIBLE);}
         RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
                 route.speedSections, along, offRoute, accuracy, "DriveMate".equals(route.provider)?0:age);
+        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20)
+            speedChangeAwareness.observeEntry(route.speedSections,limit,along,SystemClock.elapsedRealtime());
+        else speedChangeAwareness.clearEntry();
         boolean speeding = limit != null && fix.hasSpeed()
                 && RouteIntelligence.overspeed(fix.getSpeed(), limit, speedToleranceMph);
         if (speedLimitText != null) {
@@ -3889,7 +3935,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         +(atTurn?" at the turn":" ahead · "+NavigationUnits.displayDistance(change.offset-along,metricUnits)));
                 upcomingSpeedText.setVisibility(View.VISIBLE);
                 // Defer to a close turn; do not mark as spoken until eligible.
-                if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech!=null && !speech.isSpeaking()
+                if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechAvailable()
                         && (!atTurn||voiceMode==DrivingVoicePolicy.ALERTS_ONLY)
                         && (distanceToTurn > 65 || (atTurn&&voiceMode==DrivingVoicePolicy.ALERTS_ONLY)) && speedChangeAwareness.shouldAnnounce(change)) {
                     speak("Mapped speed limit changes to " + shown
@@ -4032,6 +4078,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(junctionPathView!=null)junctionPathView.setVisibility(View.GONE);
         junctionFramePoints=java.util.Collections.emptyList();highlightedJunctionIndex=-1;
         if(vectorMap!=null){vectorMap.clearJunctionFraming();vectorMap.setManeuverOffset(Double.NaN);}
+        if(rasterAwareness!=null)rasterAwareness.update(stabilizedAlong,Double.NaN,Double.NaN,metricUnits);
     }
 
     private void stopNavigation(boolean arrived) {
@@ -4069,6 +4116,7 @@ public final class MainActivity extends Activity implements LocationListener {
             map.getOverlays().remove(routeLine);
             routeLine = null;
         }
+        if(rasterAwareness!=null){map.getOverlays().remove(rasterAwareness);rasterAwareness=null;}
         if (destinationPin != null) {
             map.getOverlays().remove(destinationPin);
             destinationPin = null;
@@ -4156,10 +4204,11 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     private void speak(String message) {
-        if (speechReady && speech != null && message != null
+        if (voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech != null && message != null
                 && !message.trim().isEmpty()) {
             Bundle params = new Bundle();
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, guidanceVolume);
+            lastSpeechAt=SystemClock.elapsedRealtime();
             speech.speak(message, TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
         }
     }

@@ -31,6 +31,12 @@ public class RouteMapPolicyTest {
         assertNull(RouteMapPolicy.corridorBounds(Arrays.asList(a,new GeoMath.Point(54,-2.16))));
         assertFalse(RouteMapPolicy.insideBounds(new GeoMath.Point(54,-2.16),bounds));
     }
+    @Test public void expandedRegionalInsetCoversCheadleButNotWholeUk(){
+        assertTrue(RouteMapPolicy.insideStockport(new GeoMath.Point(53.393,-2.216)));
+        assertTrue(RouteMapPolicy.insideStockport(new GeoMath.Point(53.376,-2.202)));
+        assertFalse(RouteMapPolicy.insideStockport(new GeoMath.Point(53.36,-2.216)));
+        assertFalse(RouteMapPolicy.insideStockport(new GeoMath.Point(53.393,-2.25)));
+    }
     @Test public void routeWidthIsBoundedAndZoomDependent(){
         assertEquals(4,RouteMapPolicy.rasterWidthDp(Double.NaN));
         assertTrue(RouteMapPolicy.rasterWidthDp(13)<RouteMapPolicy.rasterWidthDp(19));

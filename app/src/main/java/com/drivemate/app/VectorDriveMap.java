@@ -54,7 +54,7 @@ public final class VectorDriveMap {
     private MapLibreMap map;
     private GeoJsonSource routeSource;
     private GeoJsonSource maneuverSource, routeTrafficLineSource;
-    private double maneuverOffset=Double.NaN;
+    private double maneuverOffset=Double.NaN, followingManeuverOffset=Double.NaN;
     private DmUnifiedGeometry sharedRouteMap;
     private String routeProvider="";
     private boolean providerStyle,providerStylePending,providerStyleFailed;
@@ -584,15 +584,15 @@ public final class VectorDriveMap {
     private void installRoadsideOverlay(Style style) {
         roadsideSource=new GeoJsonSource("dm-static-roadside",FeatureCollection.fromFeatures(new Feature[0]));
         style.addSource(roadsideSource);
-        String[] names={"camera","crossing","calming"};
-        String[] glyphs={"CAM","X","!"};
+        String[] names={"camera","crossing","calming","zebra","pelican","puffin","toucan","parallel","pegasus","signal_crossing"};
+        String[] glyphs={"CAM","X","!","Z","PEL","PUF","TOU","PAR","PEG","SIG"};
         for(int i=0;i<names.length;i++){
             Bitmap b=Bitmap.createBitmap(48,40,Bitmap.Config.ARGB_8888);
             Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
             p.setColor(Color.WHITE);c.drawRoundRect(new RectF(1,1,47,39),8,8,p);
             p.setColor(i==0?0xffa76d0f:0xffa43a31);c.drawRoundRect(new RectF(3,3,45,37),6,6,p);
             p.setColor(Color.WHITE);p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-            p.setTextAlign(Paint.Align.CENTER);p.setTextSize(i==0?15:24);
+            p.setTextAlign(Paint.Align.CENTER);p.setTextSize(glyphs[i].length()>1?15:24);
             c.drawText(glyphs[i],24,20-(p.ascent()+p.descent())/2,p);
             style.addImage("dm-mapped-"+names[i],b);
         }
@@ -810,7 +810,7 @@ public final class VectorDriveMap {
     public void setRoute(List<GeoMath.Point> path) {
         exactGeometry=new RouteRenderGeometry(path);pendingRoute=exactGeometry.full();routeLength=exactGeometry.length;
         lastAlignment="unmeasured";lastAlignmentCheck=0;
-        confirmedProgress=0;maneuverOffset=Double.NaN;clearCurrentRoad();renderRoute();renderRemaining();publishManeuver();publishRouteEvents();
+        confirmedProgress=0;maneuverOffset=followingManeuverOffset=Double.NaN;clearCurrentRoad();renderRoute();renderRemaining();publishManeuver();publishRouteEvents();
     }
     private void geometry(GeoJsonSource source,List<GeoMath.Point> path){
         if(!ready()||source==null)return;
@@ -821,18 +821,21 @@ public final class VectorDriveMap {
         source.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(points)));
     }
     private void renderRoute(){geometry(routeSource,pendingRoute);}
-    public void setManeuverOffset(double offset){
-        if(Double.compare(maneuverOffset,offset)==0)return;
-        maneuverOffset=offset;publishManeuver();
+    public void setManeuverOffset(double offset){setManeuverOffsets(offset,Double.NaN);}
+    public void setManeuverOffsets(double offset,double following){
+        if(Double.compare(maneuverOffset,offset)==0&&Double.compare(followingManeuverOffset,following)==0)return;
+        maneuverOffset=offset;followingManeuverOffset=following;publishManeuver();
     }
     private void publishManeuver(){
         if(!ready()||maneuverSource==null)return;
-        if(!Double.isFinite(maneuverOffset)||maneuverOffset<0||maneuverOffset+5>routeLength){
-            maneuverSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;
+        ArrayList<Feature> arrows=new ArrayList<>();
+        for(double offset:new double[]{maneuverOffset,followingManeuverOffset}){
+            if(!Double.isFinite(offset)||offset<0||offset+5>routeLength)continue;
+            GeoMath.Point p=exactGeometry.at(offset),end=exactGeometry.at(Math.min(routeLength,offset+12));
+            if(p==null||end==null||GeoMath.distance(p,end)<2)continue;
+            Feature f=Feature.fromGeometry(Point.fromLngLat(p.lon,p.lat));f.addNumberProperty("bearing",GeoMath.bearingDegrees(p,end));arrows.add(f);
         }
-        GeoMath.Point p=exactGeometry.at(maneuverOffset),end=exactGeometry.at(Math.min(routeLength,maneuverOffset+12));
-        if(p==null||end==null||GeoMath.distance(p,end)<2){maneuverSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));return;}
-        Feature f=Feature.fromGeometry(Point.fromLngLat(p.lon,p.lat));f.addNumberProperty("bearing",GeoMath.bearingDegrees(p,end));maneuverSource.setGeoJson(f);
+        maneuverSource.setGeoJson(FeatureCollection.fromFeatures(arrows.toArray(new Feature[0])));
     }
     private void renderRemaining(){
         if(pendingRoute==null||confirmedProgress<=0){geometry(remainingRouteSource,pendingRoute);return;}
@@ -878,6 +881,13 @@ public final class VectorDriveMap {
 
     public void clearJunctionFraming(){junctionFramePoints=java.util.Collections.emptyList();followJunction=null;}
 
+    void setUnsnappedVehicle(GeoMath.Point point,double travelBearing){
+        setVehicle(point);
+        if(Double.isFinite(travelBearing)&&ready()){
+            pendingTravelBearing=travelBearing;
+            setVehicleHeading(CameraHeadingPolicy.screenDegrees(travelBearing,map.getCameraPosition().bearing));
+        }
+    }
     public void setVehicle(GeoMath.Point point) {
         pendingGps = point;
         if (point == null || !ready() || vehicleSource == null) return;

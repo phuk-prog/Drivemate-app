@@ -17,7 +17,9 @@ final class MappedRoadside {
     }
     static MappedRoadside read(InputStream input)throws IOException {
         DataInputStream in=new DataInputStream(new BufferedInputStream(input));
-        if(in.readInt()!=0x444d4831)throw new IOException("Bad roadside format");
+        int format=in.readInt();
+        if(format!=0x444d4831&&format!=0x444d4832)throw new IOException("Bad roadside format");
+        int maxKind=format==0x444d4832?11:4;
         byte[] sha=new byte[32];in.readFully(sha);
         StringBuilder hash=new StringBuilder();
         for(byte b:sha)hash.append(String.format(Locale.ROOT,"%02x",b&255));
@@ -26,7 +28,7 @@ final class MappedRoadside {
         int[] a=new int[n],o=new int[n];byte[] k=new byte[n];
         for(int i=0;i<n;i++){
             a[i]=in.readInt();o[i]=in.readInt();k[i]=in.readByte();
-            if(a[i]<490000000||a[i]>610000000||o[i]<-90000000||o[i]>30000000||k[i]<1||k[i]>4
+            if(a[i]<490000000||a[i]>610000000||o[i]<-90000000||o[i]>30000000||k[i]<1||k[i]>maxKind
                 ||i>0&&(a[i]<a[i-1]||a[i]==a[i-1]&&(o[i]<o[i-1]||o[i]==o[i-1]&&k[i]<=k[i-1])))
                 throw new IOException("Invalid roadside point");
         }
@@ -43,7 +45,8 @@ final class MappedRoadside {
             if(lon[i]<x||lon[i]>y||kind[i]==4||(!detailed&&kind[i]!=1))continue;
             if(out.size()>=1500)break;
             Feature f=Feature.fromGeometry(Point.fromLngLat(lon[i]/1e7,lat[i]/1e7));
-            f.addStringProperty("icon",kind[i]==1?"dm-mapped-camera":kind[i]==2?"dm-mapped-crossing":"dm-mapped-calming");
+            f.addStringProperty("icon","dm-mapped-"+CrossingType.ICONS[kind[i]]);
+            if(kind[i]==2||kind[i]>=5)f.addStringProperty("label",CrossingType.label(kind[i]));
             out.add(f);
         }
         return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
