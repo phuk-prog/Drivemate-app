@@ -18,7 +18,7 @@ final class LiveTrafficIncidents {
     static String label(int n){
         switch(n){
             case 1:return "Accident";case 2:return "Fog";case 3:return "Dangerous conditions";
-            case 4:return "Heavy rain";case 5:return "Ice";case 6:return "Congestion";
+            case 4:return "Rain";case 5:return "Ice";case 6:return "Congestion";
             case 7:return "Lane closed";case 8:return "Road closed";case 9:return "Roadworks";
             case 10:return "Wind";case 11:return "Flooding";case 14:return "Broken-down vehicle";
             default:return "";
