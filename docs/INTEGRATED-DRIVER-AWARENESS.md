@@ -1,6 +1,6 @@
 # Integrated driver-awareness candidate
 
-Review branch only; not road-approved or signed. This candidate addresses the observed map and driving-screen issues without changing the stable APK identity or merging to main.
+Review candidate 2.1.1 (200016); not road-approved or signed. This candidate addresses the observed map and driving-screen issues without changing the stable APK identity or merging to main.
 
 Implemented in this branch:
 - Preserve the original route geometry; camera adopts a longer forward lead, more useful speed-aware pitch/zoom, and an approach bearing even at a zero-offset departure. Complex-junction framing remains bounded by existing viewport checks.
@@ -15,10 +15,14 @@ Implemented in this branch:
 - Second pass: on the independently verified route geometry, associate roadside events by original source way/node IDs and exact coordinates. Announce mapped traffic lights, crossings, calming, and explicitly both-direction mapped cameras; suppress unknown/one-direction cameras, conditional tags and ambiguous locations. Requires hosted mapped points; regional fallback alone has no point identities.
 - Second pass: retain explicitly supplied TomTom v1 TEC accident, obstruction, animal, pedestrian and vehicle hazard categories even when delay is zero. Reference: https://docs.tomtom.com/routing-api/documentation/tomtom-maps/v1/calculate-route and TISA ITSTF20001 v1.5 tables 3-4, 3-5. Not a separate complete live hazard feed.
 
+- Third pass: private gateway supports /v2/roads using verified matching national source. Host preparation and six-city detail smoke command are in Drivemate-map PR #23. National candidate compilation is enabled for that exact same-repository PR branch; no automatic publishing or deployment.
+- Third pass: TomTom Incident Details v5 supplies present area events, exact point/line geometries and explicit provider categories in the opt-in provider-matched live route map. Area incidents expire automatically and do not trigger proximity-only speech. Route-indexed provider traffic remains the basis for directional audible traffic notices. API entitlement and real service responses require verification.
+- Third/fourth pass: exact mapped OSM enforcement relations with explicit directed anchors yield camera notices and average-speed zone start/end and map overlays. Multiple original ways are supported only with matching ordered explicit section members. Unmapped cameras, unknown directions and unsupported relation forms are not inferred.
+
 Not completed or certified by this change:
 - Nationwide native high-zoom tiles and full building/address coverage; default national source remains z14. The new bounded exact-geometry hosted browse path is implemented but its national service is not deployed/verified. No fabricated map features or geometric smoothing.
-- Verified fixed/mobile/average camera direction, coverage and zone membership; mapped speed-camera nodes alone are not enough.
-- Live hazard/incident coverage beyond route sections, full camera direction and average-speed zone data, and deployment/real-road verification of the hosted context and conditional free-drive notices. Live signal phase information is not part of the mapped signal dataset. No claims of complete warnings.
+- Comprehensive camera coverage (especially mobile or temporary cameras) and real-world enforcement status require a verified entitled feed. The exact OSM relation subset is supported, not complete.
+- Live area incident rendering is implemented but provider access and completeness remain unverified; full national service deployment and real-road verification of hosted context and conditional free-drive notices remain outstanding. Live signal phase information is not part of the mapped signal dataset. No claims of complete warnings.
 - Real device screenshots, replay of the photographed journey, build/signature and passenger-operated road acceptance. CI does not prove physical-road safety. No main merge, signing secret exposure or public release.
 
 Acceptance: exercise preview and guided driving at 0/urban/motorway speeds; check both heading-up and north-up, full junction and exit, day/night, pitch transition, vehicle bounds, flat/3D buildings at all zooms, GPS-loss and reroute, expired/ambiguous speed sections, simultaneous alerts and turn priority, UK/metric settings, free-drive activation and exit. Verify actual generated roadside asset coverage and attribution, and inspect actual rendered layers rather than relying on code presence.
