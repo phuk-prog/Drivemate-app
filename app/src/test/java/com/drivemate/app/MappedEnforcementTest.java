@@ -28,4 +28,14 @@ public class MappedEnforcementTest {
         assertFalse(r.zones.get(0).active(9));assertTrue(r.zones.get(0).active(100));assertFalse(r.zones.get(0).active(210));
         assertTrue(MappedEnforcement.match(relation("average_speed",false),nodes(10,210),Collections.emptySet(),ways,offsets).zones.isEmpty());
     }
+    @Test public void explicitMultiWaySectionMustMatchEntireOrderedCorridor()throws Exception{
+        JSONArray rows=relation("average_speed",true);
+        rows.getJSONArray(0).getJSONArray(2)
+            .put(new JSONArray().put("section").put("w").put(12))
+            .put(new JSONArray().put("section").put("w").put(13));
+        double[] offsets={0,10,100,210};
+        assertEquals(1,MappedEnforcement.match(rows,nodes(10,210),Collections.emptySet(),Arrays.asList(12L,12L,13L),offsets).zones.size());
+        assertTrue(MappedEnforcement.match(rows,nodes(10,210),Collections.emptySet(),Arrays.asList(12L,13L,12L),offsets).zones.isEmpty());
+        assertTrue(MappedEnforcement.match(rows,nodes(10,210),Collections.emptySet(),Arrays.asList(12L,12L,14L),offsets).zones.isEmpty());
+    }
 }
