@@ -103,4 +103,18 @@ public class FixQualityPolicyTest {
         assertEquals(FixQualityPolicy.SOURCE_GPS, gps(53, -2, 0, 5).source);
         assertEquals(FixQualityPolicy.SOURCE_NETWORK, net(53, -2, 0, 5).source);
     }
+
+    @Test public void ageUsesMonotonicClockWhenAvailable() {
+        // Wall clock is 8 s behind the fix's own time, but the fix is 2 s old on the monotonic clock.
+        assertEquals(2000L, FixQualityPolicy.ageMs(98_000_000_000L, 1_008_000L, 100_000L, 1_000_000L));
+    }
+
+    @Test public void ageFallsBackToWallClockWithoutElapsedStamp() {
+        assertEquals(3000L, FixQualityPolicy.ageMs(0L, 997_000L, 50L, 1_000_000L));
+    }
+
+    @Test public void ageIsNeverNegative() {
+        assertEquals(0L, FixQualityPolicy.ageMs(0L, 1_005_000L, 0L, 1_000_000L));
+        assertEquals(0L, FixQualityPolicy.ageMs(101_000_000_000L, 0L, 100_000L, 0L));
+    }
 }

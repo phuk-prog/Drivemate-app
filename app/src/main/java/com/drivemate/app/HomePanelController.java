@@ -210,7 +210,7 @@ final class HomePanelController {
         if (a.localRouting() || (!a.ownRouting() && a.apiKey.isEmpty()) || a.places == null || a.currentLocation == null || a.active) return;
         if (!MapStartupPolicy.freshForRouting(
                 a.currentLocation.getLatitude(), a.currentLocation.getLongitude(),
-                a.currentLocation.getTime(), System.currentTimeMillis(),
+                System.currentTimeMillis() - MainActivity.fixAgeMs(a.currentLocation), System.currentTimeMillis(),
                 a.currentLocation.hasAccuracy() ? a.currentLocation.getAccuracy() : 101f)) return;
         long now = SystemClock.elapsedRealtime();
         if (a.quickEtaFetchedAt != 0 && now - a.quickEtaFetchedAt < 5 * 60_000L) return;

@@ -101,6 +101,24 @@ public final class FixQualityPolicy {
         return true;
     }
 
+    /**
+     * Age of a fix in milliseconds, never negative.
+     * Uses the monotonic elapsed-realtime stamp when the fix has one, because the
+     * wall-clock time of a GNSS fix can be a few seconds ahead of or behind a
+     * phone clock that is not network-synced. Falls back to wall-clock time.
+     *
+     * @param fixElapsedNanos {@code Location.getElapsedRealtimeNanos()}, or 0 if unset
+     * @param fixTimeMs {@code Location.getTime()}
+     * @param nowElapsedMs {@code SystemClock.elapsedRealtime()}
+     * @param nowWallMs {@code System.currentTimeMillis()}
+     */
+    public static long ageMs(long fixElapsedNanos, long fixTimeMs, long nowElapsedMs, long nowWallMs) {
+        long age = fixElapsedNanos > 0
+                ? nowElapsedMs - fixElapsedNanos / 1_000_000L
+                : nowWallMs - fixTimeMs;
+        return Math.max(0L, age);
+    }
+
     private static boolean validCoordinate(double lat, double lon) {
         return Double.isFinite(lat) && Double.isFinite(lon)
                 && lat >= -85.0 && lat <= 85.0

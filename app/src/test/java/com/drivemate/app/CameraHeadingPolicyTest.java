@@ -21,4 +21,18 @@ public final class CameraHeadingPolicyTest {
         assertEquals(-30, CameraHeadingPolicy.rasterMarkerRotation(120, 90), 0.001);
         assertEquals(20, CameraHeadingPolicy.screenDegrees(10, 350), 0.001);
     }
+
+    @Test public void bearingNeedsSpeedAndBearing() {
+        assertTrue(CameraHeadingPolicy.usableBearing(true, true, 5f, Float.NaN));
+        assertFalse(CameraHeadingPolicy.usableBearing(false, true, 5f, Float.NaN));
+        assertFalse(CameraHeadingPolicy.usableBearing(true, false, 5f, Float.NaN));
+        assertFalse(CameraHeadingPolicy.usableBearing(true, true, 1.5f, Float.NaN));
+        assertFalse(CameraHeadingPolicy.usableBearing(true, true, Float.NaN, Float.NaN));
+    }
+
+    @Test public void bearingRejectedWhenDeviceReportsWideUncertainty() {
+        assertTrue(CameraHeadingPolicy.usableBearing(true, true, 8f, 30f));
+        assertFalse(CameraHeadingPolicy.usableBearing(true, true, 8f, 45f));
+        assertTrue(CameraHeadingPolicy.usableBearing(true, true, 8f, -1f));
+    }
 }

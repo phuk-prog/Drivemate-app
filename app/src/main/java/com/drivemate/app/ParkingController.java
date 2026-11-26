@@ -93,7 +93,7 @@ final class ParkingController {
         }
         if (a.currentLocation == null || !a.currentLocation.hasSpeed()
                 || a.currentLocation.getSpeed() > 1.2f
-                || System.currentTimeMillis() - a.currentLocation.getTime() > 7000) {
+                || MainActivity.fixAgeMs(a.currentLocation) > 7000) {
             a.showError("Stop safely before finding or selecting parking.");
             return;
         }
@@ -163,7 +163,7 @@ final class ParkingController {
         if (a.currentLocation == null || !ArrivalPolicy.canSaveParking(
                 a.currentLocation.hasAccuracy() ? a.currentLocation.getAccuracy() : Float.MAX_VALUE,
                 a.currentLocation.hasSpeed() ? a.currentLocation.getSpeed() : Float.MAX_VALUE,
-                a.currentLocation.getTime(), System.currentTimeMillis())) {
+                System.currentTimeMillis() - MainActivity.fixAgeMs(a.currentLocation), System.currentTimeMillis())) {
             a.showError("Parking location not saved · wait for fresh precise stationary GPS.");
             return;
         }
@@ -177,7 +177,7 @@ final class ParkingController {
         if (a.currentLocation == null || !ArrivalPolicy.canSaveParking(
                 a.currentLocation.hasAccuracy() ? a.currentLocation.getAccuracy() : Float.MAX_VALUE,
                 a.currentLocation.hasSpeed() ? a.currentLocation.getSpeed() : Float.MAX_VALUE,
-                a.currentLocation.getTime(), System.currentTimeMillis())) {
+                System.currentTimeMillis() - MainActivity.fixAgeMs(a.currentLocation), System.currentTimeMillis())) {
             a.showError("Park safely and wait for precise stationary GPS before saving.");
             return;
         }

@@ -114,7 +114,7 @@ public final class MainActivity extends Activity implements LocationListener {
         @Override public void run() {
             if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
             if ((active||freeDriving) && currentLocation != null
-                    && System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+                    && fixAgeMs(currentLocation) > 15000) {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
@@ -850,7 +850,7 @@ public final class MainActivity extends Activity implements LocationListener {
         repeatButton.setContentDescription("Repeat next spoken turn");
         repeatButton.setVisibility(View.GONE);
         repeatButton.setOnClickListener(v -> {
-            if (!guidancePositionConfirmed || gpsLost || currentLocation==null || System.currentTimeMillis()-currentLocation.getTime()>10000) showError("Position not confirmed · check road signs.");
+            if (!guidancePositionConfirmed || gpsLost || currentLocation==null || fixAgeMs(currentLocation)>10000) showError("Position not confirmed · check road signs.");
             else if (nextInstruction.isEmpty()) showError("No upcoming direction yet.");
             else if (voiceMode == DrivingVoicePolicy.SILENT)
                 Toast.makeText(this, "Enable voice guidance to repeat a turn",
@@ -1018,7 +1018,7 @@ public final class MainActivity extends Activity implements LocationListener {
             } else if (currentLocation != null
                     && MapStartupPolicy.freshForRouting(
                             currentLocation.getLatitude(), currentLocation.getLongitude(),
-                            currentLocation.getTime(), System.currentTimeMillis(),
+                            System.currentTimeMillis() - fixAgeMs(currentLocation), System.currentTimeMillis(),
                             currentLocation.hasAccuracy()
                                     ? currentLocation.getAccuracy() : 101f)) {
                 centreOnLocation(true);
@@ -1567,7 +1567,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (!hasEnabledLocationProvider())
             return "Turn on your phone's Location service, then tap the GPS button.";
         if (currentLocation != null
-                && System.currentTimeMillis() - currentLocation.getTime() > 20000)
+                && fixAgeMs(currentLocation) > 20000)
             return "GPS position is out of date. Keep Location on and try again.";
         return "Waiting for a fresh GPS position. Move near a window or outdoors and retry.";
     }
@@ -1581,8 +1581,12 @@ public final class MainActivity extends Activity implements LocationListener {
                 || currentLocation != null || !followLocation) return;
         Location chosen = null;
         long now = System.currentTimeMillis();
-        for (String provider : new String[]{
-                LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+        // The fused provider (Android 12+) usually has the freshest remembered fix.
+        String[] providers = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                ? new String[]{LocationManager.FUSED_PROVIDER, LocationManager.GPS_PROVIDER,
+                        LocationManager.NETWORK_PROVIDER}
+                : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER};
+        for (String provider : providers) {
             try {
                 Location candidate = locationManager.getLastKnownLocation(provider);
                 if (candidate != null && MapStartupPolicy.usableCachedMapArea(
@@ -1704,9 +1708,13 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     @Override public void onLocationChanged(Location fix) {
-        if (fix == null || !MapStartupPolicy.freshForRouting(
-                fix.getLatitude(), fix.getLongitude(), fix.getTime(),
-                System.currentTimeMillis(),
+        if (fix == null) return;
+        // Judge freshness on the monotonic clock: a phone clock that is a few
+        // seconds off GNSS time must not make every good fix look stale or "future".
+        long nowWall = System.currentTimeMillis();
+        long fixAge = fixAgeMs(fix);
+        if (!MapStartupPolicy.freshForRouting(
+                fix.getLatitude(), fix.getLongitude(), nowWall - fixAge, nowWall,
                 fix.hasAccuracy() ? fix.getAccuracy() : 101f)) return;
         // Drop noisy, out-of-order, teleporting or network-only fixes before they
         // reach the map, guidance or the off-route logic.
@@ -1716,9 +1724,12 @@ public final class MainActivity extends Activity implements LocationListener {
                 fixSource(fix));
         if (!FixQualityPolicy.accept(lastAcceptedFix, sample)) return;
         lastAcceptedFix = sample;
+        boolean bearingOk = CameraHeadingPolicy.usableBearing(fix.hasBearing(), fix.hasSpeed(),
+                fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearingAccuracy() ? fix.getBearingAccuracyDegrees() : Float.NaN);
         deadReckoner.onFix(new GeoMath.Point(fix.getLatitude(), fix.getLongitude()),
-                fix.getTime(), fix.hasSpeed() ? fix.getSpeed() : 0f,
-                fix.hasBearing() ? fix.getBearing() : 0d, fix.hasBearing());
+                nowWall - fixAge, fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearing() ? fix.getBearing() : 0d, bearingOk);
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -1769,8 +1780,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (!active || smoothFollow == null || !followLocation) vectorMap.setVehicle(smoothed);
             if (!autoFallback && !active) vectorMap.prefetch(gpsPoint(fix));
         }
-        if ((!active || smoothFollow == null || !followLocation) && fix.hasBearing()
-                && fix.hasSpeed() && fix.getSpeed() > 1.5f)
+        if ((!active || smoothFollow == null || !followLocation) && bearingOk)
             userPin.setRotation(-fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
@@ -1803,6 +1813,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (active && route != null && (!routing || guidancePositionConfirmed)) updateGuidance(fix);
         else if(active&&joiningRoute&&followLocation&&lastJoinCameraAt>=0&&SystemClock.elapsedRealtime()-lastJoinCameraAt>=1000){centreOnLocation(false);lastJoinCameraAt=SystemClock.elapsedRealtime();}
         if (!active && !showingVector()) map.postInvalidateOnAnimation();
+    }
+
+    /** Age of a fix on the monotonic clock, falling back to wall-clock time. */
+    static long fixAgeMs(Location fix) {
+        return FixQualityPolicy.ageMs(fix.getElapsedRealtimeNanos(), fix.getTime(),
+                SystemClock.elapsedRealtime(), System.currentTimeMillis());
     }
 
     /** Maps a fix's provider to its FixQualityPolicy rank. */
@@ -2007,7 +2023,7 @@ public final class MainActivity extends Activity implements LocationListener {
     void startNavigation() {
         if (route == null || destination == null) return;
         if (NavigationStartPolicy.previewOnly(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
-        if (currentLocation == null || !NavigationStartPolicy.freshFix(currentLocation.getLatitude(), currentLocation.getLongitude(), currentLocation.getTime(), System.currentTimeMillis(), currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.NaN)) {
+        if (currentLocation == null || !NavigationStartPolicy.freshFix(currentLocation.getLatitude(), currentLocation.getLongitude(), System.currentTimeMillis() - fixAgeMs(currentLocation), System.currentTimeMillis(), currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.NaN)) {
             showError("Waiting for a fresh GPS position before starting.");
             return;
         }
@@ -2095,7 +2111,7 @@ public final class MainActivity extends Activity implements LocationListener {
     void selectDestination(TomTomApi.Destination selected) {
         if (currentLocation == null || !MapStartupPolicy.freshForRouting(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
-                currentLocation.getTime(), System.currentTimeMillis(),
+                System.currentTimeMillis() - fixAgeMs(currentLocation), System.currentTimeMillis(),
                 currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : 101f)) {
             // Selecting a destination must never silently use the remembered
             // startup map centre or an old system cached GPS measurement.
@@ -2169,7 +2185,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // The parking lookup is offered only when the driver is stationary.
         boolean parked = currentLocation != null && currentLocation.hasSpeed()
                 && currentLocation.getSpeed() <= 1.2f
-                && System.currentTimeMillis() - currentLocation.getTime() <= 7000;
+                && fixAgeMs(currentLocation) <= 7000;
         findParkingButton.setEnabled(parked);
         // Parking search belongs to the very end of the journey.
         findParkingButton.setVisibility(nearby ? View.VISIBLE : View.GONE);
@@ -2214,7 +2230,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (route == null) showError("Connect to the internet to calculate a route.");
             return;
         }
-        if (System.currentTimeMillis() - currentLocation.getTime() > 20000) {
+        if (fixAgeMs(currentLocation) > 20000) {
             setStatus("Waiting for a fresh GPS position; current route retained");
             return;
         }
@@ -2242,7 +2258,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (!firstRoute && active && route != null) {
                         if (currentLocation == null || !currentLocation.hasAccuracy()
                                 || currentLocation.getAccuracy() > 55
-                                || System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+                                || fixAgeMs(currentLocation) > 15000) {
                             setStatus("Uncertain GPS · current route retained");
                             return;
                         }
@@ -2323,7 +2339,7 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         if (System.currentTimeMillis() - pendingRouteAtMs > 45000
-                || System.currentTimeMillis() - currentLocation.getTime() > 12000
+                || fixAgeMs(currentLocation) > 12000
                 || GeoMath.distance(gpsPoint(currentLocation), pendingRouteOrigin) > 110) {
             clearPendingRoute();
             setStatus("Suggested route expired · checking again");
@@ -2946,7 +2962,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 && ArrivalPolicy.canSaveParking(
                         currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
                         currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
-                        currentLocation.getTime(), System.currentTimeMillis());
+                        System.currentTimeMillis() - fixAgeMs(currentLocation), System.currentTimeMillis());
         stopSmoothLoop();
         smoothFollow = null;
         ++requestGeneration;
@@ -3026,7 +3042,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (reviewAvailable && !isFinishing()) {
             // Never open the review UI when the car is still moving or speed is unknown.
             if (currentLocation != null && currentLocation.hasSpeed() && currentLocation.getSpeed() < 0.5f
-                    && System.currentTimeMillis()-currentLocation.getTime()<10000) reviewController.showMapReview();
+                    && fixAgeMs(currentLocation)<10000) reviewController.showMapReview();
             else setStatus("Journey ended · map review available in Settings when parked");
         } else if (offerParkedCar && !isFinishing()) parkingController.offerSaveParkedCar();
     }

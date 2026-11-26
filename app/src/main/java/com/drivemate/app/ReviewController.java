@@ -94,7 +94,7 @@ final class ReviewController {
     }
 
     void showMapReview(){
-        if(a.active || a.currentLocation==null || !a.currentLocation.hasSpeed() || a.currentLocation.getSpeed()>=0.5f || System.currentTimeMillis()-a.currentLocation.getTime()>10000){a.showError("Review map differences only after ending navigation and parking safely.");return;}
+        if(a.active || a.currentLocation==null || !a.currentLocation.hasSpeed() || a.currentLocation.getSpeed()>=0.5f || MainActivity.fixAgeMs(a.currentLocation)>10000){a.showError("Review map differences only after ending navigation and parking safely.");return;}
         List<MapReview.Finding> items=a.mapReview.snapshot();
         if(items.isEmpty()){new AlertDialog.Builder(a).setTitle("Journey map review").setMessage("No comparable differences recorded. Comparison requires an authorised TomTom connection and aligned road data.").setPositiveButton("Close",null).show();return;}
         String[] labels=new String[items.size()];for(int i=0;i<labels.length;i++)labels[i]=items.get(i).label();
@@ -102,7 +102,7 @@ final class ReviewController {
     }
 
     boolean safelyParked(){
-        return !a.active&&a.currentLocation!=null&&a.currentLocation.hasSpeed()&&a.currentLocation.getSpeed()<0.5f&&System.currentTimeMillis()-a.currentLocation.getTime()<10000;
+        return !a.active&&a.currentLocation!=null&&a.currentLocation.hasSpeed()&&a.currentLocation.getSpeed()<0.5f&&MainActivity.fixAgeMs(a.currentLocation)<10000;
     }
 
     void showSurveyNotes(){
@@ -170,7 +170,7 @@ final class ReviewController {
                 +(a.route==null?"":" / map: "+(a.vectorMap!=null&&a.showingVector()?a.vectorMap.geometryDescription():RouteMapPolicy.description(a.route.provider,false)))
                 +(a.showingVector()&&a.vectorMap!=null?" / visual alignment: "+a.vectorMap.routeAlignmentDiagnostic():" / raster alignment not measured")
                 +" / base map "+DriveTileServer.MAP_RELEASE;
-        s.fixAgeMs=a.currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-a.currentLocation.getTime());
+        s.fixAgeMs=a.currentLocation==null?-1:MainActivity.fixAgeMs(a.currentLocation);
         s.cameraMode = a.settingsController.cameraModeName();
         s.followingCar = a.followLocation;
         s.highDetailTiles = false; // vector default; explicit raster fallback remains possible
