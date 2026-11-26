@@ -100,7 +100,7 @@ public final class NavigationCamera {
         // Stronger forward perspective on long approaches; ease toward a
         // clearer overhead junction diagram as the manoeuvre gets close.
         double tilt = clamp(38 + junctionAhead * 0.042
-                + Math.min(7, speed * 0.20), 38, 55);
+                + Math.min(7, speed * 0.20), 38, 54);
         if (detailApproach) {
             // More overhead than the default 3D view, especially for exits.
             double blend = 1 - junctionAhead / 420.0;
