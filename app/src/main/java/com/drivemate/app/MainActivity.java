@@ -3095,7 +3095,7 @@ public final class MainActivity extends Activity implements LocationListener {
     static final AudioAttributes GUIDANCE_AUDIO = new AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
-    private int utteranceSeq;
+    private volatile int utteranceSeq;
     private android.media.AudioFocusRequest guidanceFocus;
 
     private void requestGuidanceFocus() {
