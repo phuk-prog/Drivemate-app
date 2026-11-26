@@ -543,9 +543,13 @@ public final class MainActivity extends Activity implements LocationListener {
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         speech = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && speech != null) {
-                speech.setAudioAttributes(new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                speech.setAudioAttributes(GUIDANCE_AUDIO);
+                speech.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+                    @Override public void onStart(String id) { }
+                    @Override public void onDone(String id) { releaseGuidanceFocus(id); }
+                    @Override public void onError(String id) { releaseGuidanceFocus(id); }
+                    @Override public void onStop(String id, boolean interrupted) { releaseGuidanceFocus(id); }
+                });
                 int language = speech.setLanguage(Locale.UK);
                 speechReady = language != TextToSpeech.LANG_MISSING_DATA
                         && language != TextToSpeech.LANG_NOT_SUPPORTED;
@@ -3079,8 +3083,42 @@ public final class MainActivity extends Activity implements LocationListener {
                 && !message.trim().isEmpty()) {
             Bundle params = new Bundle();
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, guidanceVolume);
-            speech.speak(message, TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
+            // Ask other audio (music, podcasts) to duck while the prompt plays, then
+            // hand focus back when the newest prompt finishes.
+            String id = "drivemate-guidance-" + (++utteranceSeq);
+            requestGuidanceFocus();
+            if (speech.speak(message, TextToSpeech.QUEUE_FLUSH, params, id) != TextToSpeech.SUCCESS)
+                releaseGuidanceFocus(id);
         }
+    }
+
+    static final AudioAttributes GUIDANCE_AUDIO = new AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+    private int utteranceSeq;
+    private android.media.AudioFocusRequest guidanceFocus;
+
+    private void requestGuidanceFocus() {
+        try {
+            android.media.AudioManager audio = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (audio == null) return;
+            if (guidanceFocus == null)
+                guidanceFocus = new android.media.AudioFocusRequest.Builder(
+                        android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                        .setAudioAttributes(GUIDANCE_AUDIO).build();
+            audio.requestAudioFocus(guidanceFocus);
+        } catch (RuntimeException ignored) {
+            // Speech still plays without focus; it just will not duck other audio.
+        }
+    }
+
+    /** Only the newest prompt releases focus, so a flushed prompt cannot cut off its successor. */
+    private void releaseGuidanceFocus(String utteranceId) {
+        if (utteranceId == null || !utteranceId.equals("drivemate-guidance-" + utteranceSeq)) return;
+        try {
+            android.media.AudioManager audio = (android.media.AudioManager) getSystemService(Context.AUDIO_SERVICE);
+            if (audio != null && guidanceFocus != null) audio.abandonAudioFocusRequest(guidanceFocus);
+        } catch (RuntimeException ignored) { }
     }
 
     @Override public void onProviderDisabled(String provider) {
