@@ -15,7 +15,7 @@ for workflow in Path(".github/workflows").glob("*.yml"):
             errors.append(f"{workflow}: raw Android binary upload")
         if re.search(r"(?im)^\s*(?:path:\s*)?app/build(?:/|\s|$)", step):
             errors.append(f"{workflow}: broad app build upload")
-        if re.search(r"(?im)^\s*(?:path:\s*)?[^\n]*\.zip\s*$", step):
+        if any(line.strip().endswith(".zip") and not line.strip().startswith("!") for line in step.splitlines()):
             if not ("password-protected" in step and "release-output/DriveMate-" in step
                     and "tools/encrypt-apk.sh" in source):
                 errors.append(f"{workflow}: unapproved ZIP upload")
