@@ -1,0 +1,2 @@
+# RC6 startup and loss handling
+Includes RC4/RC5 fixes. Disable repeating stale turns while position unconfirmed, clear stale turn and ETA on GPS loss, stop queued speech on transition from confident to uncertain, distinguish stationary near-start road access from poor accuracy. No fake route or auto-snap to a nearby road, no instructions until the existing match confidence gate passes. Changes are based on the screenshots and code audit, not actual device diagnostics.

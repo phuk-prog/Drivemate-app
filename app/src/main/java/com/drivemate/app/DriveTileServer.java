@@ -36,10 +36,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * completely independent of this map-display cache.
  */
 public final class DriveTileServer implements AutoCloseable {
-    public static final String MAP_RELEASE = "tiles-20261122T0943Z";
+    public static final String MAP_RELEASE = "tiles-20261125T0353Z";
     public static final String SOURCE = "https://github.com/phuk-prog/Drivemate-map/releases/download/"
             + MAP_RELEASE + "/united-kingdom.pmtiles";
-    public static final long SOURCE_SIZE = 1_871_405_796L;
+    public static final long SOURCE_SIZE = 1_872_336_554L;
     public static final int MAX_ZOOM = 14;
     public static final long MAX_TILE_CACHE_BYTES = 180L * 1024 * 1024;
     private static final int MAX_TILE_BYTES = 12 * 1024 * 1024;
@@ -54,6 +54,7 @@ public final class DriveTileServer implements AutoCloseable {
     private volatile PmTilesReader archive;
     private volatile boolean closed;
     private volatile long prefetchAt;
+    private final java.util.concurrent.atomic.AtomicBoolean routePrefetchPending = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile int lastPrefetchX = -1;
     private volatile int lastPrefetchY = -1;
     private volatile Runnable onFirstTile;
@@ -69,7 +70,7 @@ public final class DriveTileServer implements AutoCloseable {
         if ((!tiles.isDirectory() && !tiles.mkdirs())
                 || (!ranges.isDirectory() && !ranges.mkdirs()))
             throw new IOException("Cannot initialise local DriveMate map cache");
-        source = new RangeSource(ranges);
+        source = new RangeSource(ranges, new File(base, "offline-verified.pmtiles"));
         socket = new ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"));
         Thread acceptor = new Thread(this::accept, "drivemate-local-map");
         acceptor.setDaemon(true);
@@ -294,6 +295,30 @@ public final class DriveTileServer implements AutoCloseable {
         });
     }
 
+    /** A small route corridor, on unmetered Wi-Fi only; no unbounded task queue. */
+    public void prefetchRoute(List<GeoMath.Point> ahead) {
+        if (closed || ahead == null || ahead.isEmpty() || !unmetered()
+                || !routePrefetchPending.compareAndSet(false,true)) return;
+        List<GeoMath.Point> snapshot = new ArrayList<>(ahead.subList(0,Math.min(8,ahead.size())));
+        try {
+            prefetcher.execute(() -> {
+                try {
+                    java.util.Set<String> seen = new java.util.HashSet<>();
+                    for (GeoMath.Point point : snapshot) {
+                        if (closed || !unmetered()) break;
+                        int x=tileX(point.lon,MAX_ZOOM), y=tileY(point.lat,MAX_ZOOM);
+                        if (!seen.add(x+":"+y)) continue;
+                        try { fetchTile(MAX_ZOOM,x,y); }
+                        catch(IOException error) { break; }
+                    }
+                    trim();
+                } finally { routePrefetchPending.set(false); }
+            });
+        } catch(java.util.concurrent.RejectedExecutionException closedExecutor) {
+            routePrefetchPending.set(false);
+        }
+    }
+
     public static int tileX(double lon, int z) {
         return Math.max(0, Math.min((1 << z) - 1,
                 (int) Math.floor((lon + 180) / 360 * (1 << z))));
@@ -328,15 +353,21 @@ public final class DriveTileServer implements AutoCloseable {
      * Fail closed if the server ignores Range; never download 1.9GB by mistake.
      */
     private static final class RangeSource implements PmTilesReader.Source {
-        final File directory;
+        final File directory, offline;
         private volatile long dataStarts;
-        RangeSource(File directory) { this.directory = directory; }
+        RangeSource(File directory, File offline) { this.directory = directory; this.offline = offline; }
         @Override public long size() { return SOURCE_SIZE; }
 
         @Override public byte[] read(long offset, int length) throws IOException {
             if (offset < 0 || length <= 0 || length > 4 * 1024 * 1024
                     || offset > SOURCE_SIZE - length)
                 throw new IOException("PMTiles range outside verified release bounds");
+            // Full archive is installed atomically by the checksum-verifying downloader.
+            if (offline.isFile() && offline.length() == SOURCE_SIZE) {
+                try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(offline, "r")) {
+                    byte[] data = new byte[length]; file.seek(offset); file.readFully(data); return data;
+                }
+            }
             File local = new File(directory, offset + "-" + length + ".part");
             if (local.isFile() && local.length() == length) {
                 byte[] cached = readBytes(local, 4 * 1024 * 1024);

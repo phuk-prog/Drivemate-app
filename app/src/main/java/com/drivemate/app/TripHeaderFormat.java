@@ -9,7 +9,8 @@ public final class TripHeaderFormat {
     public static String minutesLeft(long remainingSeconds) {
         long seconds = Math.max(0, remainingSeconds);
         long minutes = (seconds + 59) / 60;
-        return minutes + " min";
+        if (minutes < 60) return minutes + " min";
+        return (minutes / 60) + " hr" + (minutes % 60 > 0 ? " " + minutes % 60 + " min" : "");
     }
 
     public static String distanceLeft(double metres, boolean metric) {

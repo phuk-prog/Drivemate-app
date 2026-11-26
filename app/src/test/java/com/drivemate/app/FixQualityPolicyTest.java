@@ -94,6 +94,11 @@ public class FixQualityPolicyTest {
                 gps(53.00001, -2, FixQualityPolicy.GPS_FRESH_MS + 1000, 5)));
     }
 
+    @Test public void preciseSatelliteCanReplacePoorFusedFix(){
+        assertTrue(FixQualityPolicy.accept(fused(53,-2,1000,45),gps(53,-2,2000,8)));
+        assertFalse(FixQualityPolicy.accept(gps(53,-2,1000,8),fused(53,-2,2000,45)));
+        assertFalse(FixQualityPolicy.accept(fused(53,-2,1000,45),net(53,-2,2000,8)));
+    }
     @Test public void booleanShorthandMapsToGpsAndNetworkSources() {
         assertEquals(FixQualityPolicy.SOURCE_GPS, gps(53, -2, 0, 5).source);
         assertEquals(FixQualityPolicy.SOURCE_NETWORK, net(53, -2, 0, 5).source);

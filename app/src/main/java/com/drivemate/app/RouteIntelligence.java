@@ -14,9 +14,14 @@ public final class RouteIntelligence {
     public static final class Lane {
         public final String direction;
         public final boolean recommended;
+        public final List<String> directions;
         public Lane(String direction, boolean recommended) {
+            this(direction, recommended, Collections.singletonList(direction == null ? "" : direction));
+        }
+        public Lane(String direction, boolean recommended, List<String> directions) {
             this.direction = direction == null ? "" : direction;
             this.recommended = recommended;
+            this.directions = Collections.unmodifiableList(new java.util.ArrayList<>(directions));
         }
         public String symbol() {
             switch (direction.toUpperCase(Locale.US)) {
@@ -44,7 +49,10 @@ public final class RouteIntelligence {
             if (lanes.isEmpty() || lanes.size() > 8) return false;
             boolean hasRecommendation = false;
             for (Lane lane : lanes) {
-                if ("?".equals(lane.symbol())) return false;
+                if (lane.directions.isEmpty() || lane.directions.size() > 5 || "?".equals(lane.symbol())) return false;
+                for (String direction : lane.directions)
+                    if ("?".equals(new Lane(direction, false).symbol())) return false;
+                if (lane.recommended && !lane.directions.contains(lane.direction)) return false;
                 hasRecommendation |= lane.recommended;
             }
             return hasRecommendation;
@@ -56,7 +64,7 @@ public final class RouteIntelligence {
                 if (i > 0) out.append("   ");
                 Lane lane = lanes.get(i);
                 if (lane.recommended) out.append("[");
-                out.append(lane.symbol());
+                for (String direction : lane.directions) out.append(new Lane(direction, false).symbol());
                 if (lane.recommended) out.append("]");
             }
             return out.toString();
@@ -103,6 +111,22 @@ public final class RouteIntelligence {
             if (distance < nearest) { nearest = distance; result = s; }
         }
         return result;
+    }
+
+    /** Use only a lane section associated with the upcoming instruction.
+     * Ambiguous overlapping recommendations are hidden rather than guessed. */
+    public static LaneSection lanesForManeuver(List<LaneSection> sections,
+            double progress, double horizon, double maneuver) {
+        if (sections == null || !Double.isFinite(progress) || !Double.isFinite(maneuver)
+                || maneuver < progress || maneuver-progress > horizon) return null;
+        LaneSection selected = null;
+        for (LaneSection s : sections) {
+            if (!s.trusted() || s.end <= progress+2 || s.start > progress+horizon
+                    || s.start > maneuver || s.end < maneuver-80 || s.end > maneuver+80) continue;
+            if (selected != null) return null;
+            selected=s;
+        }
+        return selected;
     }
 
     /**

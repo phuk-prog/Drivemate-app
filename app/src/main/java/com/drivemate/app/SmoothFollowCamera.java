@@ -229,9 +229,9 @@ public final class SmoothFollowCamera {
         GeoMath.Point wantedCenter = path.pointAt(
                 clamp(centerAlong + centrePredicted, 0, path.lengthMetres));
         if (GeoMath.distance(center, wantedCenter) > 500) {
-            // After a discontinuity, prefer reinitialisation on the next route
-            // rather than producing multiple seconds of misleading map movement.
-            wantedCenter = center;
+            // Re-anchor only on a recent accepted fix; never fly across a gap.
+            if (gpsConfident && age <= 1.15) center = wantedCenter;
+            else wantedCenter = center;
         }
         double positionFraction = alpha(dt, 0.45);
         center = blend(center, wantedCenter, positionFraction);
@@ -262,7 +262,7 @@ public final class SmoothFollowCamera {
         // vehicle arrow cannot point down the exit before making the turn.
         double toTurn = Math.max(0, nextUnconfirmedTurn
                 - Math.max(0, visualAlong - measuredProgress));
-        double ahead = clamp(toTurn - 5, 7, 22);
+        double ahead = Math.min(toTurn, clamp(toTurn - 5, 0, 22));
         GeoMath.Point headingStart = path.pointAt(Math.max(0, visualAlong - 3));
         GeoMath.Point headingEnd = path.pointAt(
                 Math.min(path.lengthMetres, visualAlong + ahead));

@@ -74,10 +74,16 @@ public final class FixQualityPolicy {
         long dt = candidate.timeMs - previous.timeMs;
         if (dt <= 0) return false;
 
-        if (candidate.source < previous.source && dt < GPS_FRESH_MS) {
+        // A genuinely precise raw satellite fix may replace poor fused data.
+        boolean betterSatellite = candidate.source == SOURCE_GPS && previous.source == SOURCE_FUSED
+                && candidate.accuracyMetres <= 25 && previous.accuracyMetres > 35
+                && previous.accuracyMetres-candidate.accuracyMetres >= 15;
+        if (candidate.source < previous.source && dt < GPS_FRESH_MS && !betterSatellite) {
             return false;
         }
 
+        if (previous.source==SOURCE_GPS && previous.accuracyMetres<=25 && candidate.source==SOURCE_FUSED
+                && candidate.accuracyMetres>35 && dt<GPS_FRESH_MS) return false;
         if (candidate.accuracyMetres > GOOD_ACCURACY_METRES) {
             if (dt < FALLBACK_AFTER_MS) return false;
             if (candidate.accuracyMetres > FALLBACK_ACCURACY_METRES) return false;

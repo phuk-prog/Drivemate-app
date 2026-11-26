@@ -1,3 +1,10 @@
+# DriveMate — UK Navigation (Android)
+
+Integration candidate 2.0.2 (200014), based on signed 2.0.1. Start new work from consolidated main. Install only verified APKs from [Releases](https://github.com/phuk-prog/Drivemate-app/releases), never debug APKs as updates. Experimental own-map/offline routing is preview-only. Physical road validation is outstanding.
+
+See [repository workflow](docs/REPOSITORY-WORKFLOW.md) and [map repository](https://github.com/phuk-prog/Drivemate-map).
+
+## Historical notes
 ## DriveMate v1.6.1 — version label matches signed APK
 
 DriveMate's header and About dialog now use the installed Android package's

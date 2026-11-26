@@ -1,0 +1,2 @@
+# RC5: independent route end vs destination arrival
+Run 4 ends at mapped road node about 166m from the requested pin. Not announcing arrival was correct; staying ON_ROUTE at end was misleading. New state ROAD_END_ACCESS_UNVERIFIED reports reaching the mapped route end without asserting a legal entrance or place arrival. ARRIVAL_PREVIEW requires three accurate, distinct, low-speed fixes near both endpoint and pin. Unknown speed does not confirm arrival. Separate instrumented Wells regression for remote pin and reachable endpoint; production live navigation remains unchanged.

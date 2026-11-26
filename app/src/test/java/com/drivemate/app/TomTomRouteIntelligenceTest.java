@@ -68,4 +68,16 @@ public class TomTomRouteIntelligenceTest {
                 route.laneSections.isEmpty());
     }
 
+
+    @Test public void preservesMultipleMarkedDirectionsAndValidRecommendation() throws Exception {
+        String sections = "[{\"sectionType\":\"LANES\","
+                + "\"startPointIndex\":2,\"endPointIndex\":3,"
+                + "\"lanes\":[{\"directions\":[\"LEFT\",\"STRAIGHT\"]},"
+                + "{\"directions\":[\"STRAIGHT\",\"RIGHT\"],\"follow\":\"RIGHT\"}]}]";
+        TomTomApi.Route route = TomTomApi.parseRoute(fixture(sections));
+        assertEquals(1,route.laneSections.size());
+        assertEquals(2,route.laneSections.get(0).lanes.get(0).directions.size());
+        assertTrue(route.laneSections.get(0).lanes.get(1).recommended);
+        assertEquals("RIGHT",route.laneSections.get(0).lanes.get(1).direction);
+    }
 }

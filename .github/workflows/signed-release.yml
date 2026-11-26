@@ -1,0 +1,224 @@
+name: DriveMate verified signed release
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Explicitly publish a versioned prerelease after signing (otherwise artifact only)'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ['release/version.json']
+concurrency:
+  group: drivemate-publication
+  cancel-in-progress: false
+permissions:
+  contents: read
+
+jobs:
+  signed-apk:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    environment: drivemate-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Reject obsolete release version
+        run: |
+          python3 tools/check_release_version.py --published
+          python3 tools/check_map_lock.py
+          python3 tools/verify_release_map_assets.py
+          python3 tools/check-apk-distribution.py
+          python3 -m unittest discover -s tools -p test_release_workflow.py -v
+          echo '498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          python3 - <<'PY'
+          import json,os
+          v=json.load(open("release/version.json"))
+          with open(os.environ["GITHUB_ENV"],"a") as f:
+              f.write("VERSION="+v["versionName"]+"\nVERSION_CODE="+str(v["versionCode"])+"\n")
+          PY
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Validate redesigned day and night style contracts
+        run: |
+          python3 tools/test_driving_styles.py
+          python3 tools/test_unified_styles.py
+      - name: Verify actual UK road features and style layer compatibility
+        run: python3 tools/verify_drive_map_roads.py
+      - name: Reject blank map screenshots (regression fixtures)
+        run: python3 tools/check_drive_map_pixels.py --self-test
+      - name: Verify DriveMate Map UK archive supports safe partial downloads
+        run: python3 tools/probe_drive_map_range.py
+      - uses: actions/cache@v4
+        with:
+          path: app/src/main/assets/world-z0-6.pmtiles
+          key: world-map-${{ hashFiles('tools/fetch_pinned_map.py') }}
+      - name: Fetch checksum-verified DriveMate world map (45 MB)
+        run: python3 tools/fetch_pinned_map.py
+      - name: Compile pinned original DriveMate map pilot
+        run: python3 tools/prepare_dmtiles_pilot.py
+      - name: Compile full-detail Stockport region from pinned UK map
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y osmium-tool
+          python3 tools/prepare_stockport_unified_app.py
+      - name: Validate resolved dependencies before signing
+        run: |
+          ./gradlew --no-daemon :app:dependencies --write-locks > dependency-report.txt
+          git diff --exit-code -- app/gradle.lockfile
+          python3 tools/scan_dependencies.py app/gradle.lockfile
+      - name: Run Android unit tests
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+
+      - name: Prepare and run offline instrumentation before private signing
+        run: |
+          python3 tools/prepare_offline_routing_pilot.py
+          python3 tools/prepare_navigation_lab.py --drivemate-only
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Offline emulator acceptance gate
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: bash tools/run_offline_routing_pilot.sh && bash tools/run_unified_zoom_test.sh && bash tools/run_drivemate_replay.sh
+      - name: Upload shared road zoom evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stockport-shared-geometry-zoom-evidence
+          path: |
+            offline-pilot-results/
+            navigation-lab/evidence/
+            unified-zoom-results/
+            app/src/main/assets/dmtiles-stockport/alignment-report.json
+            !**/*.apk
+            !**/*.aab
+            !**/*.apks
+            !**/*.xapk
+            !**/*.apkm
+            !**/*.zip
+          if-no-files-found: warn
+      - name: Build unsigned release APK
+        run: ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Check installable release-candidate package and new version
+        shell: bash
+        run: |
+          set -euo pipefail
+          AAPT="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+          test -x "$AAPT"
+          "$AAPT" dump badging app/build/outputs/apk/release/app-release-unsigned.apk |
+            grep -F "package: name='com.drivemate.android' versionCode='$VERSION_CODE' versionName='$VERSION'"
+
+      - name: Decode privately stored signing key
+        env:
+          DRIVEMATE_KEYSTORE_BASE64: ${{ secrets.DRIVEMATE_KEYSTORE_BASE64 }}
+          DRIVEMATE_SIGNING_PASSWORD: ${{ secrets.DRIVEMATE_SIGNING_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$DRIVEMATE_KEYSTORE_BASE64" || -z "$DRIVEMATE_SIGNING_PASSWORD" ]]; then
+            echo 'Set DRIVEMATE_KEYSTORE_BASE64 and DRIVEMATE_SIGNING_PASSWORD in protected Actions secrets.' >&2
+            exit 1
+          fi
+          umask 077
+          mkdir -p "$RUNNER_TEMP/drivemate-private"
+          printf '%s' "$DRIVEMATE_KEYSTORE_BASE64" \
+            | base64 --decode > "$RUNNER_TEMP/drivemate-private/DriveMate-Signing-Key.p12"
+          test -s "$RUNNER_TEMP/drivemate-private/DriveMate-Signing-Key.p12"
+
+      - name: Sign app using stable DriveMate owner certificate
+        env:
+          DRIVEMATE_SIGNING_PASSWORD: ${{ secrets.DRIVEMATE_SIGNING_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tools/sign-release.sh \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            "$RUNNER_TEMP/drivemate-private/DriveMate-Signing-Key.p12" \
+            app/build/outputs/apk/release/DriveMate-${{ env.VERSION }}-signed.apk
+
+      - name: Verify expected DriveMate certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          SIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -x "$SIGNER"
+          CERT="$("$SIGNER" verify --print-certs --min-sdk-version 26 \
+            app/build/outputs/apk/release/DriveMate-${{ env.VERSION }}-signed.apk | \
+            sed -nE 's/^(V[0-9.]+ Signer:|Signer #[0-9]+) certificate SHA-256 digest: ([[:xdigit:]]+)$/\2/p' | tr -d '\r' | tr '[:upper:]' '[:lower:]' | sort -u)"
+          EXPECTED="9f11804f0c28f61be2588fc6e1663514cfcca6ad4da4e31e19e4186c029b1a38"
+          if [[ "$CERT" != "$EXPECTED" ]]; then
+            echo "Expected signing certificate fingerprint was not found." >&2
+            echo "Signing certificate does not match the DriveMate v1.2 update certificate." >&2
+            exit 1
+          fi
+
+      - name: Ensure AES ZIP utility is available
+        run: command -v 7z || (sudo apt-get update -qq && sudo apt-get install -y p7zip-full)
+      - name: Encrypt signed APK with owner ZIP password
+        env:
+          DRIVEMATE_ZIP_PASSWORD: ${{ secrets.DRIVEMATE_ZIP_PASSWORD }}
+        run: |
+          bash tools/encrypt-apk.sh "app/build/outputs/apk/release/DriveMate-$VERSION-signed.apk" "release-output/DriveMate-$VERSION-signed.zip"
+      - name: Create release recovery evidence
+        run: |
+          set -euo pipefail
+          (cd release-output && sha256sum *.zip > SHA256SUMS)
+          python3 tools/write_release_evidence.py --directory release-output
+      - name: Upload encrypted signed APK ZIP only
+        uses: actions/upload-artifact@v4
+        with:
+          name: DriveMate-${{ env.VERSION }}-password-protected
+          path: |
+            release-output/DriveMate-${{ env.VERSION }}-signed.zip
+            release-output/SHA256SUMS
+            release-output/release-manifest.json
+            release-output/CHANGELOG.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish versioned APK and verification evidence
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/check_release_version.py --published
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo "Release tag already exists; review assets instead of replacing"; exit 1
+          fi
+          mkdir -p release-output
+          printf 'DriveMate %s. Password-protected signed update ZIP; existing package and certificate. Automated build, offline and UI replay checks passed. Not physically road validated. See release-manifest.json and Actions run %s.\n' "$VERSION" "$GITHUB_RUN_ID" > release-output/notes.md
+          gh release create "$tag" release-output/*.zip release-output/SHA256SUMS release-output/release-manifest.json release-output/CHANGELOG.md --repo "$GH_REPO" --target "$GITHUB_SHA" --title "DriveMate $VERSION" --notes-file release-output/notes.md --draft --prerelease
+          gh release edit "$tag" --repo "$GH_REPO" --draft=false
+      - name: Remove transient signing key
+        if: always()
+        shell: bash
+        run: rm -rf "$RUNNER_TEMP/drivemate-private"

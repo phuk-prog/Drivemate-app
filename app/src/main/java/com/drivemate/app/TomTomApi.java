@@ -3,7 +3,6 @@ package com.drivemate.app;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import android.net.Uri;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -55,9 +54,17 @@ public final class TomTomApi {
         public final double turnAngleDegrees;
         public final String street;
         public final String signpost;
+        public final String highwayExit;
+        public final String roadNumbers;
+        public final String drivingSide;
         public Instruction(double routeOffsetMetres, String message, String maneuver,
                            String junctionType, int exitNumber, double turnAngleDegrees,
                            String street, String signpost) {
+            this(routeOffsetMetres,message,maneuver,junctionType,exitNumber,turnAngleDegrees,street,signpost,"","","");
+        }
+        public Instruction(double routeOffsetMetres,String message,String maneuver,
+                           String junctionType,int exitNumber,double turnAngleDegrees,
+                           String street,String signpost,String highwayExit,String roadNumbers,String drivingSide) {
             this.routeOffsetMetres = routeOffsetMetres;
             this.message = message;
             this.maneuver = maneuver;
@@ -66,7 +73,20 @@ public final class TomTomApi {
             this.turnAngleDegrees = turnAngleDegrees;
             this.street = street;
             this.signpost = signpost;
+            this.highwayExit=highwayExit; this.roadNumbers=roadNumbers; this.drivingSide=drivingSide;
         }
+    }
+
+    private static String instructionRoadNumbers(JSONArray values) {
+        if(values==null)return "";
+        StringBuilder out=new StringBuilder();
+        for(int i=0;i<Math.min(values.length(),4);i++){
+            String value=values.optString(i,"").trim();
+            if(value.isEmpty()||value.length()>24||!value.matches("[A-Za-z0-9 ()/-]+"))continue;
+            if(out.length()>0)out.append(" / ");
+            out.append(value);
+        }
+        return out.toString();
     }
 
     public static final class Route {
@@ -76,6 +96,11 @@ public final class TomTomApi {
         public final int timeSeconds;
         public final int trafficDelaySeconds;
         public final long fetchedAtMs;
+        public final String provider;
+        // Optional proof from the exact hosted routing graph; never changes guidance.
+        String geometrySourceSha = "";
+        List<Long> geometryWays = java.util.Collections.emptyList();
+        DmUnifiedGeometry sharedGeometry;
         public final List<RouteIntelligence.LaneSection> laneSections;
         public final List<RouteIntelligence.SpeedSection> speedSections;
         public final List<RouteIntelligence.TrafficSection> trafficSections;
@@ -84,6 +109,10 @@ public final class TomTomApi {
               List<RouteIntelligence.LaneSection> laneSections,
               List<RouteIntelligence.SpeedSection> speedSections,
               List<RouteIntelligence.TrafficSection> trafficSections) {
+            this(points,instructions,lengthMetres,timeSeconds,trafficDelaySeconds,laneSections,speedSections,trafficSections,"TomTom");
+        }
+        Route(List<GeoMath.Point> points, List<Instruction> instructions, double lengthMetres, int timeSeconds, int trafficDelaySeconds, List<RouteIntelligence.LaneSection> laneSections, List<RouteIntelligence.SpeedSection> speedSections, List<RouteIntelligence.TrafficSection> trafficSections, String provider) {
+            this.provider = provider;
             this.points = points;
             this.instructions = instructions;
             this.lengthMetres = lengthMetres;
@@ -173,28 +202,44 @@ public final class TomTomApi {
         return results;
     }
 
+    static final class EmptyGeometryException extends IOException {
+        final double providerLength;
+        EmptyGeometryException(double providerLength) {
+            super("TomTom route geometry is empty."); this.providerLength=providerLength;
+        }
+    }
+    interface RouteRequest { JSONObject get(String url) throws IOException, JSONException; }
     public static Route route(String key, GeoMath.Point start, GeoMath.Point destination)
+            throws IOException, JSONException {
+        return route(key,start,destination,TomTomApi::requestJson);
+    }
+    static Route route(String key, GeoMath.Point start, GeoMath.Point destination, RouteRequest request)
             throws IOException, JSONException {
         String pair = coordinate(start.lat) + "," + coordinate(start.lon) + ":"
                 + coordinate(destination.lat) + "," + coordinate(destination.lon);
         String url = "https://api.tomtom.com/routing/1/calculateRoute/" + pair + "/json"
                 + "?key=" + encode(key)
-                + "&travelMode=car&routeType=fastest&traffic=true"
+                + "&travelMode=car&routeType=fastest&traffic=true&routeRepresentation=polyline"
                 + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
-        JSONObject response;
         try {
-            response = requestJson(url
-                    + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic");
+            return parseRoute(request.get(url
+                    + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic"));
         } catch (IOException error) {
-            // An older/limited key must not prevent normal navigation.
-            // Only retry metadata-related 400/403 errors, not rate limiting,
-            // connection failures or server errors.
-            String message = error.getMessage();
-            if (message == null || (!message.startsWith("TomTom HTTP 400.")
-                    && !message.startsWith("TomTom HTTP 403."))) throw error;
-            response = requestJson(url);
+            String message=error.getMessage();
+            if (!(error instanceof EmptyGeometryException) &&
+                    (message==null||(!message.startsWith("TomTom HTTP 400.")&&!message.startsWith("TomTom HTTP 403.")))) throw error;
         }
-        return parseRoute(response);
+        // Retry once without optional metadata. Never synthesize a road line,
+        // invent instructions, or silently switch to another routing provider.
+        try {
+            return parseRoute(request.get(url));
+        } catch (EmptyGeometryException error) {
+            if (Double.isFinite(error.providerLength) && error.providerLength>=0
+                    && error.providerLength<=1 && GeoMath.distance(start,destination)<=100) {
+                throw new IOException("Destination is nearby, but TomTom returned no driving route. Check the entrance or select a nearby road.",error);
+            }
+            throw new IOException("TomTom returned no usable road route after retry. Try the destination entrance or another nearby road.",error);
+        }
     }
 
     /** Package-private to test real response shapes without network/API keys. */
@@ -211,9 +256,11 @@ public final class TomTomApi {
         // removed from the drawing/guidance geometry.
         List<Double> originalPointOffsets = new ArrayList<>();
         double geometryMetres = 0;
-        JSONArray legs = route.getJSONArray("legs");
+        JSONArray legs = route.optJSONArray("legs");
+        if (legs == null) throw new EmptyGeometryException(summary.optDouble("lengthInMeters",Double.NaN));
         for (int l = 0; l < legs.length(); l++) {
-            JSONArray coords = legs.getJSONObject(l).getJSONArray("points");
+            JSONArray coords = legs.getJSONObject(l).optJSONArray("points");
+            if (coords == null) continue;
             for (int i = 0; i < coords.length(); i++) {
                 JSONObject p = coords.getJSONObject(i);
                 GeoMath.Point point = new GeoMath.Point(p.getDouble("latitude"),
@@ -230,7 +277,7 @@ public final class TomTomApi {
                 originalPointOffsets.add(geometryMetres);
             }
         }
-        if (points.size() < 2) throw new IOException("TomTom route geometry is empty.");
+        if (points.size() < 2) throw new EmptyGeometryException(summary.optDouble("lengthInMeters",Double.NaN));
 
         List<Instruction> steps = new ArrayList<>();
         JSONObject guidance = route.optJSONObject("guidance");
@@ -247,7 +294,10 @@ public final class TomTomApi {
                             instruction.optInt("roundaboutExitNumber", 0),
                             instruction.optDouble("turnAngleInDecimalDegrees", 0),
                             instruction.optString("street", ""),
-                            instruction.optString("signpostText", "")));
+                            instruction.optString("signpostText", ""),
+                            instruction.optString("exitNumber",""),
+                            instructionRoadNumbers(instruction.optJSONArray("roadNumbers")),
+                            instruction.optString("drivingSide","")));
                 }
             }
         }
@@ -276,7 +326,7 @@ public final class TomTomApi {
                         List<RouteIntelligence.Lane> lanes = new ArrayList<>();
                         for (int j = 0; j < sourceLanes.length(); j++) {
                             JSONObject lane = sourceLanes.optJSONObject(j);
-                            if (lane == null) continue;
+                            if (lane == null) { lanes.clear(); break; }
                             String follow = lane.optString("follow", "");
                             JSONArray directions = lane.optJSONArray("directions");
                             // A TomTom recommendation must be one of this
@@ -288,10 +338,12 @@ public final class TomTomApi {
                                     if (follow.equals(directions.optString(d, "")))
                                         confirmedFollow = true;
                             }
-                            String label = confirmedFollow ? follow
-                                    : directions != null && directions.length() == 1
-                                            ? directions.optString(0, "") : "";
-                            lanes.add(new RouteIntelligence.Lane(label, confirmedFollow));
+                            if (directions == null || directions.length() == 0
+                                    || (!follow.isEmpty() && !confirmedFollow)) { lanes.clear(); break; }
+                            List<String> marked = new ArrayList<>();
+                            for (int d=0; d<directions.length(); d++) marked.add(directions.optString(d, ""));
+                            String label = confirmedFollow ? follow : marked.get(0);
+                            lanes.add(new RouteIntelligence.Lane(label, confirmedFollow, marked));
                         }
                         RouteIntelligence.LaneSection candidate =
                                 new RouteIntelligence.LaneSection(from, to, lanes);
@@ -327,7 +379,8 @@ public final class TomTomApi {
     }
 
     private static String encode(String value) {
-        return Uri.encode(value);
+        try { return java.net.URLEncoder.encode(value, "UTF-8").replace("+", "%20"); }
+        catch (java.io.UnsupportedEncodingException impossible) { throw new AssertionError(impossible); }
     }
 
     private static JSONObject requestJson(String url) throws IOException, JSONException {
