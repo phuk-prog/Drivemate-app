@@ -10,7 +10,7 @@ Orientation so sessions don't need to rediscover the repo. Keep this file short.
 - `.github/workflows/` — CI; edit only when the task is about CI.
 
 ## Rules of thumb (token saving)
-- Old release notes are in `docs/HISTORY.md`; don't read them or old `docs/DRIVEMATE-*RC*.md` unless asked.
+- Old release notes are in `docs/HISTORY.md`; don't read them or `docs/archive/` (old RC notes) unless asked.
 - Grep for the symbol first; don't open whole files or list `docs/`.
 - Release versions: `python3 tools/bump_release_version.py VERSION` (preview; `--apply` to write). Never hand-edit the version register.
 - Don't edit dependency lockfiles by hand; they come from CI.
