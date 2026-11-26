@@ -250,6 +250,9 @@ public final class MainActivity extends Activity implements LocationListener {
     private View speedBadgeView;
     private boolean keyboardOpen;
     private boolean homeMode = true;
+    private boolean freeDriving;
+    private boolean advanceSpeedVoice = true;
+    private double freeDriveBearing=Double.NaN;
     private LinearLayout homePanel;
     private LinearLayout navigationPanel;
     private LinearLayout topMapOverlay;
@@ -482,6 +485,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 settings.getInt("map_theme", DrivingDisplayPolicy.DEFAULT_THEME));
         hazardWarningEnabled = settings.getBoolean("hazard_voice_alerts", true);
         speedWarningEnabled = settings.getBoolean("speed_voice_alerts", true);
+        advanceSpeedVoice = settings.getBoolean("advance_speed_voice", true);
         buildings3d = settings.getBoolean("buildings_3d", true);
         closeZoom = settings.getBoolean("close_zoom", true);
         highDetailOnline = settings.getBoolean("high_detail_online", true);
@@ -1276,12 +1280,13 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void setHomeVisible(boolean show) {
         homeMode = show;
+        if(!show)freeDriving=false;
         if (homePanel == null || navigationPanel == null) return;
-        homePanel.setVisibility(show && !keyboardOpen ? View.VISIBLE : View.GONE);
+        homePanel.setVisibility(show && !keyboardOpen && !freeDriving ? View.VISIBLE : View.GONE);
         navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
         if (speedBadgeView != null) {
             // Speed only while actually navigating: not on home or route preview.
-            speedBadgeView.setVisibility(keyboardOpen || show || !active
+            speedBadgeView.setVisibility(keyboardOpen || (!active&&!freeDriving) || (show&&!freeDriving)
                     ? View.GONE : View.VISIBLE);
         }
         if (followButton != null) {
@@ -1296,8 +1301,8 @@ public final class MainActivity extends Activity implements LocationListener {
             // to the previous estimates.
             int navHeight = navigationPanel.getHeight();
             int above = navHeight > 0 ? navHeight + dp(19) : dp(active ? 100 : 225);
-            speedBadgePos.bottomMargin = show ? dp(320) : above;
-            gpsButtonPos.bottomMargin = show ? dp(327) : above;
+            speedBadgePos.bottomMargin = freeDriving ? dp(16) : show ? dp(320) : above;
+            gpsButtonPos.bottomMargin = freeDriving ? dp(16) : show ? dp(327) : above;
         }
         applyNavigationChrome();
         if (show && !keyboardOpen) refreshHomePanel();
@@ -1472,7 +1477,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Independent map survey drafts",
                 "Offline routing · UK experimental preview",
                 "Offline visual map · download full UK",
-                "DriveMate original stack · Wells pilot"
+                "DriveMate original stack · Wells pilot",
+                "Free driving · "+(freeDriving?"On":"Off"),
+                "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off")
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1608,6 +1615,9 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 27: showOfflineRouting(); break;
                         case 28: showOfflineDisplay(); break;
                         case 29: if(!active) DmPilotScreen.show(this); break;
+                        case 30: toggleFreeDriving(); break;
+                        case 31: advanceSpeedVoice=!advanceSpeedVoice;
+                            getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("advance_speed_voice",advanceSpeedVoice).apply(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -2390,7 +2400,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
-            setStatus("GPS ready · accuracy ±" + Math.round(fix.getAccuracy()) + " m"
+            setStatus((freeDriving?"Free driving · road limits not verified · GPS ±":"GPS ready · accuracy ±") + Math.round(fix.getAccuracy()) + " m"
                     + satelliteSuffix());
         }
         if (!active && followLocation) {
@@ -2438,10 +2448,41 @@ public final class MainActivity extends Activity implements LocationListener {
         return new BitmapDrawable(getResources(),scaled);
     }
 
+    private void toggleFreeDriving(){
+        if(active||route!=null||routing){Toast.makeText(this,"End the route before using free driving.",Toast.LENGTH_SHORT).show();return;}
+        freeDriving=!freeDriving;
+        freeDriveBearing=Double.NaN;followLocation=true;updateFollowButton();
+        if(freeDriving)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        setHomeVisible(true);
+        setStatus(freeDriving?"Free driving · GPS and mapped features · road limits not verified":"Map browsing");
+        if(currentLocation!=null)centreOnLocation(true);
+    }
+
     private void centreOnLocation(boolean forceZoom) {
         if (currentLocation == null) return;
         GeoMath.Point position = gpsPoint(currentLocation);
         boolean vector = showingVector();
+        if(freeDriving && !active && route==null){
+            float speed=currentLocation.hasSpeed()?Math.max(0,currentLocation.getSpeed()):0;
+            if(currentLocation.hasBearing() && speed>1.5f && currentLocation.hasAccuracy() && currentLocation.getAccuracy()<=25){
+                double next=currentLocation.getBearing();
+                freeDriveBearing=Double.isFinite(freeDriveBearing)?(freeDriveBearing+Math.max(-45,Math.min(45,(next-freeDriveBearing+540)%360-180))+360)%360:next;
+            }
+            double heading=Double.isFinite(freeDriveBearing)?freeDriveBearing:0;
+            double bearing=DrivingDisplayPolicy.northUp(cameraMode)?0:heading;
+            double pitch=DrivingDisplayPolicy.tilt(45+Math.min(9,speed*.25),cameraMode);
+            double cameraZoom=Math.max(14.0,16.8-speed*.055);
+            GeoMath.Point centre=position;
+            if(Double.isFinite(freeDriveBearing) && !DrivingDisplayPolicy.northUp(cameraMode)){
+                double ahead=Math.min(110,35+speed*2),rad=Math.toRadians(heading);
+                centre=new GeoMath.Point(position.lat+Math.cos(rad)*ahead/111320,
+                        position.lon+Math.sin(rad)*ahead/(111320*Math.max(.15,Math.cos(Math.toRadians(position.lat)))));
+            }
+            if(vector)vectorMap.setBrowseCamera(centre,cameraZoom,bearing,pitch,heading);
+            else {map.setMapOrientation((float)-bearing);map.getController().setZoom(cameraZoom);map.getController().setCenter(new GeoPoint(centre.lat,centre.lon));}
+            lastCameraCenter=position;return;
+        }
         double zoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
         if (forceZoom || zoom < 14.0) zoom = 16.5;
         if (vector) {
@@ -3647,16 +3688,17 @@ public final class MainActivity extends Activity implements LocationListener {
                         + NavigationUnits.displayDistance(change.offset-along, metricUnits));
                 upcomingSpeedText.setVisibility(View.VISIBLE);
                 // Defer to a close turn; do not mark as spoken until eligible.
-                if (speedWarningEnabled && distanceToTurn > 65 && speedChangeAwareness.shouldAnnounce(change)) {
-                    sayVerifiedAlert("Mapped speed limit changes to " + shown
+                if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech!=null && !speech.isSpeaking()
+                        && distanceToTurn > 65 && speedChangeAwareness.shouldAnnounce(change)) {
+                    speak("Mapped speed limit changes to " + shown
                             + (metricUnits?" kilometres per hour in ":" miles per hour in ")
-                            + NavigationUnits.spokenDistance(change.offset-along, metricUnits) + ". Check road signs.", true);
+                            + NavigationUnits.spokenDistance(change.offset-along, metricUnits) + ". Check road signs.");
                 }
             }
         }
         speedText.setTextColor(speeding ? Color.rgb(255, 197, 85) : Color.WHITE);
         long now = SystemClock.elapsedRealtime();
-        if (speeding && speedWarningEnabled && distanceToTurn > 300
+        if (speeding && speedWarningEnabled && (speech==null||!speech.isSpeaking()) && distanceToTurn > 300
                 && (lastSpeedWarningAt == 0 || now - lastSpeedWarningAt > 120000)) {
             lastSpeedWarningAt = now;
             sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",
@@ -3678,7 +3720,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 trafficNoticeText.setVisibility(View.VISIBLE);
             }
         }
-        if (traffic != null && hazardWarningEnabled && traffic.start > along
+        if (traffic != null && hazardWarningEnabled && (speech==null||!speech.isSpeaking()) && traffic.start > along
                 && traffic.start - along <= 450 && distanceToTurn > 300
                 && (lastTrafficWarningStart < 0
                         || Math.abs(lastTrafficWarningStart - traffic.start) > 50)
