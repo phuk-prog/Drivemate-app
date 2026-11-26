@@ -23,8 +23,10 @@ public class DmNavigationSessionTest {
         DmTileDiskSource offline=new DmTileDiskSource(root,raw,hash,8_000_000,null);
         DmNavigationSession session=new DmNavigationSession(new DmTileEngine(raw,hash,offline),offline,new File(root,"journey.json"),hash);
         DmTileEngine.Route path=session.restore(a);long time=1000;double length=GeoMath.length(path.points);
-        for(int i=0;i<1000;i++){
-            GeoMath.Point position=GeoMath.pointAtDistance(path.points,length*i/1000.0);
+        int count="true".equals(InstrumentationRegistry.getArguments().getString("soak"))?3600:1000;
+        long began=android.os.SystemClock.elapsedRealtime();
+        for(int i=0;i<count;i++){
+            GeoMath.Point position=GeoMath.pointAtDistance(path.points,length*i/(double)count);
             DmNavigationSession.Update u=session.fix(position,5,time+=1000,false);
             assertTrue(u.status==DmNavigationSession.Status.ON_ROUTE||u.status==DmNavigationSession.Status.ARRIVAL_PREVIEW||u.status==DmNavigationSession.Status.ROAD_END_ACCESS_UNVERIFIED);
         }
@@ -48,7 +50,7 @@ public class DmNavigationSessionTest {
         assertEquals(DmNavigationSession.Status.COVERAGE_MISSING,session.fix(far,5,time+=15000,false).status);
         DmNavigationSession reopened=new DmNavigationSession(new DmTileEngine(raw,hash,offline),offline,new File(root,"journey.json"),hash);
         assertTrue(reopened.restore(dev).metres>0);
-        android.util.Log.i("OfflineRoutingPilot","Integrated session: 1000 GPS fixes, offline diversion, coverage failure, restart passed");
+        android.util.Log.i("OfflineRoutingPilot","Integrated session: "+count+" simulated GPS fixes, offline diversion, coverage failure, restart passed; processing_ms="+(android.os.SystemClock.elapsedRealtime()-began));
         reopened.clear();
     }
 }

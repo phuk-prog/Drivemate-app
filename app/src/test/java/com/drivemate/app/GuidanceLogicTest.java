@@ -19,6 +19,16 @@ public class GuidanceLogicTest {
         assertEquals("↻", GuidanceLogic.symbol("ROUNDABOUT_RIGHT", "ROUNDABOUT", 45));
     }
 
+    @Test public void explicitForkAndSlightDirectionWinsOverAngle() {
+        assertEquals("↖", GuidanceLogic.symbol("KEEP_LEFT","BIFURCATION",45));
+        assertEquals("↗", GuidanceLogic.symbol("KEEP_RIGHT","BIFURCATION",-45));
+        assertEquals("↑", GuidanceLogic.symbol("STRAIGHT","BIFURCATION",45));
+        assertEquals("↗", GuidanceLogic.symbol("RIGHT","Y_JUNCTION",0));
+        assertEquals("↖", GuidanceLogic.symbol("LEFT","FORK",Double.NaN));
+        assertEquals("↖", GuidanceLogic.symbol("SLIGHT_LEFT","REGULAR",-15));
+        assertEquals("↗", GuidanceLogic.symbol("SLIGHT_RIGHT","REGULAR",15));
+    }
+
     @Test public void avoidsBacktrackingThroughRoundabout() {
         double[] offsets = {0, 70, 90, 130, 250};
         assertEquals(4, GuidanceLogic.nextInstructionIndex(offsets, 150, 2));

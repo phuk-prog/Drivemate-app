@@ -107,7 +107,7 @@ public final class DriveMateProvider {
             if(index<previous||index<0||index>=points.size())throw new IOException("Invalid maneuver index");previous=index;
             String msg=move.getString("instruction");if(msg.trim().isEmpty())throw new IOException("Empty maneuver");
             if(type>=1&&type<=3)continue;
-            String code=maneuver(type),junction=type>=17&&type<=24?"BIFURCATION":type==26||type==27?"ROUNDABOUT":"";
+            String code=maneuver(type),junction=junctionType(type);
             JSONArray names=move.optJSONArray("street_names");String street=names==null?"":names.optString(0,"");
             steps.add(new TomTomApi.Instruction(offset[index],msg,code,junction,move.optInt("roundabout_exit_count",0),code.contains("LEFT")?-45:code.contains("RIGHT")?45:0,street,sign(move)));
             RouteIntelligence.LaneSection s=laneSection(move.optJSONArray("lanes"),offset[index]);if(s!=null)lanes.add(s);
@@ -119,9 +119,11 @@ public final class DriveMateProvider {
     static String maneuver(int type){
         switch(type){
             case 4:case 5:case 6:return "DESTINATION";case 9:return "SLIGHT_RIGHT";case 10:return "RIGHT";case 11:return "SHARP_RIGHT";
-            case 12:case 13:return "UTURN";case 14:return "SHARP_LEFT";case 15:return "LEFT";case 16:return "SLIGHT_LEFT";
-            case 18:case 20:case 23:case 37:return "RIGHT";case 19:case 21:case 24:case 38:return "LEFT";case 26:case 27:return "ROUNDABOUT";case 7:case 8:case 17:case 22:case 25:case 28:case 29:return "STRAIGHT";default:throw new IllegalArgumentException("Unsupported Valhalla maneuver "+type);}
+            case 12:return "RIGHT_U_TURN";case 13:return "LEFT_U_TURN";case 14:return "SHARP_LEFT";case 15:return "LEFT";case 16:return "SLIGHT_LEFT";
+            case 17:return "RAMP_STRAIGHT";case 18:return "RAMP_RIGHT";case 19:return "RAMP_LEFT";case 20:return "MOTORWAY_EXIT_RIGHT";case 21:return "MOTORWAY_EXIT_LEFT";case 22:return "STRAIGHT";case 23:return "KEEP_RIGHT";case 24:return "KEEP_LEFT";case 25:return "MERGE";case 37:return "MERGE_RIGHT";case 38:return "MERGE_LEFT";case 26:return "ROUNDABOUT";case 27:return "ROUNDABOUT_EXIT";case 7:case 8:case 28:case 29:return "STRAIGHT";default:throw new IllegalArgumentException("Unsupported Valhalla maneuver "+type);}
     }
+    /** Valhalla documented manoeuvre enum: ramp/exit are not bifurcations. */
+    static String junctionType(int type){return type>=22&&type<=24?"BIFURCATION":type==26||type==27?"ROUNDABOUT":"";}
     static String sign(JSONObject move){
         JSONObject sign=move.optJSONObject("sign");if(sign==null)return "";
         List<String> labels=new ArrayList<>();

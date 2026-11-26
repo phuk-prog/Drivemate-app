@@ -20,8 +20,14 @@ public class MapReviewTest {
     }
     @Test public void valhallaForkDirectionCodes(){
         assertEquals("STRAIGHT",DriveMateProvider.maneuver(22));
-        assertEquals("RIGHT",DriveMateProvider.maneuver(23));
-        assertEquals("LEFT",DriveMateProvider.maneuver(24));
+        assertEquals("KEEP_RIGHT",DriveMateProvider.maneuver(23));
+        assertEquals("KEEP_LEFT",DriveMateProvider.maneuver(24));
+        String[] glyphs={"↑","↗","↖"};
+        for(int type=22;type<=24;type++){
+            String code=DriveMateProvider.maneuver(type),junction=DriveMateProvider.junctionType(type);
+            assertEquals(JunctionIntelligence.Kind.FORK,JunctionIntelligence.classify(code,junction));
+            assertEquals(glyphs[type-22],GuidanceLogic.symbol(code,junction,0));
+        }
     }
     @Test public void unknownLaneMaskIsNotInvented()throws Exception{
         assertNull(DriveMateProvider.laneSection(new org.json.JSONArray("[{\"directions\":8,\"active\":64}]"),200));

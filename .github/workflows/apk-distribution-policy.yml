@@ -9,28 +9,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - run: python3 tools/check-apk-distribution.py
-      - name: Ensure AES ZIP utility is available
-        run: command -v 7z || (sudo apt-get update -qq && sudo apt-get install -y p7zip-full)
-      - name: Verify password encryption on harmless test fixture
-        run: |
-          set -euo pipefail
-          tmp="$(mktemp -d)"
-          trap 'rm -rf "$tmp"' EXIT
-          printf 'non-installable test fixture\n' > "$tmp/test.apk"
-          export DRIVEMATE_ZIP_PASSWORD='fixture-123'
-          bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/test.zip"
-          if 7z t -pwrong-password "$tmp/test.zip" >/dev/null 2>&1; then
-            echo 'Archive unexpectedly accepted wrong password' >&2; exit 1
-          fi
-          7z x "-p$DRIVEMATE_ZIP_PASSWORD" "-o$tmp/extracted" "$tmp/test.zip" >/dev/null
-          cmp "$tmp/test.apk" "$tmp/extracted/test.apk"
-          if DRIVEMATE_ZIP_PASSWORD='' bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/unprotected.zip"; then
-            echo 'Missing password unexpectedly accepted' >&2; exit 1
-          fi
-          test ! -e "$tmp/unprotected.zip"
-          if DRIVEMATE_ZIP_PASSWORD='0123456789' bash tools/encrypt-apk.sh "$tmp/test.apk" "$tmp/too-short.zip"; then
-            echo 'Ten-character password unexpectedly accepted' >&2; exit 1
-          fi
-          test ! -e "$tmp/too-short.zip"
+      - run: python3 tools/check-action-pins.py
+      - name: Test signed APK expiry policy
+        run: python3 -m unittest discover -s tools -p test_apk_artifact_policy.py -v
+      - name: Validate cleanup script syntax
+        run: bash -n tools/remove-public-apks.sh

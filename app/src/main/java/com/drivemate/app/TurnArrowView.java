@@ -10,7 +10,7 @@ import android.view.View;
 /** Compact, high-contrast manoeuvre icon. Intended display size is 52dp. */
 public final class TurnArrowView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private enum Arrow { STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, UTURN, ROUNDABOUT, ARRIVE }
+    private enum Arrow { STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, UTURN, UTURN_RIGHT, ROUNDABOUT, ARRIVE }
     private Arrow arrow = Arrow.STRAIGHT;
     private int roundaboutExit;
     private float[] routeTrace;
@@ -36,6 +36,7 @@ public final class TurnArrowView extends View {
     public void update(String symbol, int exit) {
         if ("↻".equals(symbol)) arrow = Arrow.ROUNDABOUT;
         else if ("⤺".equals(symbol)) arrow = Arrow.UTURN;
+        else if ("⤻".equals(symbol)) arrow = Arrow.UTURN_RIGHT;
         else if ("⚑".equals(symbol)) arrow = Arrow.ARRIVE;
         else if ("↖".equals(symbol)) arrow = Arrow.SLIGHT_LEFT;
         else if ("↗".equals(symbol)) arrow = Arrow.SLIGHT_RIGHT;
@@ -84,6 +85,10 @@ public final class TurnArrowView extends View {
                 path.moveTo(25, 53); path.lineTo(25, 40); path.quadTo(25, 36, 29, 32);
                 path.lineTo(49, 16);
                 head.moveTo(35, 17); head.lineTo(50, 15); head.lineTo(48, 29);
+                break;
+            case UTURN_RIGHT:
+                path.moveTo(19,54); path.lineTo(19,29); path.cubicTo(19,5,47,5,47,29); path.lineTo(47,42);
+                head.moveTo(38,34); head.lineTo(47,43); head.lineTo(56,34);
                 break;
             case UTURN:
                 path.moveTo(45, 54); path.lineTo(45, 29); path.cubicTo(45, 5, 17, 5, 17, 29);
