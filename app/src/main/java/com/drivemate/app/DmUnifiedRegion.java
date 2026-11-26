@@ -56,6 +56,11 @@ final class DmUnifiedRegion {
         }
         throw new IOException("No verified regional context fits display bounds",last);
     }
+    /** Raw source geometry for the original DriveMate rendering library. */
+    NativeMapScene nativeScene(DmTileEngine.Route route)throws Exception{
+        DisplayContext c=context(route.points,route.ways);
+        return NativeMapScene.fromRegional(c.features,route,c.bounds);
+    }
     DmUnifiedGeometry geometry(DmTileEngine.Route route)throws Exception{
         DisplayContext c=context(route.points,route.ways);
         return DmUnifiedGeometry.regional(c.features,route,c.bounds);

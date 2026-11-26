@@ -32,6 +32,7 @@
             </intent-filter>
         </activity>
         <activity android:name="com.drivemate.app.DmUnifiedPreviewActivity" android:exported="false"/>
+        <activity android:name="com.drivemate.app.NativeMapPreviewActivity" android:exported="false"/>
         <service
             android:name="com.drivemate.app.NavigationService"
             android:exported="false"

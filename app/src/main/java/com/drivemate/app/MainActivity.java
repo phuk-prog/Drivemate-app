@@ -1503,7 +1503,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
                 "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
                 "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
-                "Full-detail DriveMate · Stockport preview",
+                "DriveMate original renderer · Stockport preview",
                 "Save where I parked",
                 places != null && places.parkedCar() != null
                         ? "Find my parked car" : "Find my parked car · none saved",
@@ -1629,7 +1629,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 17: selectRerouteMode(); break;
                         case 18: selectSpeedTolerance(); break;
                         case 19:
-                            if(!active) startActivity(new Intent(this,DmUnifiedPreviewActivity.class).putExtra("stockport",true));
+                            if(!active) startActivity(new Intent(this,NativeMapPreviewActivity.class));
                             else Toast.makeText(this,"Stop navigation before opening map preview",Toast.LENGTH_SHORT).show();
                             break;
                         case 20: promptSaveParking(); break;
