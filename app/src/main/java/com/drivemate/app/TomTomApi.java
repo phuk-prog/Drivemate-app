@@ -125,6 +125,33 @@ public final class TomTomApi {
         }
     }
 
+    /** TomTom v1 route-indexed TEC causes; TISA ITSTF20001 v1.5 tables 3-4 and 3-5.
+     * No category inferred from delays or map proximity. */
+    static String trafficCategory(JSONObject section){
+        String simple=section.optString("simpleCategory","");
+        if("ROAD_CLOSURE".equals(simple))return simple;
+        JSONObject tec=section.optJSONObject("tec");
+        JSONArray causes=tec==null?null:tec.optJSONArray("causes");
+        java.util.Set<String> explicit=new java.util.LinkedHashSet<>();
+        if(causes!=null)for(int i=0;i<Math.min(causes.length(),32);i++){
+            JSONObject c=causes.optJSONObject(i);if(c==null)continue;
+            switch(c.optInt("mainCauseCode",-1)){
+                case 2:explicit.add("ACCIDENT");break;
+                case 10:explicit.add("OBSTRUCTION");break;
+                case 11:explicit.add("ANIMALS");break;
+                case 12:explicit.add("PEOPLE");break;
+                case 13:explicit.add("VEHICLE_HAZARD");break;
+                default:break;
+            }
+        }
+        if(explicit.size()>1)return "MULTIPLE_HAZARDS";
+        if(explicit.size()==1)return explicit.iterator().next();
+        return simple;
+    }
+    private static boolean isSafetyTrafficCategory(String category){
+        return java.util.Arrays.asList("ACCIDENT","OBSTRUCTION","ANIMALS","PEOPLE","VEHICLE_HAZARD","MULTIPLE_HAZARDS").contains(category);
+    }
+
     public static List<Destination> search(String key, String query, GeoMath.Point near)
             throws IOException, JSONException {
         String url = "https://api.tomtom.com/search/2/search/" + encode(query) + ".json"
@@ -355,12 +382,12 @@ public final class TomTomApi {
                             speedSections.add(new RouteIntelligence.SpeedSection(from, to, limit));
                         break;
                     case "TRAFFIC":
-                        String category = section.optString("simpleCategory", "");
+                        String category = trafficCategory(section);
                         int delay = section.optInt("delayInSeconds", 0);
                         // Ignore empty/no-impact traffic sections. The route
                         // summary retains overall traffic information.
                         if (delay > 0 || "ROAD_CLOSURE".equals(category)
-                                || "ROAD_WORK".equals(category))
+                                || "ROAD_WORK".equals(category) || isSafetyTrafficCategory(category))
                             trafficSections.add(new RouteIntelligence.TrafficSection(
                                     from, to, delay, category));
                         break;
@@ -374,6 +401,17 @@ public final class TomTomApi {
                 laneSections, speedSections, trafficSections);
     }
 
+    /** Current area incidents for display on the provider-matched map only. */
+    static List<LiveTrafficIncidents.Event> liveIncidents(String key,GeoMath.Point centre)throws IOException,JSONException{
+        if(key==null||key.isEmpty()||centre==null||!Double.isFinite(centre.lat)||!Double.isFinite(centre.lon)
+                ||centre.lat<49||centre.lat>61||centre.lon< -9||centre.lon>3)throw new IOException("No eligible UK incident area");
+        String bbox=coordinate(centre.lon-.045)+","+coordinate(centre.lat-.028)+","+coordinate(centre.lon+.045)+","+coordinate(centre.lat+.028);
+        String fields="{incidents{type,geometry{type,coordinates},properties{id,iconCategory,timeValidity,endTime}}}";
+        String url="https://api.tomtom.com/traffic/services/5/incidentDetails?key="+encode(key)
+                +"&bbox="+bbox+"&fields="+encode(fields)+"&language=en-GB&timeValidityFilter=present";
+        return LiveTrafficIncidents.parse(requestJson(url),System.currentTimeMillis());
+    }
+
     private static String coordinate(double value) {
         return String.format(Locale.US, "%.6f", value);
     }
@@ -385,6 +423,7 @@ public final class TomTomApi {
 
     private static JSONObject requestJson(String url) throws IOException, JSONException {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setInstanceFollowRedirects(false);
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(15000);
         connection.setRequestProperty("Accept", "application/json");

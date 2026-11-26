@@ -1,6 +1,6 @@
 # DriveMate — UK Navigation (Android)
 
-Integration candidate 2.1.0 (200015), based on signed 2.0.2. Start new work from consolidated main. Install only certificate-verified signed APKs from the [main signing workflow](https://github.com/phuk-prog/Drivemate-app/actions/workflows/signed-release.yml). The download has a one-hour cleanup target; no ZIP password or permanent release asset. Experimental own-map/offline routing is preview-only. Physical road validation is outstanding.
+Driver-awareness review candidate 2.1.1 (200016), based on integration version 2.1.0. Not signed or road-approved. Start new work from consolidated main. Install only certificate-verified signed APKs from the [main signing workflow](https://github.com/phuk-prog/Drivemate-app/actions/workflows/signed-release.yml). The download has a one-hour cleanup target; no ZIP password or permanent release asset. Experimental own-map/offline routing is preview-only. Physical road validation is outstanding.
 
 See [repository workflow](docs/REPOSITORY-WORKFLOW.md) and [map repository](https://github.com/phuk-prog/Drivemate-map).
 

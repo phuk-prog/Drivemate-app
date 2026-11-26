@@ -58,6 +58,18 @@ public final class VectorDriveMap {
     private boolean providerStyle,providerStylePending,providerStyleFailed;
     private GeoJsonSource signalSource;
     private MappedSignals signals;
+    private GeoJsonSource roadsideSource, speedChangeSource, routeEventSource;
+    private GeoJsonSource incidentLineSource,incidentPointSource,averageZoneSource;
+    private List<LiveTrafficIncidents.Event> areaIncidents=java.util.Collections.emptyList();
+    private long areaIncidentFetchedAt;
+    private int areaIncidentCount=-1;
+    private MappedRoadside roadside;
+    private boolean roadsideAttempted;
+    private double lastRoadsideLat=Double.NaN,lastRoadsideLon=Double.NaN,lastRoadsideZoom=Double.NaN;
+    private long routeEventsFetchedAt;
+    private boolean routeEventsMetric, routeEventsExpired;
+    private List<RouteIntelligence.SpeedSection> pendingSpeedSections=java.util.Collections.emptyList();
+    private List<RouteIntelligence.TrafficSection> pendingTrafficSections=java.util.Collections.emptyList();
     private boolean signalsAttempted;
     private double lastSignalLat=Double.NaN,lastSignalLon=Double.NaN,lastSignalZoom=Double.NaN;
     private String[] providerRoadLayers=new String[0];
@@ -107,7 +119,7 @@ public final class VectorDriveMap {
     private long lastFramingCheck;
     private double lastRenderedVehicleAngle = Double.NaN;
     private Runnable onUserGesture;
-    private double pendingZoom = 14.5, pendingBearing;
+    private double pendingZoom = 14.5, pendingBearing, pendingPitch, pendingTravelBearing;
     private static final String LOG_TAG = "DriveMateVector";
     private static final long MONITOR_INTERVAL_MS = 1800L;
     public interface RoadStatusListener {
@@ -119,7 +131,7 @@ public final class VectorDriveMap {
     private final Runnable roadMonitor = new Runnable() {
         @Override public void run() {
             if (disposed) return;
-            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();}
+            if (view.getVisibility() == View.VISIBLE) {inspectRoadDisplay();inspectRouteAlignment();updateSignals();updateRoadside();expireRouteEvents();refreshLiveIncidents(false);}
             view.postDelayed(this, MONITOR_INTERVAL_MS);
         }
     };
@@ -143,7 +155,7 @@ public final class VectorDriveMap {
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE
                         && onUserGesture != null) onUserGesture.run();
             });
-            map.addOnCameraIdleListener(()->updateSignals());
+            map.addOnCameraIdleListener(()->{updateSignals();updateRoadside();});
             loadStyle();
         });
         // A successfully downloaded tile can be empty or fail to render.
@@ -177,7 +189,9 @@ public final class VectorDriveMap {
         org.maplibre.android.style.layers.Layer flat = map.getStyle().getLayer("uk-buildings");
         if (blocks != null) blocks.setProperties(PropertyFactory.visibility(
                 enabled ? "visible" : "none"));
-        if (flat != null) flat.setMaxZoom(enabled ? 14.5f : 24f);
+        // Preserve genuine footprints as a fallback at every zoom; extrusion
+        // height starts at zero and can otherwise leave buildings invisible.
+        if (flat != null) flat.setMaxZoom(24f);
     }
 
     /**
@@ -320,10 +334,22 @@ public final class VectorDriveMap {
         }catch(RuntimeException ignored){lastAlignment="unmeasured";}
     }
     public String routeAlignmentDiagnostic(){return lastAlignment;}
-    String geometryDescription(){return providerStyle?"TomTom vector roads and routing (same provider; geometry not independently verified)":providerStyleFailed?"Independent vector fallback · road alignment not verified":RouteMapPolicy.description(routeProvider,hasSharedRouteMap());}
+    String geometryDescription(){return sharedRouteMap!=null&&sharedRouteMap.checkedEdges==0?"DriveMate source-matched detailed browse map":providerStyle?"TomTom vector roads and routing (same provider; geometry not independently verified)":providerStyleFailed?"Independent vector fallback · road alignment not verified":RouteMapPolicy.description(routeProvider,hasSharedRouteMap());}
     private boolean requestProviderStyle(){return sharedRouteMap==null&&!providerStyleFailed&&RouteMapPolicy.useTomTomVector(routeProvider,!tomtomKey.isEmpty());}
     private String providerStyleUrl(){return "https://api.tomtom.com/style/1/style/20.3.4-6?key="+android.net.Uri.encode(tomtomKey)+"&map="+(nightMode?"basic_night":"basic_main")+"&poi=poi_main"+(trafficEnabled?"&traffic_flow="+(nightMode?"flow_relative0-dark":"flow_relative0"):"");}
-    boolean hasSharedRouteMap(){return sharedRouteMap!=null&&ready();}
+    boolean hasSharedRouteMap(){return sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0&&ready();}
+    public void setBrowseGeometry(DmUnifiedGeometry context){
+        if(pendingRoute!=null&&!pendingRoute.isEmpty())return;
+        if(context!=null&&context.checkedEdges!=0)return;
+        if(sharedRouteMap==context)return;
+        if(sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0)return;
+        // Reuse the active detailed style on context refresh, instead of flashing the map.
+        if(sharedRouteMap!=null&&context!=null&&ready()&&map.getStyle()!=null){
+            Style style=map.getStyle();GeoJsonSource roads=style.getSourceAs("unified-roads"),areas=style.getSourceAs("unified-areas"),points=style.getSourceAs("unified-points");
+            if(roads!=null&&areas!=null){sharedRouteMap=context;roads.setGeoJson(context.roads);areas.setGeoJson(context.areas);if(points!=null)points.setGeoJson(context.mappedPoints);return;}
+        }
+        sharedRouteMap=context;loadStyle();
+    }
     /** Instrumentation checks the same road and route layers used by live guidance. */
     boolean sharedRouteRendered(double zoom){
         if(!hasSharedRouteMap()||view.getWidth()<100||view.getHeight()<100||Math.abs(currentZoom()-zoom)>.2)return false;
@@ -344,7 +370,7 @@ public final class VectorDriveMap {
     public void setTomTomKey(String key) {
         String newKey = key == null ? "" : key;
         if (newKey.equals(tomtomKey)) return;
-        tomtomKey = newKey;providerStyleFailed=false;
+        tomtomKey = newKey;providerStyleFailed=false;setLiveIncidents(null,0);
         if (map != null) loadStyle();
     }
 
@@ -402,7 +428,7 @@ public final class VectorDriveMap {
                 }
                 installOverlays(style);
                 styleReady = true;
-                updateSignals();
+                updateSignals();updateRoadside();publishRouteEvents();refreshLiveIncidents(true);
                 setHighDetailEnabled(highDetailEnabled);
                 setBuildings3D(buildings3d);
                 setNavigationDetail(navigationDetail);
@@ -413,8 +439,8 @@ public final class VectorDriveMap {
                 setParkedCar(pendingParked);
                 if (pendingRoute != null) {renderRoute();renderRemaining();}
                 publishRoadName();
-                if (pendingCamera != null) setCamera(pendingCamera,
-                        pendingZoom, pendingBearing);
+                if (pendingCamera != null) setBrowseCamera(pendingCamera,
+                         pendingZoom, pendingBearing,pendingPitch,pendingTravelBearing);
                 if(!navigationDetail&&pendingPreviewPadding!=null){int[] pad=pendingPreviewPadding;pendingPreviewPadding=null;previewRoute(pendingRoute,pad[0],pad[1],pad[2]);}
             });
         } catch (Exception error) {
@@ -477,6 +503,9 @@ public final class VectorDriveMap {
                 PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
         style.addLayer(gleam);
         installSignalOverlay(style);
+        installRoadsideOverlay(style);
+        installRouteEvents(style);
+        installLiveIncidents(style);
         CircleLayer dest = new CircleLayer("dm-dest-dot", "dm-destination");
         dest.setProperties(PropertyFactory.circleColor("#E14343"),
                 PropertyFactory.circleRadius(8f),
@@ -504,7 +533,7 @@ public final class VectorDriveMap {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
                 PropertyFactory.iconRotationAlignment("viewport"),
-                PropertyFactory.iconRotate(0f),PropertyFactory.iconSize(1.0f));
+                PropertyFactory.iconRotate(0f),PropertyFactory.iconSize(1.28f));
         style.addLayer(vehicle);
         SymbolLayer currentRoadLayer=new SymbolLayer("dm-current-road-label","dm-current-road");
         currentRoadLayer.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("name")),
@@ -538,6 +567,167 @@ public final class VectorDriveMap {
         lastSignalLat=lat;lastSignalLon=lon;lastSignalZoom=z;
         signalSource.setGeoJson(signals.features(lat-span,lon-span,lat+span,lon+span));
     }
+    private void installRoadsideOverlay(Style style) {
+        roadsideSource=new GeoJsonSource("dm-static-roadside",FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(roadsideSource);
+        String[] names={"camera","crossing","calming"};
+        String[] glyphs={"CAM","X","!"};
+        for(int i=0;i<names.length;i++){
+            Bitmap b=Bitmap.createBitmap(48,40,Bitmap.Config.ARGB_8888);
+            Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setColor(Color.WHITE);c.drawRoundRect(new RectF(1,1,47,39),8,8,p);
+            p.setColor(i==0?0xffa76d0f:0xffa43a31);c.drawRoundRect(new RectF(3,3,45,37),6,6,p);
+            p.setColor(Color.WHITE);p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            p.setTextAlign(Paint.Align.CENTER);p.setTextSize(i==0?15:24);
+            c.drawText(glyphs[i],24,20-(p.ascent()+p.descent())/2,p);
+            style.addImage("dm-mapped-"+names[i],b);
+        }
+        SymbolLayer l=new SymbolLayer("dm-roadside-locations","dm-static-roadside");
+        l.setMinZoom(13f);
+        l.setProperties(PropertyFactory.iconImage(org.maplibre.android.style.expressions.Expression.get("icon")),
+                PropertyFactory.iconSize(.8f),PropertyFactory.iconAllowOverlap(false),PropertyFactory.iconIgnorePlacement(false));
+        style.addLayer(l);
+        lastRoadsideLat=lastRoadsideLon=lastRoadsideZoom=Double.NaN;
+    }
+
+    private void updateRoadside(){
+        if(!ready()||roadsideSource==null||map.getCameraPosition().target==null)return;
+        double z=map.getCameraPosition().zoom;
+        if(z<13){if(Double.isFinite(lastRoadsideZoom)){roadsideSource.setGeoJson(FeatureCollection.fromFeatures(new Feature[0]));lastRoadsideZoom=Double.NaN;}return;}
+        if(!roadsideAttempted){roadsideAttempted=true;try{roadside=MappedRoadside.load(activity);}catch(Exception e){Log.w(LOG_TAG,"Mapped roadside data unavailable");}}
+        if(roadside==null)return;
+        LatLng target=map.getCameraPosition().target;
+        double lat=target.getLatitude(),lon=target.getLongitude();
+        double span=Math.max(.002,Math.min(.075,.045*Math.pow(2,15-z)));
+        if(Double.isFinite(lastRoadsideZoom)&&Math.abs(z-lastRoadsideZoom)<.3&&Math.abs(lat-lastRoadsideLat)<span*.15&&Math.abs(lon-lastRoadsideLon)<span*.15)return;
+        lastRoadsideLat=lat;lastRoadsideLon=lon;lastRoadsideZoom=z;
+        roadsideSource.setGeoJson(roadside.features(lat-span,lon-span,lat+span,lon+span,z>=16));
+    }
+
+    public void setRouteEvents(List<RouteIntelligence.SpeedSection> speed,List<RouteIntelligence.TrafficSection> traffic,boolean metric,long fetchedAt){
+        routeEventsMetric=metric;routeEventsFetchedAt=fetchedAt;routeEventsExpired=false;
+        pendingSpeedSections=speed==null?java.util.Collections.emptyList():new ArrayList<>(speed);
+        pendingTrafficSections=traffic==null?java.util.Collections.emptyList():new ArrayList<>(traffic);
+        publishRouteEvents();
+    }
+
+    private void installRouteEvents(Style style){
+        speedChangeSource=new GeoJsonSource("dm-speed-changes",FeatureCollection.fromFeatures(new Feature[0]));
+        routeEventSource=new GeoJsonSource("dm-route-events",FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(speedChangeSource);style.addSource(routeEventSource);
+        averageZoneSource=exactLineSource("dm-average-speed-zones");style.addSource(averageZoneSource);
+        LineLayer average=new LineLayer("dm-average-speed-zone-outline","dm-average-speed-zones");
+        average.setMinZoom(12f);average.setProperties(PropertyFactory.lineColor("#a85c15"),PropertyFactory.lineWidth(15f),PropertyFactory.lineOpacity(.8f),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+        style.addLayerBelow(average,"dm-route-halo");
+        CircleLayer c=new CircleLayer("dm-speed-change-roundels","dm-speed-changes");
+        c.setMinZoom(13f);c.setProperties(PropertyFactory.circleColor("#ffffff"),
+                PropertyFactory.circleRadius(13f),PropertyFactory.circleStrokeWidth(3f),PropertyFactory.circleStrokeColor("#d9272e"));
+        style.addLayer(c);
+        SymbolLayer text=new SymbolLayer("dm-speed-change-values","dm-speed-changes");
+        text.setMinZoom(13f);text.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("value")),
+                PropertyFactory.textSize(12f),PropertyFactory.textColor("#111111"),PropertyFactory.textAllowOverlap(true));
+        style.addLayer(text);
+        CircleLayer hazard=new CircleLayer("dm-route-event-points","dm-route-events");
+        hazard.setMinZoom(12f);hazard.setProperties(PropertyFactory.circleColor("#c45616"),
+                PropertyFactory.circleRadius(6f),PropertyFactory.circleStrokeWidth(2f),PropertyFactory.circleStrokeColor("#ffffff"));
+        style.addLayer(hazard);
+        SymbolLayer notice=new SymbolLayer("dm-route-event-labels","dm-route-events");
+        notice.setMinZoom(13f);notice.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("label")),
+                PropertyFactory.textSize(11f),PropertyFactory.textColor("#ffffff"),PropertyFactory.textHaloColor("#78350f"),
+                PropertyFactory.textHaloWidth(2f),PropertyFactory.textOffset(new Float[]{0f,-1.4f}));
+        style.addLayer(notice);
+    }
+
+    boolean supportsLiveIncidents(){return ready()&&providerStyle&&trafficEnabled;}
+    void setLiveIncidents(List<LiveTrafficIncidents.Event> events,long fetchedAt){
+        areaIncidents=events==null?java.util.Collections.emptyList():new ArrayList<>(events);
+        areaIncidentFetchedAt=fetchedAt;refreshLiveIncidents(true);
+    }
+    private void installLiveIncidents(Style style){
+        incidentLineSource=exactLineSource("dm-live-incident-lines");
+        incidentPointSource=new GeoJsonSource("dm-live-incident-points",FeatureCollection.fromFeatures(new Feature[0]));
+        style.addSource(incidentLineSource);style.addSource(incidentPointSource);
+        LineLayer lines=new LineLayer("dm-live-incident-extent","dm-live-incident-lines");
+        lines.setMinZoom(12f);lines.setProperties(PropertyFactory.lineColor("#bd341e"),PropertyFactory.lineWidth(5f),
+            PropertyFactory.lineOpacity(.85f),PropertyFactory.lineCap("round"),PropertyFactory.lineJoin("round"));
+        style.addLayerBelow(lines,"dm-route-travelled");
+        CircleLayer points=new CircleLayer("dm-live-incident-dot","dm-live-incident-points");
+        points.setMinZoom(12f);points.setProperties(PropertyFactory.circleColor("#b83122"),
+            PropertyFactory.circleRadius(7f),PropertyFactory.circleStrokeWidth(2f),PropertyFactory.circleStrokeColor("#ffffff"));
+        style.addLayer(points);
+        SymbolLayer labels=new SymbolLayer("dm-live-incident-label","dm-live-incident-points");
+        labels.setMinZoom(14f);labels.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("label")),
+            PropertyFactory.textSize(12f),PropertyFactory.textColor("#ffffff"),PropertyFactory.textHaloColor("#70261c"),
+            PropertyFactory.textHaloWidth(2f),PropertyFactory.textOffset(new Float[]{0f,-1.5f}));
+        style.addLayer(labels);
+    }
+    private void refreshLiveIncidents(boolean force){
+        if(!ready()||incidentLineSource==null||incidentPointSource==null)return;
+        long now=System.currentTimeMillis(),age=now-areaIncidentFetchedAt;
+        boolean valid=supportsLiveIncidents()&&age>=0&&age<=LiveTrafficIncidents.MAX_AGE_MS;
+        int count=0;
+        if(valid)for(LiveTrafficIncidents.Event event:areaIncidents)if(event.present(now))count++;
+        if(!force&&count==areaIncidentCount)return;
+        areaIncidentCount=count;
+        ArrayList<Feature> lines=new ArrayList<>(),points=new ArrayList<>();
+        if(valid)for(LiveTrafficIncidents.Event event:areaIncidents){
+            if(!event.present(now)||event.points.isEmpty())continue;
+            GeoMath.Point first=event.points.get(0);
+            Feature marker=Feature.fromGeometry(Point.fromLngLat(first.lon,first.lat));
+            marker.addStringProperty("label","TomTom: "+event.label);points.add(marker);
+            if(event.points.size()>1){
+                ArrayList<Point> geometry=new ArrayList<>();for(GeoMath.Point p:event.points)geometry.add(Point.fromLngLat(p.lon,p.lat));
+                lines.add(Feature.fromGeometry(LineString.fromLngLats(geometry)));
+            }
+        }
+        incidentLineSource.setGeoJson(FeatureCollection.fromFeatures(lines.toArray(new Feature[0])));
+        incidentPointSource.setGeoJson(FeatureCollection.fromFeatures(points.toArray(new Feature[0])));
+    }
+    private void expireRouteEvents(){
+        long age=System.currentTimeMillis()-routeEventsFetchedAt;
+        if(!routeEventsExpired && (age<0||age>480000)){routeEventsExpired=true;publishRouteEvents();}
+    }
+    private void publishRouteEvents(){
+        if(!ready()||speedChangeSource==null||routeEventSource==null)return;
+        ArrayList<Feature> speed=new ArrayList<>(),traffic=new ArrayList<>(),zones=new ArrayList<>();
+        long age=System.currentTimeMillis()-routeEventsFetchedAt;
+        if(!routeEventsExpired && age>=0 && age<=480000 && pendingRoute!=null&&pendingRoute.size()>1){
+            for(RouteIntelligence.SpeedSection section:pendingSpeedSections){
+                if(speed.size()>=500)break;
+                if(section==null||section.end<=0||section.end>routeLength||section.end-section.start<8)continue;
+                SpeedChangeAwareness.Change change=SpeedChangeAwareness.next(pendingSpeedSections,section,section.end-4,0);
+                if(change==null)continue;
+                GeoMath.Point p=exactGeometry.at(change.offset);
+                if(p!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(p.lon,p.lat));
+                    f.addStringProperty("value",String.valueOf(routeEventsMetric?change.kmh:Math.round(change.kmh/1.609344)));speed.add(f);}
+            }
+            // Traffic labels are only supplied route events, never synthetic hazards.
+            for(RouteIntelligence.TrafficSection section:pendingTrafficSections){
+                if(traffic.size()>=500)break;
+                if(section==null||!Double.isFinite(section.start)||section.start<0||section.start>routeLength||section.end<=section.start)continue;
+                GeoMath.Point p=exactGeometry.at(section.start);
+                if(p!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(p.lon,p.lat));f.addStringProperty("label",section.label());traffic.add(f);}
+            }
+        }
+        if(!routeEventsExpired&&age>=0&&age<=480000&&sharedRouteMap!=null&&sharedRouteMap.checkedEdges>0&&pendingRoute!=null){
+            for(RouteRoadsideAwareness.Event event:sharedRouteMap.routeRoadside){
+                if(traffic.size()>=500)break;
+                if(event.offset<0||event.offset>routeLength)continue;
+                GeoMath.Point point=exactGeometry.at(event.offset);
+                if(point!=null){Feature f=Feature.fromGeometry(Point.fromLngLat(point.lon,point.lat));f.addStringProperty("label",event.label);traffic.add(f);}
+            }
+            for(MappedEnforcement.Zone zone:sharedRouteMap.averageZones){
+                if(zones.size()>=200||zone.start<0||zone.end>routeLength||zone.end<=zone.start)continue;
+                List<GeoMath.Point> slice=GeoMath.slice(pendingRoute,zone.start,zone.end);
+                ArrayList<Point> vertices=new ArrayList<>();for(GeoMath.Point point:slice)vertices.add(Point.fromLngLat(point.lon,point.lat));
+                if(vertices.size()>1)zones.add(Feature.fromGeometry(LineString.fromLngLats(vertices)));
+            }
+        }
+        if(averageZoneSource!=null)averageZoneSource.setGeoJson(FeatureCollection.fromFeatures(zones.toArray(new Feature[0])));
+        speedChangeSource.setGeoJson(FeatureCollection.fromFeatures(speed.toArray(new Feature[0])));
+        routeEventSource.setGeoJson(FeatureCollection.fromFeatures(traffic.toArray(new Feature[0])));
+    }
+
     static void installDetailIcons(Style style){
         style.addImage("dm-shield-blue",shieldBitmap(0xff164d94));style.addImage("dm-shield-green",shieldBitmap(0xff285a48));style.addImage("dm-shield-white",shieldBitmap(0xfff4f8fa));
         String[][] icons={{"fuel","F"},{"ev","EV"},{"parking","P"},{"hospital","+"},{"food","R"},{"shop","S"},{"services","MS"},{"hotel","H"},{"garage","G"},{"airport","A"},{"ferry","FE"},{"station","T"},{"place","•"}};
@@ -580,6 +770,7 @@ public final class VectorDriveMap {
 
     public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path){setSharedRoute(shared,path,"");}
     public void setSharedRoute(DmUnifiedGeometry shared,List<GeoMath.Point> path,String provider){
+        pendingSpeedSections=java.util.Collections.emptyList();pendingTrafficSections=java.util.Collections.emptyList();routeEventsExpired=true;
         String next=provider==null||path==null?"":provider;
         boolean changedProvider=!next.equals(routeProvider);
         boolean change=sharedRouteMap!=shared||changedProvider;
@@ -596,7 +787,7 @@ public final class VectorDriveMap {
     public void setRoute(List<GeoMath.Point> path) {
         exactGeometry=new RouteRenderGeometry(path);pendingRoute=exactGeometry.full();routeLength=exactGeometry.length;
         lastAlignment="unmeasured";lastAlignmentCheck=0;
-        confirmedProgress=0;clearCurrentRoad();renderRoute();renderRemaining();
+        confirmedProgress=0;clearCurrentRoad();renderRoute();renderRemaining();publishRouteEvents();
     }
     private void geometry(GeoJsonSource source,List<GeoMath.Point> path){
         if(!ready()||source==null)return;
@@ -694,9 +885,13 @@ public final class VectorDriveMap {
     }
 
     public void setCamera(GeoMath.Point center, double zoom, double bearing) {
+        setBrowseCamera(center,zoom,bearing,0,bearing);
+    }
+
+    public void setBrowseCamera(GeoMath.Point center,double zoom,double bearing,double pitch,double vehicleBearing) {
         pendingCamera = center;
         pendingZoom = zoom;
-        pendingBearing = bearing;
+        pendingBearing = bearing;pendingPitch=pitch;pendingTravelBearing=vehicleBearing;
         ensureRegionalCoverage(center);
         if (!ready() || center == null) return;
         // The GPU map follows directly; GPS camera updates do not restart
@@ -707,7 +902,7 @@ public final class VectorDriveMap {
                                 .target(new LatLng(center.lat, center.lon))
                                 .zoom(zoom)
                                 .bearing((bearing % 360 + 360) % 360)
-                                .tilt(0)
+                                .tilt(Math.max(0,Math.min(55,pitch)))
                                 .build());
         // Native GPU linear interpolation is short enough to finish before
         // the next typical one-second GPS fix. Sudden position jumps, startup
@@ -720,7 +915,8 @@ public final class VectorDriveMap {
         lastRenderedCamera = center;
         lastRenderedZoom = zoom;
         lastRenderedBearing = bearing;
-        lastRenderedTilt = 0;
+        lastRenderedTilt = pitch;
+        setVehicleHeading(CameraHeadingPolicy.screenDegrees(vehicleBearing,bearing));
     }
 
     /**
@@ -771,7 +967,7 @@ public final class VectorDriveMap {
                 activity.getResources().getDisplayMetrics().density) - viewportZoomOut(frame);
         pendingCamera = frame.center;
         pendingZoom = mapZoom;
-        pendingBearing = frame.bearing;
+        pendingBearing = frame.bearing;pendingPitch=frame.tilt;pendingTravelBearing=frame.travelBearing;
         pendingGps = frame.vehicle;
         ensureRegionalCoverage(frame.center);
         if (!ready()) return;
@@ -844,6 +1040,7 @@ public final class VectorDriveMap {
 
     public void setTraffic(boolean visible) {
         boolean changed=trafficEnabled!=visible;trafficEnabled = visible;
+        if(!visible)setLiveIncidents(null,0);
         if(changed&&requestProviderStyle()){loadStyle();return;}
         if (!ready()) return;
         org.maplibre.android.style.layers.Layer layer =

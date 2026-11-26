@@ -9,6 +9,11 @@ public final class NavigationCameraTest {
     private final List<GeoMath.Point> north = Arrays.asList(
             new GeoMath.Point(53.0, -2.0),
             new GeoMath.Point(53.02, -2.0));
+    @Test public void departureWithZeroOffsetStillFacesApproachRoad(){
+        List<GeoMath.Point> east=Arrays.asList(new GeoMath.Point(53,-2),new GeoMath.Point(53,-1.98));
+        NavigationCamera.Frame frame=NavigationCamera.calculate(east,east.get(0),0,0,0,1300,220,140,true);
+        assertEquals(90,frame.roadBearingDegrees,1.0);
+    }
     @Test public void zoomsInAsNextJunctionGetsCloser() {
         GeoMath.Point vehicle = new GeoMath.Point(53.005, -2.0);
         NavigationCamera.Frame distant = NavigationCamera.calculate(

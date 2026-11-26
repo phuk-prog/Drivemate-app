@@ -58,6 +58,41 @@ public final class DriveMateProvider {
         }catch(Exception ignored){/* No explicit aligned limit: unknown. */}
         return route;
     }
+    static final class RoadContext {
+        final List<JSONArray> ways;final double[] bounds;final long fetchedAt;final DmUnifiedGeometry map;
+        RoadContext(List<JSONArray> ways,double[] bounds,DmUnifiedGeometry map){this.ways=ways;this.bounds=bounds;this.map=map;fetchedAt=System.currentTimeMillis();}
+        boolean freshAt(GeoMath.Point p){
+            long age=System.currentTimeMillis()-fetchedAt;
+            return age>=0&&age<=120000&&p!=null&&p.lon>bounds[0]+.0007&&p.lon<bounds[2]-.0007
+                &&p.lat>bounds[1]+.0005&&p.lat<bounds[3]-.0005;
+        }
+    }
+    /** Only the owner-configured HTTPS host, with matching national graph/data identity. */
+    static RoadContext roadContext(String endpoint,GeoMath.Point p)throws Exception{
+        if(!valid(endpoint)||!endpoint.endsWith("/route")||p==null)throw new IOException("No trusted road context host");
+        String root=endpoint.substring(0,endpoint.length()-6);
+        JSONObject graph=json(root+"/v1/graph-source",null),meta=json(root+"/v1/meta",null);
+        String source=graph.optString("source_sha256");
+        if(!source.matches("[a-f0-9]{64}")||!source.equals(meta.optString("source_sha256"))||!"uk".equals(meta.optString("scope")))throw new IOException("Road context source mismatch");
+        double[] bounds={p.lon-.004,p.lat-.003,p.lon+.004,p.lat+.003};
+        if(bounds[0]<-9||bounds[2]>3||bounds[1]<49||bounds[3]>61)throw new IOException("Outside UK map bounds");
+        String bbox=String.format(Locale.US,"%.8f,%.8f,%.8f,%.8f",bounds[0],bounds[1],bounds[2],bounds[3]);
+        JSONObject response=json(root+"/v2/roads?bbox="+bbox+"&source="+source,null);
+        if(!"drivemate-map-v2".equals(response.optString("format"))||response.optInt("coordinate_scale")!=10000000
+                ||!source.equals(response.optString("source_sha256")))throw new IOException("Road context identity mismatch");
+        JSONArray echoed=response.getJSONArray("bounds");if(echoed.length()!=4)throw new IOException("Missing bounds");
+        for(int i=0;i<4;i++)if(Math.abs(echoed.getDouble(i)-bounds[i])>1e-7)throw new IOException("Different bounds");
+        JSONArray raw=response.getJSONArray("features");if(raw.length()>6000)throw new IOException("Road context too large");
+        ArrayList<JSONArray> ways=new ArrayList<>();int vertices=0;Set<Long> ids=new HashSet<>();
+        for(int i=0;i<raw.length();i++){JSONArray f=raw.getJSONArray(i);
+            if(f.length()!=4||!ids.add(f.getLong(0))||f.getJSONArray(2).length()!=f.getJSONArray(3).length())throw new IOException("Invalid context geometry");
+            vertices+=f.getJSONArray(2).length();if(vertices>100000)throw new IOException("Too many vertices");ways.add(f);
+        }
+        if(!source.equals(json(root+"/v1/graph-source",null).optString("source_sha256")))throw new IOException("Road context source changed");
+        DmUnifiedGeometry geometry=DmUnifiedGeometry.browse(ways,bounds);
+        JSONArray mapped=response.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
+        return new RoadContext(Collections.unmodifiableList(ways),bounds,geometry);
+    }
     /** Optional V2 geometry from the configured trusted routing host; never alters route or instructions. */
     static DmUnifiedGeometry sharedMap(String endpoint,TomTomApi.Route route){
         if(!valid(endpoint)||!endpoint.endsWith("/route")||route.geometryWays.isEmpty()||!route.geometrySourceSha.matches("[a-f0-9]{64}"))return null;
@@ -73,6 +108,7 @@ public final class DriveMateProvider {
             for(int i=0;i<input.length();i++){JSONArray feature=input.getJSONArray(i);vertices+=feature.getJSONArray(2).length();if(vertices>100000)return null;features.add(feature);}
             DmUnifiedGeometry geometry=new DmUnifiedGeometry(features,route.points,route.geometryWays,b);
             JSONArray mapped=result.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
+            JSONArray enforcement=result.optJSONArray("enforcement");if(enforcement!=null)geometry.setEnforcement(enforcement);
             return geometry;
         }catch(Exception failure){return null;}
     }
