@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
     paths: ['.github/workflows/remove-public-apks.yml', 'tools/remove-public-apks.sh']
+  schedule:
+    - cron: '17 4 * * *'
   workflow_dispatch:
     inputs:
       delete:
@@ -26,7 +28,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          DELETE_REQUESTED: ${{ github.event_name == 'push' || inputs.delete == true }}
+          DELETE_REQUESTED: ${{ github.event_name == 'push' || github.event_name == 'schedule' || inputs.delete == true }}
         run: |
           if [[ "$DELETE_REQUESTED" == true ]]; then
             bash tools/remove-public-apks.sh --delete
