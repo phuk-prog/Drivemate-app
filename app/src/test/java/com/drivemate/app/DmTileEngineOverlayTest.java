@@ -60,6 +60,31 @@ public class DmTileEngineOverlayTest{
             assertTrue("route stays in downloaded cells",allowed.containsAll(over.cells));
         }
     }
+    /** Via-way turn restriction ("from A, via link B, to C"), expanded by the map importer into a copy
+     *  of B: the Java engine must reach exactly the same results as the map repository's engine,
+     *  including no route for the restricted manoeuvre and no U-turn loophole through the copy. */
+    @Test public void viaWayRestrictionMatchesPythonEngine()throws Exception{
+        DmTileEngine.Source src=name->{try(InputStream in=DmTileEngineOverlayTest.class.getResourceAsStream("/dm-viaway/"+name)){if(in==null)throw new FileNotFoundException(name);return new ByteArrayInputStream(DmTileEngine.read(in,8_000_000));}};
+        byte[] m;try(InputStream in=DmTileEngineOverlayTest.class.getResourceAsStream("/dm-viaway/manifest.json")){m=DmTileEngine.read(in,8_000_000);}
+        DmTileEngine e=new DmTileEngine(m,DmTileEngine.sha(m),src);
+        JSONArray expected;try(InputStream in=DmTileEngineOverlayTest.class.getResourceAsStream("/dm-viaway/expected.json")){expected=new JSONArray(new String(DmTileEngine.read(in,8_000_000),StandardCharsets.UTF_8));}
+        int routed=0,refused=0;
+        for(int i=0;i<expected.length();i++){
+            JSONObject j=expected.getJSONObject(i);GeoMath.Point s=point(j.getJSONArray("start")),t=point(j.getJSONArray("end"));
+            for(int level=0;level<2;level++){
+                DmTileEngine.Route r=null;
+                try{r=level==0?e.routeFlat(s,t,null):e.routeOverlay(s,t,null);}catch(IOException none){}
+                assertEquals("routable "+j,j.getBoolean("ok"),r!=null);
+                if(r==null)continue;
+                assertEquals("time "+j,j.getDouble("seconds"),r.seconds,0.015);
+                List<Long> ways=e.original(r).ways;JSONArray want=j.getJSONArray("ways");
+                assertEquals(want.length(),ways.size());
+                for(int k=0;k<ways.size();k++)assertEquals("copied ways reported as OSM ways",want.getLong(k),(long)ways.get(k));
+            }
+            if(j.getBoolean("ok"))routed++;else refused++;
+        }
+        assertTrue(routed>40&&refused>0);
+    }
     @Test public void snapFlagsSayWhichJourneyEndMaySnap()throws Exception{
         String[] cases={"[1,51000000,-2000000,[],[]]","[1,51000000,-2000000,[],[],1]","[1,51000000,-2000000,[],[],0]",
                         "[1,51000000,-2000000,[],[],2]","[1,51000000,-2000000,[],[],3]"};

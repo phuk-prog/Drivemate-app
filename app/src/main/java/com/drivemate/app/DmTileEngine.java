@@ -19,6 +19,8 @@ public final class DmTileEngine {
     private final JSONObject overlayCells;
     private final LinkedHashMap<String,Overlay> overlayCache=new LinkedHashMap<>(16,.75f,true);
     private static final int MAX_OVERLAYS=512;
+    /** Ways copied by the map importer for via-way turn restrictions -> original OSM way. */
+    private final Map<Long,Long> wayAlias=new HashMap<>();
     /** Level 2: blocks of block x block cells crossed in one exact jump ("overlay2"), or null. */
     private final JSONObject level2Blocks;private final int block;
     private final Map<String,Set<String>> blockCells=new HashMap<>();
@@ -46,6 +48,8 @@ public final class DmTileEngine {
         if(!"drivemate-tiles-v1".equals(m.getString("format"))||m.getInt("cell_microdegrees")!=CELL||!"ODbL-1.0".equals(m.getString("license")))throw new IOException("Unsupported map format");
         catalog=m.getJSONObject("tiles");globalRules=m.getJSONObject("global_rules");
         double declared=m.optDouble("max_speed_kph",160);maxKph=declared>0&&declared<160?declared:160;this.source=source;planner=new DmCellPlanner(catalog);
+        JSONObject alias=m.optJSONObject("way_alias");
+        if(alias!=null)for(Iterator<String> it=alias.keys();it.hasNext();){String k=it.next();wayAlias.put(Long.parseLong(k),alias.getLong(k));}
         JSONObject ov=m.optJSONObject("overlay");
         if(ov!=null&&!"drivemate-overlay-v1".equals(ov.optString("format")))throw new IOException("Unsupported road hierarchy");
         overlayCells=ov==null?null:ov.getJSONObject("cells");
@@ -93,7 +97,10 @@ public final class DmTileEngine {
         /** May a journey start / end here? Field 5 (map compile_dmtiles_uk.snap_flags): 1 both, 0 neither
          *  (an isolated road fragment), 2 end only (e.g. a one-way slip road), 3 start only. Older tiles omit it. */
         final boolean startHere,endHere;
-        Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);int snap=a.length()>5?a.getInt(5):1;startHere=snap==1||snap==3;endHere=snap==1||snap==2;this.cell=cell;}
+        /** Copies made for via-way restrictions carry their original node id (field 6); the search
+         *  remembers it as the previous node so U-turn rules hold across copies (map dm_overlay.canon). */
+        final long canon;
+        Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);int snap=a.length()>5?a.getInt(5):1;startHere=snap==1||snap==3;endHere=snap==1||snap==2;canon=a.length()>6?a.getLong(6):id;this.cell=cell;}
     }
     static final class Tile{
         final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places;
@@ -167,7 +174,13 @@ public final class DmTileEngine {
     }
     public Route route(GeoMath.Point start,GeoMath.Point finish)throws Exception{return route(start,finish,null);}
     public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed)throws Exception{
-        return overlayCells!=null?routeOverlay(start,finish,allowed):routeFlat(start,finish,allowed);
+        return original(overlayCells!=null?routeOverlay(start,finish,allowed):routeFlat(start,finish,allowed));
+    }
+    /** Report copied ways (via-way restrictions) as the OSM ways they copy, for names and guidance. */
+    Route original(Route r){
+        if(wayAlias.isEmpty())return r;
+        List<Long> w=new ArrayList<>();for(long x:r.ways)w.add(wayAlias.getOrDefault(x,x));
+        return new Route(new ArrayList<>(r.points),w,new ArrayList<>(r.nodeIds),new ArrayList<>(r.edgeIds),new HashSet<>(r.cells),r.metres,r.seconds,r.expansions,r.ms);
     }
     /** Search state for the hierarchy: a road by road step in a detail cell, or an overlay entry. */
     private static final class HState{
@@ -224,7 +237,7 @@ public final class DmTileEngine {
                     if(detail.contains(dest)){Node next=load(dest).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");at=next.point;}
                     else{Overlay o=overlay(dest);Integer r=o.row.get(id);if(r==null)throw new IOException("Road hierarchy missing entry");at=new GeoMath.Point(o.entries[r][4]/1e6,o.entries[r][5]/1e6);}
                     best.put(id,cost);steps.put(id,new Step(s.edge,false,s.cell,n.id));
-                    q.add(new HState(id,dest,dst,n.id,way,cost,cost+heuristic(at,b.point)));
+                    q.add(new HState(id,dest,dst,n.canon,way,cost,cost+heuristic(at,b.point)));
                 }
             }else{
                 Overlay o=overlay(s.cell);Integer r=o.row.get(s.edge);if(r==null)throw new IOException("Road hierarchy missing entry");count++;
@@ -254,7 +267,7 @@ public final class DmTileEngine {
                 if(!LocalRoutingPilot.allowed(s[3],to,nw,rs))continue;
                 long cost=s[0]+e.getLong(5);if(cost>=best.getOrDefault(id,Long.MAX_VALUE))continue;
                 best.put(id,cost);parent.put(id,new long[]{s[1],i,n.id});
-                if(cell.equals(e.getString(2)))q.add(new long[]{cost,id,to,n.id,nw});
+                if(cell.equals(e.getString(2)))q.add(new long[]{cost,id,to,n.canon,nw});
             }
         }return parent;
     }
@@ -333,7 +346,7 @@ public final class DmTileEngine {
                 double cost=s.cost+seconds;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
                 String nextCell=e.getString(2);if(allowed!=null&&!allowed.contains(nextCell))continue;
                 Node next=load(nextCell).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");
-                best.put(id,cost);q.add(new State(next,id,way,s.node.id,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/maxKph,lower.getOrDefault(next.cell,0L)/1000.0),s));
+                best.put(id,cost);q.add(new State(next,id,way,s.node.canon,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/maxKph,lower.getOrDefault(next.cell,0L)/1000.0),s));
             }
         }throw new CoverageException("No connected route inside pilot limits");
     }
