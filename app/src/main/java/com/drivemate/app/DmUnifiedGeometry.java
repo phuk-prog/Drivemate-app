@@ -72,6 +72,9 @@ final class DmUnifiedGeometry {
     DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> points,List<Long> ways,double[] bounds)throws Exception{
         this(features,points,ways,null,1e7,bounds);
     }
+    static DmUnifiedGeometry browse(List<JSONArray> features,double[] bounds)throws Exception{
+        return new DmUnifiedGeometry(features,Collections.emptyList(),Collections.emptyList(),null,1e7,bounds);
+    }
     private DmUnifiedGeometry(List<JSONArray> features,List<GeoMath.Point> routePoints,List<Long> routeWays,DmTileEngine.Route path,double scale,double[] bounds)throws Exception{
         this.coordinateScale=scale;this.bounds=bounds.clone();
         Map<Long,JSONArray> byWay=new HashMap<>();List<Feature> r=new ArrayList<>(),a=new ArrayList<>();
@@ -98,6 +101,10 @@ final class DmUnifiedGeometry {
                     a.add(item);
                 }
             }
+        }
+        if(routePoints.isEmpty()&&routeWays.isEmpty()&&path==null){
+            roads=FeatureCollection.fromFeatures(r.toArray(new Feature[0]));areas=FeatureCollection.fromFeatures(a.toArray(new Feature[0]));
+            route=FeatureCollection.fromFeatures(new Feature[0]);points=Collections.emptyList();checkedEdges=0;return;
         }
         if(routePoints.size()<2||routeWays.size()!=routePoints.size()-1)throw new IOException("Route identity mismatch");
         if(path!=null&&(path.points.size()!=path.nodeIds.size()||path.edgeIds.size()!=path.ways.size()))throw new IOException("Route node identity mismatch");
