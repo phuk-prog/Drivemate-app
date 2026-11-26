@@ -38,9 +38,10 @@ public final class DmUnifiedPreviewActivity extends Activity {
             DmUnifiedGeometry verified=region.geometry(result);
             runOnUiThread(()->{if(isFinishing()||isDestroyed())return;route=result;geometry=verified;
                 status.setText((stockport?"Stockport":"Wells")+" · "+Math.round(route.metres)+" m · "+verified.checkedEdges+" shared edges\nFull source geometry · preview only");render();});
-        }catch(Exception e){runOnUiThread(()->{if(!isDestroyed())status.setText("Preview unavailable: "+e.getMessage());});}},"dm-unified-region").start();
+        }catch(Exception e){android.util.Log.e("UnifiedRegion","Regional preview failed",e);runOnUiThread(()->{if(!isDestroyed())status.setText("Preview unavailable: "+e.getMessage());});}},"dm-unified-region").start();
     }
     void setNight(boolean value){night=value;render();}
+    String previewStatus(){return status==null?"No preview status":status.getText().toString();}
     boolean readyForZoom(){return ready&&geometry!=null&&view.getWidth()>0;}
     private void render(){
         if(map==null||geometry==null||isDestroyed())return;ready=false;final int gen=++generation;

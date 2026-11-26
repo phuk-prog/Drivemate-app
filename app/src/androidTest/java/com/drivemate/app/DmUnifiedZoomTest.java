@@ -60,7 +60,9 @@ public class DmUnifiedZoomTest {
                     ins.runOnMainSync(()->{if(a.readyForZoom()){if(!positioned.getAndSet(true))a.position(zoom);else if(a.rendered(zoom))ok.set(true);}});
                     if(ok.get())break;SystemClock.sleep(1000);
                 }
-                assertTrue("No actual rendered roads and route at zoom "+zoom,ok.get());
+                java.util.concurrent.atomic.AtomicReference<String> status=new java.util.concurrent.atomic.AtomicReference<>();
+                ins.runOnMainSync(()->status.set(a.previewStatus()));
+                assertTrue("No actual rendered roads and route at zoom "+zoom+"; "+status.get(),ok.get());
                 Bitmap b=ins.getUiAutomation().takeScreenshot();assertNotNull(b);
                 try(FileOutputStream out=new FileOutputStream(new File(dir,(night?"night-":"day-")+"zoom-"+(int)zoom+".png"))){assertTrue(b.compress(Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}
                 android.util.Log.i("UnifiedZoom","PASS Stockport "+(night?"night":"day")+" zoom "+zoom+" rendered roads and verified shared route");

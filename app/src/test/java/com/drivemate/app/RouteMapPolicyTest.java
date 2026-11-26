@@ -37,6 +37,15 @@ public class RouteMapPolicyTest {
         assertFalse(RouteMapPolicy.insideStockport(new GeoMath.Point(53.36,-2.216)));
         assertFalse(RouteMapPolicy.insideStockport(new GeoMath.Point(53.393,-2.25)));
     }
+    @Test public void smallerDisplayMarginPreservesRouteAndReducesContext()throws Exception{
+        GeoMath.Point a=new GeoMath.Point(53.405,-2.165),b=new GeoMath.Point(53.410,-2.171);
+        double[] wide=DmUnifiedRegion.displayBounds(Arrays.asList(a,b),true,1);
+        double[] narrow=DmUnifiedRegion.displayBounds(Arrays.asList(a,b),true,.2);
+        assertTrue(RouteMapPolicy.insideBounds(a,narrow));
+        assertTrue(RouteMapPolicy.insideBounds(b,narrow));
+        assertTrue(narrow[2]-narrow[0]<wide[2]-wide[0]);
+        assertTrue(narrow[3]-narrow[1]<wide[3]-wide[1]);
+    }
     @Test public void routeWidthIsBoundedAndZoomDependent(){
         assertEquals(4,RouteMapPolicy.rasterWidthDp(Double.NaN));
         assertTrue(RouteMapPolicy.rasterWidthDp(13)<RouteMapPolicy.rasterWidthDp(19));

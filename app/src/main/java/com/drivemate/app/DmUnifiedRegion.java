@@ -18,27 +18,51 @@ final class DmUnifiedRegion {
         // Route search loads its own bounded cells; do not pin the entire regional pack.
     }
     static double[] displayBounds(List<GeoMath.Point> points,boolean stockport)throws IOException{
-        if(points==null||points.size()<2)throw new IOException("No regional route");
+        return displayBounds(points,stockport,1);
+    }
+    static double[] displayBounds(List<GeoMath.Point> points,boolean stockport,double margin)throws IOException{
+        if(points==null||points.size()<2||!Double.isFinite(margin)||margin<=0||margin>1)throw new IOException("No regional route or invalid margin");
         double w=180,s=90,e=-180,n=-90;
         for(GeoMath.Point p:points){
             if(!Double.isFinite(p.lat)||!Double.isFinite(p.lon))throw new IOException("Invalid route");
             w=Math.min(w,p.lon);e=Math.max(e,p.lon);s=Math.min(s,p.lat);n=Math.max(n,p.lat);
         }
-        w-=.012;s-=.008;e+=.012;n+=.008;
+        w-=.012*margin;s-=.008*margin;e+=.012*margin;n+=.008*margin;
         if(stockport){double[] b=RouteMapPolicy.stockportBounds();w=Math.max(w,b[0]);s=Math.max(s,b[1]);e=Math.min(e,b[2]);n=Math.min(n,b[3]);}
         if(e<=w||n<=s||e-w>.055||n-s>.035)throw new IOException("Route exceeds bounded regional display");
         return new double[]{w,s,e,n};
     }
-    private List<JSONArray> context(List<GeoMath.Point> points,List<Long> ways,double[] bounds)throws Exception{
-        return engine.boundedFeatures(engine.keys(),bounds,new HashSet<>(ways),false,16000,160000);
+    private static final double[] MARGINS={1,.65,.4,.2};
+    private static final class Context {
+        final double[] bounds;final List<JSONArray> features;
+        Context(double[] b,List<JSONArray> f){bounds=b;features=f;}
+    }
+    private Context context(List<GeoMath.Point> points,List<Long> ways)throws Exception{
+        Set<Long> required=new HashSet<>(ways);
+        Exception last=null;
+        // A dense neighbourhood must not make the complete preview unavailable.
+        // Reduce only optional context, never the route or its original way IDs.
+        for(double margin:MARGINS){
+            double[] bounds;
+            try{bounds=displayBounds(points,stockport,margin);}catch(IOException tooWide){last=tooWide;continue;}
+            try{
+                List<JSONArray> rows=engine.boundedFeatures(engine.keys(),bounds,required,false,16000,160000);
+                android.util.Log.i("UnifiedRegion","Bounded regional context: "+rows.size()+" features, margin "+margin);
+                return new Context(bounds,rows);
+            }catch(DmTileEngine.CoverageException dense){
+                last=dense;
+                android.util.Log.w("UnifiedRegion","Regional context unavailable at margin "+margin+": "+dense.getMessage());
+            }
+        }
+        throw new IOException("No verified regional context fits display bounds",last);
     }
     DmUnifiedGeometry geometry(DmTileEngine.Route route)throws Exception{
-        double[] bounds=displayBounds(route.points,stockport);
-        return DmUnifiedGeometry.regional(context(route.points,route.ways,bounds),route,bounds);
+        Context c=context(route.points,route.ways);
+        return DmUnifiedGeometry.regional(c.features,route,c.bounds);
     }
     DmUnifiedGeometry geometry(List<GeoMath.Point> points,List<Long> ways)throws Exception{
-        double[] bounds=displayBounds(points,stockport);
-        return DmUnifiedGeometry.regional(context(points,ways,bounds),points,ways,bounds);
+        Context c=context(points,ways);
+        return DmUnifiedGeometry.regional(c.features,points,ways,c.bounds);
     }
     /** Only enable the regional live renderer if every actual route vertex and ordered way matches the same pinned OSM snapshot. */
     static DmUnifiedGeometry matchLive(Context context, TomTomApi.Route route) {
