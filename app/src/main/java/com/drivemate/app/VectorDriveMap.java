@@ -599,7 +599,7 @@ public final class VectorDriveMap {
         SymbolLayer l=new SymbolLayer("dm-roadside-locations","dm-static-roadside");
         l.setMinZoom(13f);
         l.setProperties(PropertyFactory.iconImage(org.maplibre.android.style.expressions.Expression.get("icon")),
-                PropertyFactory.iconSize(.8f),PropertyFactory.iconAllowOverlap(false),PropertyFactory.iconIgnorePlacement(false));
+                PropertyFactory.iconSize(.95f),PropertyFactory.iconAllowOverlap(false),PropertyFactory.iconIgnorePlacement(false));
         style.addLayer(l);
         lastRoadsideLat=lastRoadsideLon=lastRoadsideZoom=Double.NaN;
     }
@@ -615,7 +615,7 @@ public final class VectorDriveMap {
         double span=Math.max(.002,Math.min(.075,.045*Math.pow(2,15-z)));
         if(Double.isFinite(lastRoadsideZoom)&&Math.abs(z-lastRoadsideZoom)<.3&&Math.abs(lat-lastRoadsideLat)<span*.15&&Math.abs(lon-lastRoadsideLon)<span*.15)return;
         lastRoadsideLat=lat;lastRoadsideLon=lon;lastRoadsideZoom=z;
-        roadsideSource.setGeoJson(roadside.features(lat-span,lon-span,lat+span,lon+span,z>=16));
+        roadsideSource.setGeoJson(roadside.features(lat-span,lon-span,lat+span,lon+span,z>=14.5));
     }
 
     public void setRouteEvents(List<RouteIntelligence.SpeedSection> speed,List<RouteIntelligence.TrafficSection> traffic,boolean metric,long fetchedAt){

@@ -122,6 +122,14 @@ public final class MainActivity extends Activity implements LocationListener {
                     saySystemWarning("GPS signal lost. Waiting for location.");
                 }
             }
+            if(active&&!guidancePositionConfirmed&&!joiningRoute&&lastConfirmedMetricsAt>=0
+                    && !RoadTestDisplayPolicy.retainMetrics(lastConfirmedMetricsAt,SystemClock.elapsedRealtime())){
+                lastConfirmedMetricsAt=-1;
+                setTripMetricLabels(false);
+                if(tripEtaValue!=null){tripEtaValue.setText("—");tripEtaValue.setContentDescription("ETA unavailable");}
+                if(tripMinutesValue!=null){tripMinutesValue.setText("—");tripMinutesValue.setContentDescription("Time unavailable");}
+                if(tripDistanceValue!=null){tripDistanceValue.setText("—");tripDistanceValue.setContentDescription("Distance unavailable");}
+            }
             if (active && !hasNetwork()) {
                 if (!networkLost) {
                     networkLost = true;
@@ -2443,7 +2451,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (!active || smoothFollow == null || !followLocation) vectorMap.setVehicle(smoothed);
             if (!autoFallback && !active) vectorMap.prefetch(gpsPoint(fix));
         }
-        if ((!active || smoothFollow == null) && fix.hasBearing()
+        if ((!active || smoothFollow == null || !followLocation) && fix.hasBearing()
                 && fix.hasSpeed() && fix.getSpeed() > 1.5f)
             userPin.setRotation(-fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
@@ -2474,7 +2482,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     + satelliteSuffix()
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
-        if (active && route != null && !routing) updateGuidance(fix);
+        if (active && route != null && (!routing || guidancePositionConfirmed)) updateGuidance(fix);
         else if(active&&joiningRoute&&followLocation&&lastJoinCameraAt>=0&&SystemClock.elapsedRealtime()-lastJoinCameraAt>=1000){centreOnLocation(false);lastJoinCameraAt=SystemClock.elapsedRealtime();}
         if (!active && !showingVector()) map.postInvalidateOnAnimation();
     }
@@ -2693,15 +2701,26 @@ public final class MainActivity extends Activity implements LocationListener {
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
+        double remaining=Math.max(0,GeoMath.length(route.points)-along);
+        boolean shortTrip=RoadTestDisplayPolicy.wideApproach(remaining,nextJunctionOffsetMetres-along)
+                && !closeZoom && highlightedJunctionIndex<0;
+        List<GeoMath.Point> cameraContext=junctionFramePoints;
+        if(shortTrip){
+            cameraContext=new ArrayList<>();
+            for(int i=0;i<=8;i++)cameraContext.add(GeoMath.pointAtDistance(route.points,along+remaining*i/8.0));
+            double centerAlong=along+remaining*.40;
+            GeoMath.Point center=GeoMath.pointAtDistance(route.points,centerAlong);
+            target=new NavigationCamera.Frame(center,target.zoom,target.roadBearingDegrees,target.junctionMetres,centerAlong,Math.min(38,target.tiltDegrees));
+        }
         if (vectorMap != null && showingVector()) {
             double distance = nextJunctionOffsetMetres-along;
             GeoMath.Point junction = distance >= 0 && distance <= Math.max(480,velocity*8+100)
                     ? GeoMath.pointAtDistance(route.points,nextJunctionOffsetMetres) : null;
             vectorMap.setFollowViewport(headerHeight,bottomPanelHeight,junction,
-                    distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
+                    shortTrip?cameraContext:distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
         }
         boolean frameJunction=!junctionFramePoints.isEmpty()&&target.junctionMetres<=260;
-        double fittedZoom=frameJunction?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),junctionFramePoints,map.getWidth(),map.getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
+        double fittedZoom=(frameJunction||shortTrip)?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,map.getWidth(),map.getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
         target = new NavigationCamera.Frame(target.center, fittedZoom,
                 target.roadBearingDegrees, target.junctionMetres,
                 target.cameraCenterAlongMetres,
@@ -3645,7 +3664,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (now - lastRouteRequest > ROUTE_REFRESH_MS && leftMetres > 1500 && !routing) {
             lastRerouteAttempt = now;
             planRoute(false);
-            return;
+            // Keep confirmed guidance and camera updates alive during background refresh.
         }
 
         distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
@@ -3871,7 +3890,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 upcomingSpeedText.setVisibility(View.VISIBLE);
                 // Defer to a close turn; do not mark as spoken until eligible.
                 if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech!=null && !speech.isSpeaking()
-                        && !atTurn && distanceToTurn > 65 && speedChangeAwareness.shouldAnnounce(change)) {
+                        && (!atTurn||voiceMode==DrivingVoicePolicy.ALERTS_ONLY)
+                        && (distanceToTurn > 65 || (atTurn&&voiceMode==DrivingVoicePolicy.ALERTS_ONLY)) && speedChangeAwareness.shouldAnnounce(change)) {
                     speak("Mapped speed limit changes to " + shown
                             + (metricUnits?" kilometres per hour in ":" miles per hour in ")
                             + NavigationUnits.spokenDistance(change.offset-along, metricUnits) + ". Check road signs.");
