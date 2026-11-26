@@ -16,6 +16,9 @@ final class NativeRegionalRouter {
         for(GeoMath.Point p:path.points)if(!region.covers(p))throw new IOException("Route crosses unverified regional boundary. No external fallback.");
         return convert(region,path,from,to);
     }
+    /** Explicit reroute preview, reconstructed using the same verified graph and destination.
+     * Never returns an old path as a successful replacement on missing coverage. */
+    TomTomApi.Route reroutePreview(GeoMath.Point from,GeoMath.Point destination)throws Exception{return preview(from,destination);}
     static TomTomApi.Route convert(DmUnifiedRegion region,DmTileEngine.Route path,GeoMath.Point from,GeoMath.Point to)throws Exception{
         if(path.points.size()<2||GeoMath.distance(from,path.points.get(0))>75
                 ||GeoMath.distance(to,path.points.get(path.points.size()-1))>100)

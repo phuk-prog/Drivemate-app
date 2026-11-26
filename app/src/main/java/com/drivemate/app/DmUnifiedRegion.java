@@ -66,7 +66,7 @@ final class DmUnifiedRegion {
     /** Raw source geometry for the original DriveMate rendering library. */
     NativeMapScene nativeScene(DmTileEngine.Route route)throws Exception{
         DisplayContext c=context(route.points,route.ways);
-        return NativeMapScene.fromRegional(c.features,route,c.bounds);
+        return NativeMapScene.fromRegional(c.features,route,c.bounds).withIntelligence(engine.routeIntelligence(route));
     }
     DmTileEngine.Route sample(boolean stockport)throws Exception{
         double[][] choices=stockport?new double[][]{{53.405,-2.165,53.410,-2.171},{53.400,-2.154,53.405,-2.165},{53.410,-2.171,53.400,-2.154}}:new double[][]{{51.209,-2.647,51.207,-2.641}};

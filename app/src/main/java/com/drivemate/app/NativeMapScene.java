@@ -23,9 +23,13 @@ final class NativeMapScene {
     final List<RouteRoadsideAwareness.Event> routeRoadside;
     final List<MappedEnforcement.Zone> averageZones;
     private NativeMapScene(List<Shape> shapes,List<GeoMath.Point> route,int edges,double[] bounds){
-        this.shapes=Collections.unmodifiableList(shapes);this.route=Collections.unmodifiableList(new ArrayList<>(route));checkedEdges=edges;this.bounds=bounds.clone();
-        routeRoadside=Collections.emptyList();averageZones=Collections.emptyList(); // no exact node-tag/relationship evidence in current regional pack
+        this(shapes,route,edges,bounds,new NativeRouteIntelligence.Result(Collections.emptyList(),Collections.emptyList()));
     }
+    private NativeMapScene(List<Shape> shapes,List<GeoMath.Point> route,int edges,double[] bounds,NativeRouteIntelligence.Result intelligence){
+        this.shapes=Collections.unmodifiableList(shapes);this.route=Collections.unmodifiableList(new ArrayList<>(route));checkedEdges=edges;this.bounds=bounds.clone();
+        routeRoadside=intelligence.events;averageZones=intelligence.zones;
+    }
+    NativeMapScene withIntelligence(NativeRouteIntelligence.Result intelligence){return new NativeMapScene(shapes,route,checkedEdges,bounds,intelligence);}
     private static boolean yes(String tag){return !tag.isEmpty()&&!Arrays.asList("no","false","0").contains(tag);}
     static int kind(JSONObject t,boolean closed){
         String h=t.optString("highway");

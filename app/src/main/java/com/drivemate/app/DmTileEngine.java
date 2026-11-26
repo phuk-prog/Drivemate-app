@@ -36,11 +36,13 @@ public final class DmTileEngine {
         Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);this.cell=cell;}
     }
     static final class Tile{
-        final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places;
+        final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places,roadsideNodes,enforcement;
         Tile(JSONObject data,String key)throws Exception{
             JSONArray a=data.getJSONArray("nodes");if(a.length()>MAX_NODES)throw new IOException("Tile graph exceeds pilot bounds");
             for(int i=0;i<a.length();i++){Node n=new Node(a.getJSONArray(i),key);if(!key.equals(DmTileEngine.key(n.point.lat,n.point.lon))||nodes.put(n.id,n)!=null)throw new IOException("Wrong tile node");}
             features=data.getJSONArray("features");places=data.getJSONArray("places");
+            roadsideNodes=data.optJSONArray("roadside_nodes");enforcement=data.optJSONArray("enforcement");
+            if(roadsideNodes!=null&&roadsideNodes.length()>6000||enforcement!=null&&enforcement.length()>1000)throw new IOException("Road intelligence exceeds cell budget");
         }
     }
     private Tile load(String k)throws Exception{
@@ -163,6 +165,23 @@ public final class DmTileEngine {
             west=Math.min(west,x);east=Math.max(east,x);south=Math.min(south,y);north=Math.max(north,y);
         }
         return coords.length()>0&&west<=bounds[2]&&east>=bounds[0]&&south<=bounds[3]&&north>=bounds[1];
+    }
+    /** Optional exact source records: deduplicate by original OSM identity, never nearest pixels. */
+    NativeRouteIntelligence.Result routeIntelligence(Route route)throws Exception{
+        Map<Long,JSONArray> nodes=new HashMap<>(),relations=new HashMap<>();
+        pinned.clear();cache.clear();
+        try{
+            for(String key:new TreeSet<>(route.cells)){
+                Tile t=load(key);collectIntelligence(t.roadsideNodes,nodes,6000);collectIntelligence(t.enforcement,relations,1000);cache.remove(key);
+            }
+            return NativeRouteIntelligence.match(route.points,route.nodeIds,route.ways,new JSONArray(nodes.values()),new JSONArray(relations.values()));
+        }finally{cache.clear();}
+    }
+    private static void collectIntelligence(JSONArray input,Map<Long,JSONArray> out,int max)throws Exception{
+        if(input==null)return;
+        for(int i=0;i<input.length();i++){JSONArray row=input.getJSONArray(i);long id=row.getLong(0);JSONArray previous=out.putIfAbsent(id,row);
+            if(previous!=null&&!previous.toString().equals(row.toString()))throw new IOException("Conflicting source intelligence");
+            if(out.size()>max)throw new IOException("Route intelligence exceeds budget");}
     }
     /** Tags and legal outgoing choices for the actual directed route, not a proximity guess. */
     Map<Long,JSONObject> routeTags(Route route)throws Exception{

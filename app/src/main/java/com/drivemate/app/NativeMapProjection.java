@@ -21,6 +21,14 @@ final class NativeMapProjection {
             focal=Math.max(1,Math.max(width,height)*1.25);
             anchorX=width*.5f;anchorY=height*(tilt>0?.62f:.5f);
         }
+        double depth(double x,double y){return 1-((-(x-cx)*scale*sin+(y-cy)*scale*cos)*tiltSin/focal);}
+        boolean segment(double x0,double y0,double x1,double y1,float[] a,float[] b){
+            double d0=depth(x0,y0),d1=depth(x1,y1),near=.051;
+            if(d0<near&&d1<near)return false;
+            if(d0<near){double f=(near-d0)/(d1-d0);x0+=(x1-x0)*f;y0+=(y1-y0)*f;}
+            else if(d1<near){double f=(near-d1)/(d0-d1);x1+=(x0-x1)*f;y1+=(y0-y1)*f;}
+            screen(x0,y0,a);screen(x1,y1,b);return Float.isFinite(a[0])&&Float.isFinite(a[1])&&Float.isFinite(b[0])&&Float.isFinite(b[1]);
+        }
         void screen(double x,double y,float[] out){
             double dx=(x-cx)*scale,dy=(y-cy)*scale;
             double lateral=dx*cos+dy*sin,forward=-dx*sin+dy*cos;

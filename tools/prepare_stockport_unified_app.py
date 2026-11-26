@@ -2,7 +2,7 @@
 import hashlib,subprocess,sys,urllib.request
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-REF="264cafa86d38bac071a2c32b85576607dc0bff96"
+REF="1392c62f4af462900a9df36338bd965683f12d20"
 work=ROOT/"stockport-unified-work";work.mkdir(exist_ok=True)
 for name in ("prepare_stockport_unified.py","compile_dmtiles.py","verify_unified_geometry.py","build_uk_roads.py","build_traffic_signals.py","test_traffic_signals.py","build_roadside_points.py","test_roadside_points.py"):
     with urllib.request.urlopen(f"https://raw.githubusercontent.com/phuk-prog/Drivemate-map/{REF}/tools/{name}",timeout=60) as r:data=r.read(2_000_001)
