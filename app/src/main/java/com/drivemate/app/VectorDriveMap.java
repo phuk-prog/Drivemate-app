@@ -115,7 +115,7 @@ public final class VectorDriveMap {
     private long lastFramingCheck;
     private double lastRenderedVehicleAngle = Double.NaN;
     private Runnable onUserGesture;
-    private double pendingZoom = 14.5, pendingBearing;
+    private double pendingZoom = 14.5, pendingBearing, pendingPitch, pendingTravelBearing;
     private static final String LOG_TAG = "DriveMateVector";
     private static final long MONITOR_INTERVAL_MS = 1800L;
     public interface RoadStatusListener {
@@ -435,8 +435,8 @@ public final class VectorDriveMap {
                 setParkedCar(pendingParked);
                 if (pendingRoute != null) {renderRoute();renderRemaining();}
                 publishRoadName();
-                if (pendingCamera != null) setCamera(pendingCamera,
-                        pendingZoom, pendingBearing);
+                if (pendingCamera != null) setBrowseCamera(pendingCamera,
+                         pendingZoom, pendingBearing,pendingPitch,pendingTravelBearing);
                 if(!navigationDetail&&pendingPreviewPadding!=null){int[] pad=pendingPreviewPadding;pendingPreviewPadding=null;previewRoute(pendingRoute,pad[0],pad[1],pad[2]);}
             });
         } catch (Exception error) {
@@ -822,7 +822,7 @@ public final class VectorDriveMap {
     public void setBrowseCamera(GeoMath.Point center,double zoom,double bearing,double pitch,double vehicleBearing) {
         pendingCamera = center;
         pendingZoom = zoom;
-        pendingBearing = bearing;
+        pendingBearing = bearing;pendingPitch=pitch;pendingTravelBearing=vehicleBearing;
         ensureRegionalCoverage(center);
         if (!ready() || center == null) return;
         // The GPU map follows directly; GPS camera updates do not restart
@@ -898,7 +898,7 @@ public final class VectorDriveMap {
                 activity.getResources().getDisplayMetrics().density) - viewportZoomOut(frame);
         pendingCamera = frame.center;
         pendingZoom = mapZoom;
-        pendingBearing = frame.bearing;
+        pendingBearing = frame.bearing;pendingPitch=frame.tilt;pendingTravelBearing=frame.travelBearing;
         pendingGps = frame.vehicle;
         ensureRegionalCoverage(frame.center);
         if (!ready()) return;
