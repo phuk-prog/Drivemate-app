@@ -8,7 +8,9 @@ public class TripHeaderFormatTest {
         assertEquals("0 min", TripHeaderFormat.minutesLeft(0));
         assertEquals("1 min", TripHeaderFormat.minutesLeft(1));
         assertEquals("9 min", TripHeaderFormat.minutesLeft(520));
-        assertEquals("61 min", TripHeaderFormat.minutesLeft(3601));
+        assertEquals("1 hr 1 min", TripHeaderFormat.minutesLeft(3601));
+        assertEquals("2 hr 25 min", TripHeaderFormat.minutesLeft(8700));
+        assertEquals("1 hr", TripHeaderFormat.minutesLeft(3600));
     }
 
     @Test public void uKDrivingSummaryAlwaysShowsMiles() {
