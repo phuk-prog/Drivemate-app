@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   signed-apk:
-    if: github.ref == 'refs/heads/main'
+    if: github.event.repository.private == true && (github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -141,6 +141,7 @@ jobs:
           echo "Signed APK: DriveMate-$VERSION.apk"
 
       - name: Upload privately signed installable APK
+        if: github.event.repository.private == true
         uses: actions/upload-artifact@v4
         with:
           name: DriveMate-${{ env.DRIVEMATE_VERSION }}-signed-APK
