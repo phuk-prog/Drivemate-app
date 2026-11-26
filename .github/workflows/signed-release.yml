@@ -9,7 +9,7 @@ on:
         default: false
   push:
     branches: [main]
-    paths: ['release/version.json']
+    paths: ['release/version.json', 'tools/encrypt-apk.sh']
 concurrency:
   group: drivemate-publication
   cancel-in-progress: false
@@ -32,6 +32,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Check ZIP password availability before expensive builds
+        env:
+          DRIVEMATE_ZIP_PASSWORD: ${{ secrets.DRIVEMATE_ZIP_PASSWORD }}
+        shell: bash
+        run: |
+          set +x
+          if [[ ${#DRIVEMATE_ZIP_PASSWORD} -lt 11 ]]; then
+            echo 'Set DRIVEMATE_ZIP_PASSWORD (at least 11 characters).' >&2
+            exit 1
+          fi
 
       - name: Reject obsolete release version
         run: |
