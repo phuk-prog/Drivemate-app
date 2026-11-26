@@ -804,6 +804,10 @@ public final class VectorDriveMap {
     }
 
     public void setCamera(GeoMath.Point center, double zoom, double bearing) {
+        setBrowseCamera(center,zoom,bearing,0,bearing);
+    }
+
+    public void setBrowseCamera(GeoMath.Point center,double zoom,double bearing,double pitch,double vehicleBearing) {
         pendingCamera = center;
         pendingZoom = zoom;
         pendingBearing = bearing;
@@ -817,7 +821,7 @@ public final class VectorDriveMap {
                                 .target(new LatLng(center.lat, center.lon))
                                 .zoom(zoom)
                                 .bearing((bearing % 360 + 360) % 360)
-                                .tilt(0)
+                                .tilt(Math.max(0,Math.min(55,pitch)))
                                 .build());
         // Native GPU linear interpolation is short enough to finish before
         // the next typical one-second GPS fix. Sudden position jumps, startup
@@ -830,7 +834,8 @@ public final class VectorDriveMap {
         lastRenderedCamera = center;
         lastRenderedZoom = zoom;
         lastRenderedBearing = bearing;
-        lastRenderedTilt = 0;
+        lastRenderedTilt = pitch;
+        setVehicleHeading(CameraHeadingPolicy.screenDegrees(vehicleBearing,bearing));
     }
 
     /**
