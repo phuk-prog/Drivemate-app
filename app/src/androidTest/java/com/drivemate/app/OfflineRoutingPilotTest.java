@@ -26,6 +26,8 @@ public class OfflineRoutingPilotTest{
             JSONArray samples=fixture.getJSONArray("samples");assertTrue(samples.length()>=2);
             for(int i=0;i<samples.length();i++){JSONObject s=samples.getJSONObject(i);JSONArray a=s.getJSONArray("start"),b=s.getJSONArray("end");
                 LocalRoutingPilot.Result result=roads.route(new GeoMath.Point(a.getDouble(0),a.getDouble(1)),new GeoMath.Point(b.getDouble(0),b.getDouble(1)));
+                assertTrue(result.expanded<=80000);
+                assertTrue(result.elapsedMs>=0);
                 assertTrue(result.points.size()>2);assertEquals(s.getJSONObject("reference").getDouble("distance_km"),result.metres/1000,0.02);
                 assertEquals(s.getJSONObject("reference").getDouble("minutes"),result.seconds/60,0.06);
                 android.util.Log.i("OfflineRoutingPilot","sample "+i+" metres="+result.metres+" seconds="+result.seconds+" expanded="+result.expanded+" elapsed_ms="+result.elapsedMs);

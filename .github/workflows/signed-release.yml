@@ -1,6 +1,12 @@
 name: DriveMate verified signed release
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Explicitly publish a versioned prerelease after signing (otherwise artifact only)'
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths: ['release/version.json']
@@ -171,6 +177,7 @@ jobs:
           retention-days: 30
 
       - name: Publish versioned APK and verification evidence
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
         shell: bash
         run: |
           set -euo pipefail

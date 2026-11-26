@@ -169,7 +169,7 @@ public final class LocalRoutingPack {
             LocalRoutingPilot.Result r=engine.route(start,end);
             // Geometry-only candidate: do not invent lane advice, limits or turn instructions.
             List<TomTomApi.Instruction> steps=new ArrayList<>();
-            steps.add(new TomTomApi.Instruction(r.metres,"End of experimental route preview","DESTINATION","",0,0,"",""));
+            steps.add(new TomTomApi.Instruction(r.metres,"End of experimental road preview; destination access not verified","DESTINATION","",0,0,"",""));
             return new TomTomApi.Route(r.points,steps,r.metres,(int)Math.ceil(r.seconds),0,new ArrayList<>(),new ArrayList<>(),new ArrayList<>(),"DriveMate local preview");
         }
     }

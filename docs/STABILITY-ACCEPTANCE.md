@@ -25,3 +25,6 @@ until their unique changes are reconciled. One issue per failure, link both
 repos and exact test evidence; avoid parallel implementations of the same fix.
 Use debug side-by-side for tests and a signed candidate only after all gates.
 Do not claim a simulator result as road validation. No driving interaction.
+
+## Subsequent bounded routing pass
+Android local preview now caches read-only edge and turn queries per route while retaining the same expansion, time and queue limits. The map PR compares alternative queue weights on failed exact anchors without changing promotion gates. Do not activate alternative anchors as navigation. Signed main builds produce an artifact by default; public prerelease creation is a separate explicit manual input after owner approval.
