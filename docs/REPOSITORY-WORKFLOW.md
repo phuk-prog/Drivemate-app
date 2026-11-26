@@ -11,3 +11,14 @@ The separate older display-overhaul branch is not blindly merged over newer 2.x 
 Map lock records exact source pins; do not automatically move to a failed nationwide candidate. Local routing is still preview-only. Origin snaps must have usable outgoing edges; weighted A* uses same priority as revised verifier while retaining device resource limits. National acceptance remains pending; no increase in Android limits.
 
 Before road use: recorded roundabout, motorway, GPS-loss, route refresh, reroute, lane, accessibility, day/night, landscape, and real update install test on previous signed APK. Release prereleases are engineering candidates, not safety certification.
+
+## 26 November stability gate
+
+PR #36 is the integration candidate, not a release. The host-only dependency
+overrides must be resolved using the proposed-lock workflow; review and commit
+the exact generated lock before the normal validation and security checks can
+pass. No manually fabricated lock or advisory waiver. The signed workflow
+uses environment `drivemate-release`; the owner must configure its reviewers,
+main-only deployment policy and environment-scoped secrets, and remove legacy
+repository-level signing secrets only after preserving secure backups.
+See [stability acceptance](STABILITY-ACCEPTANCE.md).

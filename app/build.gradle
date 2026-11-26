@@ -41,3 +41,21 @@ dependencies {
 
 // Reviewed dependency lockfile is checked into source control.
 dependencyLocking { lockAllConfigurations() }
+
+// Restrict security overrides to AGP's host-side Unified Test Platform.
+// These libraries are not packaged in the release APK. Regenerate the lock
+// from Gradle and run the OSV and emulator gates before signing.
+configurations.configureEach {
+    if (name.startsWith('_internal-unified-test-platform-')) {
+        resolutionStrategy.eachDependency { details ->
+            def g = details.requested.group
+            def n = details.requested.name
+            if (g == 'com.google.guava' && n == 'guava') details.useVersion('33.6.0-jre')
+            if (g == 'com.google.protobuf' && n == 'protobuf-java') details.useVersion('3.25.9')
+            if (g == 'commons-io' && n == 'commons-io') details.useVersion('2.21.0')
+            if (g == 'io.netty' && n.startsWith('netty-') && details.requested.version?.startsWith('4.1.')) {
+                details.useVersion('4.1.141.Final')
+            }
+        }
+    }
+}

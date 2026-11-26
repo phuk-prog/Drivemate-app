@@ -30,6 +30,7 @@ jobs:
         run: |
           ./gradlew --no-daemon :app:dependencies --write-locks > dependency-report.txt
           python3 tools/scan_dependencies.py app/gradle.lockfile
+          git diff --exit-code -- app/gradle.lockfile
       - uses: actions/upload-artifact@v4
         if: always()
         with:
