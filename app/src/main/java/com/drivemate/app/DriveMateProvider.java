@@ -108,6 +108,7 @@ public final class DriveMateProvider {
             for(int i=0;i<input.length();i++){JSONArray feature=input.getJSONArray(i);vertices+=feature.getJSONArray(2).length();if(vertices>100000)return null;features.add(feature);}
             DmUnifiedGeometry geometry=new DmUnifiedGeometry(features,route.points,route.geometryWays,b);
             JSONArray mapped=result.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
+            JSONArray enforcement=result.optJSONArray("enforcement");if(enforcement!=null)geometry.setEnforcement(enforcement);
             return geometry;
         }catch(Exception failure){return null;}
     }
