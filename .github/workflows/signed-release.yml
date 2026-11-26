@@ -29,6 +29,9 @@ jobs:
     timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Reject obsolete release version
         run: |
@@ -184,11 +187,20 @@ jobs:
           DRIVEMATE_ZIP_PASSWORD: ${{ secrets.DRIVEMATE_ZIP_PASSWORD }}
         run: |
           bash tools/encrypt-apk.sh "app/build/outputs/apk/release/DriveMate-$VERSION-signed.apk" "release-output/DriveMate-$VERSION-signed.zip"
+      - name: Create release recovery evidence
+        run: |
+          set -euo pipefail
+          (cd release-output && sha256sum *.zip > SHA256SUMS)
+          python3 tools/write_release_evidence.py --directory release-output
       - name: Upload encrypted signed APK ZIP only
         uses: actions/upload-artifact@v4
         with:
           name: DriveMate-${{ env.VERSION }}-password-protected
-          path: release-output/DriveMate-${{ env.VERSION }}-signed.zip
+          path: |
+            release-output/DriveMate-${{ env.VERSION }}-signed.zip
+            release-output/SHA256SUMS
+            release-output/release-manifest.json
+            release-output/CHANGELOG.md
           if-no-files-found: error
           retention-days: 30
 
@@ -203,17 +215,8 @@ jobs:
             echo "Release tag already exists; review assets instead of replacing"; exit 1
           fi
           mkdir -p release-output
-          (cd release-output && sha256sum *.zip > SHA256SUMS)
-          python3 - <<'PY'
-          import hashlib,json,os
-          from pathlib import Path
-          v=json.loads(Path("release/version.json").read_text())
-          apk=next(Path("release-output").glob("*.zip"))
-          v.update({"commit":os.environ["GITHUB_SHA"],"run_id":os.environ["GITHUB_RUN_ID"],"encrypted_zip":apk.name,"sha256":hashlib.file_digest(apk.open("rb"),"sha256").hexdigest(),"map":json.loads(Path("release/map-lock.json").read_text()),"road_validated":False})
-          Path("release-output/release-manifest.json").write_text(json.dumps(v,indent=2)+"\n")
-          PY
           printf 'DriveMate %s. Password-protected signed update ZIP; existing package and certificate. Automated build, offline and UI replay checks passed. Not physically road validated. See release-manifest.json and Actions run %s.\n' "$VERSION" "$GITHUB_RUN_ID" > release-output/notes.md
-          gh release create "$tag" release-output/*.zip release-output/SHA256SUMS release-output/release-manifest.json --repo "$GH_REPO" --target "$GITHUB_SHA" --title "DriveMate $VERSION" --notes-file release-output/notes.md --draft --prerelease
+          gh release create "$tag" release-output/*.zip release-output/SHA256SUMS release-output/release-manifest.json release-output/CHANGELOG.md --repo "$GH_REPO" --target "$GITHUB_SHA" --title "DriveMate $VERSION" --notes-file release-output/notes.md --draft --prerelease
           gh release edit "$tag" --repo "$GH_REPO" --draft=false
       - name: Remove transient signing key
         if: always()
