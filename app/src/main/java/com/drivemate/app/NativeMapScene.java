@@ -20,8 +20,11 @@ final class NativeMapScene {
         }
     }
     final List<Shape> shapes;final List<GeoMath.Point> route;final int checkedEdges;final double[] bounds;
+    final List<RouteRoadsideAwareness.Event> routeRoadside;
+    final List<MappedEnforcement.Zone> averageZones;
     private NativeMapScene(List<Shape> shapes,List<GeoMath.Point> route,int edges,double[] bounds){
         this.shapes=Collections.unmodifiableList(shapes);this.route=Collections.unmodifiableList(new ArrayList<>(route));checkedEdges=edges;this.bounds=bounds.clone();
+        routeRoadside=Collections.emptyList();averageZones=Collections.emptyList(); // no exact node-tag/relationship evidence in current regional pack
     }
     private static boolean yes(String tag){return !tag.isEmpty()&&!Arrays.asList("no","false","0").contains(tag);}
     static int kind(JSONObject t,boolean closed){

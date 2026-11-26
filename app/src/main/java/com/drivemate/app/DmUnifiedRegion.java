@@ -61,23 +61,6 @@ final class DmUnifiedRegion {
         DisplayContext c=context(route.points,route.ways);
         return NativeMapScene.fromRegional(c.features,route,c.bounds);
     }
-    DmUnifiedGeometry geometry(DmTileEngine.Route route)throws Exception{
-        DisplayContext c=context(route.points,route.ways);
-        return DmUnifiedGeometry.regional(c.features,route,c.bounds);
-    }
-    DmUnifiedGeometry geometry(List<GeoMath.Point> points,List<Long> ways)throws Exception{
-        DisplayContext c=context(points,ways);
-        return DmUnifiedGeometry.regional(c.features,points,ways,c.bounds);
-    }
-    /** Only enable the regional live renderer if every actual route vertex and ordered way matches the same pinned OSM snapshot. */
-    static DmUnifiedGeometry matchLive(Context context, TomTomApi.Route route) {
-        if(route.geometrySourceSha.isEmpty() || route.geometryWays.isEmpty() || !RouteMapPolicy.insideStockport(route.points))return null;
-        try {
-            DmUnifiedRegion region=new DmUnifiedRegion(context,true);
-            if(!route.geometrySourceSha.equals(region.parentSource))return null;
-            return region.geometry(route.points,route.geometryWays);
-        }catch(Exception failure){return null;}
-    }
     DmTileEngine.Route sample(boolean stockport)throws Exception{
         double[][] choices=stockport?new double[][]{{53.405,-2.165,53.410,-2.171},{53.400,-2.154,53.405,-2.165},{53.410,-2.171,53.400,-2.154}}:new double[][]{{51.209,-2.647,51.207,-2.641}};
         Exception last=null;

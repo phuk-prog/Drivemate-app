@@ -3,7 +3,6 @@ package com.drivemate.app;
 import android.content.Context;
 import java.io.*;
 import java.util.*;
-import org.maplibre.geojson.*;
 
 /** Mapped locations only; not evidence of operating status or route/direction applicability. */
 final class MappedRoadside {
@@ -40,20 +39,5 @@ final class MappedRoadside {
         if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)||south>north||west>east||north-south>.25||east-west>.25)return Collections.emptyList();
         int a=(int)Math.floor(south*1e7),b=(int)Math.ceil(north*1e7),x=(int)Math.floor(west*1e7),y=(int)Math.ceil(east*1e7);
         List<int[]> out=new ArrayList<>();for(int i=first(a);i<lat.length&&lat[i]<=b;i++)if(lon[i]>=x&&lon[i]<=y){if(out.size()>=1500)break;out.add(new int[]{lat[i],lon[i],kind[i]});}return out;
-    }
-    FeatureCollection features(double south,double west,double north,double east,boolean detailed){
-        ArrayList<Feature> out=new ArrayList<>();
-        if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)
-            ||south>north||west>east||north-south>.25||east-west>.25)return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
-        int a=(int)Math.floor(south*1e7),b=(int)Math.ceil(north*1e7),x=(int)Math.floor(west*1e7),y=(int)Math.ceil(east*1e7);
-        for(int i=first(a);i<lat.length&&lat[i]<=b;i++){
-            if(lon[i]<x||lon[i]>y||kind[i]==4||(!detailed&&kind[i]!=1))continue;
-            if(out.size()>=1500)break;
-            Feature f=Feature.fromGeometry(Point.fromLngLat(lon[i]/1e7,lat[i]/1e7));
-            f.addStringProperty("icon","dm-mapped-"+CrossingType.ICONS[kind[i]]);
-            if(kind[i]==2||kind[i]>=5)f.addStringProperty("label",CrossingType.label(kind[i]));
-            out.add(f);
-        }
-        return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
     }
 }

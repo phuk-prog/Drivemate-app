@@ -3525,12 +3525,12 @@ public final class MainActivity extends Activity implements LocationListener {
         }
 
         RouteRoadsideAwareness.Event roadside = confident && guidancePositionConfirmed && accuracy<=25 && offRoute<=20
-                && route.sharedGeometry!=null && age<=480000
-                ? RouteRoadsideAwareness.next(route.sharedGeometry.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
+                && route.nativeScene!=null && age<=480000
+                ? RouteRoadsideAwareness.next(route.nativeScene.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
                 : null;
         MappedEnforcement.Zone activeZone=null;
-        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20&&route.sharedGeometry!=null&&age<=480000){
-            for(MappedEnforcement.Zone z:route.sharedGeometry.averageZones)if(z.active(along)){
+        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20&&route.nativeScene!=null&&age<=480000){
+            for(MappedEnforcement.Zone z:route.nativeScene.averageZones)if(z.active(along)){
                 if(activeZone==null||z.end<activeZone.end)activeZone=z;
             }
         }

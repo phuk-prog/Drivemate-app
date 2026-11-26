@@ -21,7 +21,7 @@ android {
         }
     }
     // PMTiles archives already compress their own tile/index data. Keep the
-    // bundled overview uncompressed in APK so MapLibre can seek by byte range.
+    // bundled overview uncompressed in APK so DriveMate can seek by byte range.
     androidResources {
         noCompress += ['pmtiles']
     }
@@ -31,7 +31,6 @@ android {
     }
 }
 dependencies {
-    implementation 'org.maplibre.gl:android-sdk-opengl:13.7.1'
     androidTestImplementation 'androidx.test:runner:1.6.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'
     testImplementation 'junit:junit:4.13.2'

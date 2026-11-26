@@ -69,6 +69,7 @@ final class NativeMapView extends View {
     void setNight(boolean value){night=value;invalidate();}
     void setCamera(GeoMath.Point p,double z,double bearing,double tilt){if(p==null)return;center=p;zoom=Math.max(2,Math.min(21,z));this.bearing=bearing;this.tilt=tilt;invalidate();}
     void setProgress(double value,GeoMath.Point vehicle,double turnOffset){progress=Math.max(0,value);this.vehicle=vehicle;turn=turnOffset;invalidate();}
+    double bearing(){return bearing;}
     int roadsDrawn(){return roadsDrawn;}int routeDrawn(){return routeDrawn;}int buildingsDrawn(){return buildingsDrawn;}
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
     private int color(int day,int dark){return night?dark:day;}
