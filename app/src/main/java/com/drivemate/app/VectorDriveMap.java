@@ -177,7 +177,9 @@ public final class VectorDriveMap {
         org.maplibre.android.style.layers.Layer flat = map.getStyle().getLayer("uk-buildings");
         if (blocks != null) blocks.setProperties(PropertyFactory.visibility(
                 enabled ? "visible" : "none"));
-        if (flat != null) flat.setMaxZoom(enabled ? 14.5f : 24f);
+        // Preserve genuine footprints as a fallback at every zoom; extrusion
+        // height starts at zero and can otherwise leave buildings invisible.
+        if (flat != null) flat.setMaxZoom(24f);
     }
 
     /**
@@ -504,7 +506,7 @@ public final class VectorDriveMap {
                 PropertyFactory.iconAllowOverlap(true),
                 PropertyFactory.iconIgnorePlacement(true),
                 PropertyFactory.iconRotationAlignment("viewport"),
-                PropertyFactory.iconRotate(0f),PropertyFactory.iconSize(1.0f));
+                PropertyFactory.iconRotate(0f),PropertyFactory.iconSize(1.28f));
         style.addLayer(vehicle);
         SymbolLayer currentRoadLayer=new SymbolLayer("dm-current-road-label","dm-current-road");
         currentRoadLayer.setProperties(PropertyFactory.textField(org.maplibre.android.style.expressions.Expression.get("name")),
