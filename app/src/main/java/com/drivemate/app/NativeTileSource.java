@@ -11,6 +11,8 @@ final class NativeTileSource implements AutoCloseable {
     private volatile DriveTileServer uk;
     private volatile PmTilesReader world;
     private volatile PackTiles packs;
+    private volatile CdnTiles cdn;
+    private synchronized CdnTiles cdn(){if(cdn==null)cdn=new CdnTiles(app);return cdn;}
     private volatile int packGeneration=-1;
     private AssetFileDescriptor worldAsset;
     private FileInputStream worldStream;
@@ -60,7 +62,7 @@ final class NativeTileSource implements AutoCloseable {
         return packs;
     }
     private byte[] raw(int z,int x,int y)throws IOException{
-        if(z>6){byte[] local=installedPacks().tile(z,x,y);if(local!=null)return local;return ukServer().nativeTile(z,x,y);}
+        if(z>6){byte[] local=installedPacks().tile(z,x,y);if(local!=null)return local;byte[] fast=cdn().tile(z,x,y);if(fast!=null)return fast;return ukServer().nativeTile(z,x,y);}
         if(world==null)openWorld();
         return world.tile(z,x,y);
     }

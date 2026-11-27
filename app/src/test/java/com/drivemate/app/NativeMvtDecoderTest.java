@@ -17,4 +17,19 @@ public class NativeMvtDecoderTest {
         assertEquals((8090+20/4096.0)/16384,shapes.get(0).xy[2],1e-12);
         try{NativeMvtDecoder.decode(new byte[]{26,100},14,8090,5300);fail("truncated accepted");}catch(IOException expected){}
     }
+    private static byte[] omtRoad(String cls)throws Exception{
+        byte[] geometry=concat(v(9),v(20),v(40),v(10),v(20),v(0));
+        byte[] f=concat(field(2,concat(v(0),v(0))),v(24),v(2),field(4,geometry));
+        byte[] value=field(1,cls.getBytes("UTF-8"));
+        byte[] layer=concat(field(1,"transportation".getBytes("UTF-8")),field(2,f),field(3,"class".getBytes("UTF-8")),field(4,value),v(40),v(4096),v(120),v(2));
+        return field(3,layer);
+    }
+    @Test public void openMapTilesRoadsMapToDriveMateKinds()throws Exception{
+        List<NativeMapScene.Shape> a=NativeMvtDecoder.decode(omtRoad("primary"),14,8090,5300);
+        assertEquals(1,a.size());assertEquals(NativeMapScene.MAIN,a.get(0).kind);
+        assertEquals(NativeMapScene.MOTORWAY,NativeMvtDecoder.decode(omtRoad("motorway"),14,8090,5300).get(0).kind);
+        assertEquals(NativeMapScene.LOCAL,NativeMvtDecoder.decode(omtRoad("minor"),14,8090,5300).get(0).kind);
+        assertEquals(NativeMapScene.RAIL,NativeMvtDecoder.decode(omtRoad("rail"),14,8090,5300).get(0).kind);
+        assertTrue(NativeMvtDecoder.decode(omtRoad("ferry"),14,8090,5300).isEmpty());
+    }
 }

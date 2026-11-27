@@ -164,7 +164,7 @@ final class NativeMapView extends View {
         if(scene==null){paint.setColor(color(0xff344451,0xfff1f4f5));paint.setTextSize(dp(12));paint.setStyle(Paint.Style.FILL);canvas.drawText("Map coverage unavailable",dp(10),getHeight()*.45f,paint);}
         long elapsed=System.nanoTime()-frameStart;frameCount++;drawTotalNanos+=elapsed;drawMaxNanos=Math.max(drawMaxNanos,elapsed);
         if(paintListener!=null)paintListener.run();
-        paint.setStyle(Paint.Style.FILL);paint.setTextSize(dp(10));paint.setColor(color(0xff344451,0xfff1f4f5));canvas.drawText("© OpenStreetMap contributors · DriveMate native",dp(8),getHeight()-dp(8),paint);
+        paint.setStyle(Paint.Style.FILL);paint.setTextSize(dp(10));paint.setColor(color(0xff344451,0xfff1f4f5));canvas.drawText("© OpenStreetMap contributors · OpenFreeMap · OpenMapTiles",dp(8),getHeight()-dp(8),paint);
     }
     private void marker(Canvas canvas,NativeMapProjection.Camera c,GeoMath.Point p,int color,String text){
         if(p==null)return;point(c,p);if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1]))return;paint.setStyle(Paint.Style.FILL);paint.setColor(color);canvas.drawCircle(screen[0],screen[1],dp(9),paint);paint.setColor(Color.WHITE);paint.setTextSize(dp(10));canvas.drawText(text,screen[0]-paint.measureText(text)/2,screen[1]+dp(3),paint);
