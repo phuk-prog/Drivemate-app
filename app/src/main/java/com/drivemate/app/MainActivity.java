@@ -1776,7 +1776,30 @@ public final class MainActivity extends Activity implements LocationListener {
     private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
         List<TomTomApi.Destination> online=OnlineFirst.search(onlineKey(),query,near,hasNetwork());
         if(online!=null)return online;
-        return new NativeRegionalRouter(this).search(query,near);
+        // Offline: names and places from installed map areas, then the Stockport address/postcode index.
+        List<TomTomApi.Destination> named=packSearch(query,near,new int[]{2,5,9});
+        List<TomTomApi.Destination> addresses;
+        try{addresses=new NativeRegionalRouter(this).search(query,near);}catch(Exception e){addresses=new ArrayList<>();if(named.isEmpty())throw e;}
+        // Anything with a digit is more likely an address or postcode, so that index goes first.
+        boolean addressLike=query.matches(".*[0-9].*");
+        List<TomTomApi.Destination> merged=new ArrayList<>(addressLike?addresses:named);
+        for(TomTomApi.Destination d:(addressLike?named:addresses)){
+            boolean duplicate=false;
+            for(TomTomApi.Destination m:merged)if(GeoMath.distance(m.point,d.point)<30){duplicate=true;break;}
+            if(!duplicate)merged.add(d);
+        }
+        return merged.size()>8?new ArrayList<>(merged.subList(0,8)):merged;
+    }
+    /** Offline name search (places, streets, towns, stops) over the installed map areas. */
+    private List<TomTomApi.Destination> packSearch(String query,GeoMath.Point near,int[] rings){
+        MapPacks store=new MapPacks(this);
+        List<java.io.File> files=store.installedFiles();
+        if(near==null||files.isEmpty())return new ArrayList<>();
+        PackTiles tiles=new PackTiles();
+        try{
+            for(java.io.File f:files)try{tiles.add(f);}catch(java.io.IOException ignored){}
+            return PackSearch.search(tiles,query,near,rings);
+        }finally{tiles.close();}
     }
     /** The saved TomTom key, only when the owner has consented to online search and routing. */
     private String onlineKey(){
@@ -2037,16 +2060,17 @@ public final class MainActivity extends Activity implements LocationListener {
         typeaheadHandler.removeCallbacksAndMessages(null);
         final String key = onlineKey();
         final String typed = raw.trim().toLowerCase(Locale.UK);
-        if (typed.length() < 3 || !hasNetwork()) return;
-        if (key.isEmpty()) {
-            if (!keyTipShown) { keyTipShown = true; setStatus("Tip: add your TomTom key in Settings for faster search and live-traffic routes."); }
-            return;
-        }
+        if (typed.length() < 3) return;
+        final boolean online = !key.isEmpty() && hasNetwork();
+        if (key.isEmpty() && !keyTipShown) { keyTipShown = true; setStatus("Tip: add your TomTom key in Settings for faster search and live-traffic routes."); }
         final int seq = ++typeaheadSeq;
         final GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
         typeaheadHandler.postDelayed(() -> suggestWorker.execute(() -> {
-            final List<TomTomApi.Destination> found = OnlineFirst.suggest(key, typed, near);
-            if (found == null) return;
+            List<TomTomApi.Destination> result = online ? OnlineFirst.suggest(key, typed, near) : null;
+            // TomTom unavailable or silent: suggest from the installed map areas instead.
+            if (result == null) { List<TomTomApi.Destination> local = packSearch(typed, near, new int[]{2, 4}); if (!local.isEmpty()) result = local; }
+            if (result == null) return;
+            final List<TomTomApi.Destination> found = result;
             runOnUiThread(() -> {
                 if (isFinishing() || seq != typeaheadSeq || destinationInput == null) return;
                 if (!destinationInput.getText().toString().trim().toLowerCase(Locale.UK).equals(typed)) return;
