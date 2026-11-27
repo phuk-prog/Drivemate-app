@@ -56,4 +56,16 @@ configurations.configureEach {
             }
         }
     }
+    // Same policy for AGP's host-side lint tool (build-time only, not packaged).
+    if (name == 'androidLintTool') {
+        resolutionStrategy.eachDependency { details ->
+            def g = details.requested.group
+            def n = details.requested.name
+            if (g == 'com.google.guava' && n == 'guava') details.useVersion('33.8.0-jre')
+            if (g == 'org.apache.commons' && n == 'commons-lang3') details.useVersion('3.18.0')
+            if (g == 'org.apache.httpcomponents' && n == 'httpclient') details.useVersion('4.5.13')
+            if (g == 'org.bouncycastle' && n == 'bcprov-jdk18on') details.useVersion('1.85')
+            if (g == 'org.bouncycastle' && n == 'bcpkix-jdk18on') details.useVersion('1.84')
+        }
+    }
 }
