@@ -36,11 +36,13 @@ public final class DmTileEngine {
         Node(JSONArray a,String cell)throws JSONException{id=a.getLong(0);point=new GeoMath.Point(a.getInt(1)/1e6,a.getInt(2)/1e6);edges=a.getJSONArray(3);rules=a.getJSONArray(4);this.cell=cell;}
     }
     static final class Tile{
-        final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places;
+        final Map<Long,Node> nodes=new HashMap<>();final JSONArray features,places,roadsideNodes,enforcement;
         Tile(JSONObject data,String key)throws Exception{
             JSONArray a=data.getJSONArray("nodes");if(a.length()>MAX_NODES)throw new IOException("Tile graph exceeds pilot bounds");
             for(int i=0;i<a.length();i++){Node n=new Node(a.getJSONArray(i),key);if(!key.equals(DmTileEngine.key(n.point.lat,n.point.lon))||nodes.put(n.id,n)!=null)throw new IOException("Wrong tile node");}
             features=data.getJSONArray("features");places=data.getJSONArray("places");
+            roadsideNodes=data.optJSONArray("roadside_nodes");enforcement=data.optJSONArray("enforcement");
+            if(roadsideNodes!=null&&roadsideNodes.length()>6000||enforcement!=null&&enforcement.length()>1000)throw new IOException("Road intelligence exceeds cell budget");
         }
     }
     private Tile load(String k)throws Exception{
@@ -128,6 +130,110 @@ public final class DmTileEngine {
     }
     public List<JSONArray> features(Set<String> cells)throws Exception{
         Map<Long,JSONArray> out=new LinkedHashMap<>();for(String k:new TreeSet<>(cells)){JSONArray a=load(k).features;for(int i=0;i<a.length();i++){JSONArray row=a.getJSONArray(i);out.put(row.getLong(0),row);}}return new ArrayList<>(out.values());
+    }
+    /** Display-only bounded scan. Release graph and unrelated tile JSON before converting to GPU features.
+     * Complete original ways are retained, never simplified or clipped to the viewport. */
+    List<JSONArray> boundedFeatures(Set<String> cells,double[] bounds,Set<Long> required,boolean buildingsOnly,
+                                    int maxFeatures,int maxVertices)throws Exception{
+        pinned.clear();cache.clear();
+        Map<Long,JSONArray> result=new LinkedHashMap<>();int vertices=0;
+        try{
+            for(String k:new TreeSet<>(cells)){
+                JSONArray rows=load(k).features;
+                for(int i=0;i<rows.length();i++){
+                    JSONArray row=rows.getJSONArray(i);long id=row.getLong(0);
+                    if(result.containsKey(id))continue;
+                    JSONObject tags=row.getJSONObject(1);
+                    if(buildingsOnly&&(!tags.has("building")||"no".equals(tags.optString("building"))))continue;
+                    JSONArray coords=row.getJSONArray(2);
+                    boolean mandatory=required.contains(id);
+                    if(!mandatory&&(bounds==null||!intersects(coords,bounds)))continue;
+                    if(coords.length()>maxVertices-vertices||result.size()>=maxFeatures)
+                        throw new CoverageException("Display region exceeds bounded geometry budget");
+                    result.put(id,row);vertices+=coords.length();
+                }
+                cache.remove(k);
+            }
+            if(!result.keySet().containsAll(required))throw new CoverageException("Route way outside available display region");
+            return new ArrayList<>(result.values());
+        }finally{cache.clear();}
+    }
+    static boolean intersects(JSONArray coords,double[] bounds)throws JSONException{
+        double west=180,east=-180,south=90,north=-90;
+        for(int i=0;i<coords.length();i++){
+            JSONArray p=coords.getJSONArray(i);double y=p.getInt(0)/1e6,x=p.getInt(1)/1e6;
+            west=Math.min(west,x);east=Math.max(east,x);south=Math.min(south,y);north=Math.max(north,y);
+        }
+        return coords.length()>0&&west<=bounds[2]&&east>=bounds[0]&&south<=bounds[3]&&north>=bounds[1];
+    }
+    /** Optional exact source records: deduplicate by original OSM identity, never nearest pixels. */
+    NativeRouteIntelligence.Result routeIntelligence(Route route)throws Exception{
+        Map<Long,JSONArray> nodes=new HashMap<>(),relations=new HashMap<>();
+        pinned.clear();cache.clear();
+        try{
+            for(String key:new TreeSet<>(route.cells)){
+                Tile t=load(key);collectIntelligence(t.roadsideNodes,nodes,6000);collectIntelligence(t.enforcement,relations,1000);cache.remove(key);
+            }
+            return NativeRouteIntelligence.match(route.points,route.nodeIds,route.ways,new JSONArray(nodes.values()),new JSONArray(relations.values()));
+        }finally{cache.clear();}
+    }
+    private static void collectIntelligence(JSONArray input,Map<Long,JSONArray> out,int max)throws Exception{
+        if(input==null)return;
+        for(int i=0;i<input.length();i++){JSONArray row=input.getJSONArray(i);long id=row.getLong(0);JSONArray previous=out.putIfAbsent(id,row);
+            if(previous!=null&&!previous.toString().equals(row.toString()))throw new IOException("Conflicting source intelligence");
+            if(out.size()>max)throw new IOException("Route intelligence exceeds budget");}
+    }
+    /** Tags and legal outgoing choices for the actual directed route, not a proximity guess. */
+    Map<Long,JSONObject> routeTags(Route route)throws Exception{
+        Set<Long> required=new HashSet<>(route.ways);Map<Long,JSONObject> out=new HashMap<>();
+        pinned.clear();cache.clear();
+        try{
+            for(String key:new TreeSet<>(route.cells)){
+                JSONArray rows=load(key).features;
+                for(int i=0;i<rows.length();i++){
+                    JSONArray row=rows.getJSONArray(i);long id=row.getLong(0);
+                    if(required.contains(id))out.put(id,row.getJSONObject(1));
+                }
+                cache.remove(key);
+            }
+            if(!out.keySet().containsAll(required))throw new CoverageException("Missing exact route way tags");
+            return out;
+        }finally{cache.clear();}
+    }
+    int[] legalChoices(Route route)throws Exception{
+        int[] count=new int[route.points.size()];
+        try{
+            for(int i=1;i<route.points.size()-1;i++){
+                GeoMath.Point p=route.points.get(i);Node n=load(key(p.lat,p.lon)).nodes.get(route.nodeIds.get(i));
+                if(n==null)throw new CoverageException("Missing route junction");
+                State state=new State(n,route.edgeIds.get(i-1),route.ways.get(i-1),route.nodeIds.get(i-1),0,0,0,null);
+                List<long[]> restrictions=rules(state);Set<Long> exits=new HashSet<>();boolean actual=false;
+                for(int j=0;j<n.edges.length();j++){
+                    JSONArray e=n.edges.getJSONArray(j);long dst=e.getLong(1),way=e.getLong(3);
+                    if(LocalRoutingPilot.allowed(state.prev,dst,way,restrictions)){
+                        exits.add(dst);if(e.getLong(0)==route.edgeIds.get(i))actual=true;
+                    }
+                }
+                if(!actual)throw new CoverageException("Route turn no longer permitted");
+                count[i]=exits.size();
+            }
+            return count;
+        }finally{cache.clear();}
+    }
+    /** Search one verified cell at a time, avoiding retaining the whole regional graph. */
+    List<JSONArray> regionalSearch(String query)throws Exception{
+        ArrayList<JSONArray> rows=new ArrayList<>();Set<String> seen=new HashSet<>();
+        pinned.clear();cache.clear();
+        try{
+            for(String k:keys()){
+                for(JSONArray row:search(query,Collections.singleton(k))){
+                    String identity=row.optString(0)+"|"+row.optInt(1)+"|"+row.optInt(2);
+                    if(seen.add(identity))rows.add(row);
+                }
+                cache.remove(k);
+            }
+            return rows;
+        }finally{cache.clear();}
     }
     public JSONObject wayTags(long id,Set<String> cells)throws Exception{
         for(JSONArray f:features(cells))if(f.getLong(0)==id)return f.getJSONObject(1);

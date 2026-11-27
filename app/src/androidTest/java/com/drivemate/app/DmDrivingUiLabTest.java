@@ -63,14 +63,23 @@ public class DmDrivingUiLabTest {
                 LocationManager lm=(LocationManager)field("locationManager").get(activity);if(lm!=null)lm.removeUpdates(activity);
                 assertTrue(field("active").getBoolean(activity));
             });
+            final int[] silentConfirmed={0};
             long began=SystemClock.elapsedRealtime();
             for(int k=0;k<fixes.length();k++){
                 final int index=k;JSONObject point=fixes.getJSONObject(k);
                 long wait=began+1000L*k-SystemClock.elapsedRealtime();if(wait>0)SystemClock.sleep(wait);
                 onMain(ins,()->{
+                    if(index==fixes.length()/3)call(activity,"setVoiceMode",new Class<?>[]{int.class},DrivingVoicePolicy.SILENT);
+                    if(index==fixes.length()*2/3)call(activity,"setVoiceMode",new Class<?>[]{int.class},DrivingVoicePolicy.NORMAL);
                     Location loc=fix(point);field("currentLocation").set(activity,loc);
                     // Invoke actual GPS callback, with no mock fix sent to other apps.
                     activity.onLocationChanged(loc);
+                    if(field("voiceMode").getInt(activity)==DrivingVoicePolicy.SILENT&&field("active").getBoolean(activity)
+                            &&field("guidancePositionConfirmed").getBoolean(activity)){
+                        assertFalse(text(activity,"tripDistanceValue").equals("—"));
+                        assertFalse(text(activity,"topInstructionText").isEmpty());
+                        silentConfirmed[0]++;
+                    }
                     results.put(new JSONObject().put("t",index).put("active",field("active").getBoolean(activity))
                         .put("heading",text(activity,"topTurnTitle")).put("instruction",text(activity,"topInstructionText"))
                         .put("next_instruction",text(activity,"nextInstruction")).put("eta",text(activity,"tripEtaValue"))
@@ -83,6 +92,7 @@ public class DmDrivingUiLabTest {
             }
             try(FileOutputStream file=new FileOutputStream(new File(out,"driving-ui-results.json"))){file.write(results.toString(2).getBytes(java.nio.charset.StandardCharsets.UTF_8));}
             assertEquals(fixes.length(),results.length());
+            assertTrue("Fixture must exercise confirmed visual guidance in silent mode",silentConfirmed[0]>0);
             android.util.Log.i("NavigationLab","LAB_DRIVING_UI "+results.length()+" actual UI fixes; fixture maneuvers not road validated; audio recording separate");
         }finally{onMain(ins,()->activity.finish());}
     }

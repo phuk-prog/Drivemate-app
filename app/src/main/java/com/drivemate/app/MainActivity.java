@@ -58,16 +58,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.osmdroid.config.Configuration;
-import org.osmdroid.tileprovider.MapTileProviderBasic;
-import org.osmdroid.tileprovider.tilesource.XYTileSource;
-import org.osmdroid.util.GeoPoint;
-import org.osmdroid.util.BoundingBox;
-import org.osmdroid.util.MapTileIndex;
-import org.osmdroid.views.MapView;
-import org.osmdroid.views.overlay.Marker;
-import org.osmdroid.views.overlay.Polyline;
-import org.osmdroid.views.overlay.TilesOverlay;
 
 import java.text.DateFormat;
 import java.util.ArrayList;
@@ -83,34 +73,26 @@ import java.util.concurrent.Executors;
  * This first build intentionally does not claim offline/background navigation.
  */
 public final class MainActivity extends Activity implements LocationListener {
-    final SettingsController settingsController = new SettingsController(this);
-    final ReviewController reviewController = new ReviewController(this);
-    final ParkingController parkingController = new ParkingController(this);
-    final DestinationController destinationController = new DestinationController(this);
-    final HomePanelController homePanelController = new HomePanelController(this);
-    final RoadContextController roadContextController = new RoadContextController(this);
-    final GuidanceDialogs guidanceDialogs = new GuidanceDialogs(this);
+    private static final int LOCATION_PERMISSION = 10;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 13;
+    private static final String PREFS = "drivemate_settings";
+    private static final int BLUE = Color.rgb(24, 110, 235);
+    private static final int DARK = Color.rgb(10, 39, 59);
+    private static final int CYAN = Color.rgb(7, 214, 235);
+    private static final int VOICE_SEARCH_REQUEST = 12;
+    private static final long ROUTE_REFRESH_MS = 300_000L;
 
-    static final int LOCATION_PERMISSION = 10;
-    static final int NOTIFICATION_PERMISSION_REQUEST = 13;
-    static final String PREFS = "drivemate_settings";
-    static final int BLUE = Color.rgb(24, 110, 235);
-    static final int DARK = Color.rgb(10, 39, 59);
-    static final int CYAN = Color.rgb(7, 214, 235);
-    static final int VOICE_SEARCH_REQUEST = 12;
-    static final long ROUTE_REFRESH_MS = 300_000L;
-
-    final ExecutorService network = Executors.newSingleThreadExecutor();
-    final ExecutorService packWorker = Executors.newSingleThreadExecutor();
-    final ExecutorService incidentWorker=Executors.newSingleThreadExecutor();
-    long lastIncidentRequest;
-    GeoMath.Point lastIncidentCentre;
-    int incidentGeneration;
-    boolean incidentBusy;
-    boolean downloadingLocalPack;
-    final Handler gpsHandler = new Handler(Looper.getMainLooper());
-    boolean gpsLost;
-    final Runnable gpsWatchdog = new Runnable() {
+    private final ExecutorService network = Executors.newSingleThreadExecutor();
+    private final ExecutorService packWorker = Executors.newSingleThreadExecutor();
+    private final ExecutorService incidentWorker=Executors.newSingleThreadExecutor();
+    private long lastIncidentRequest;
+    private GeoMath.Point lastIncidentCentre;
+    private int incidentGeneration;
+    private boolean incidentBusy;
+    private boolean downloadingLocalPack;
+    private final Handler gpsHandler = new Handler(Looper.getMainLooper());
+    private boolean gpsLost;
+    private final Runnable gpsWatchdog = new Runnable() {
         @Override public void run() {
             if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
             if ((active||freeDriving) && currentLocation != null
@@ -118,9 +100,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
-                    roadContextController.clearLiveIncidents();
+                    clearLiveIncidents();
                     if(active)suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
-                    else if(freeDriving)roadContextController.clearFreeRoadContext();
+                    else if(freeDriving)clearFreeRoadContext();
                     if (speedText != null) speedText.setText("GPS —");
                     if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
                     if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
@@ -158,10 +140,10 @@ public final class MainActivity extends Activity implements LocationListener {
      * the legacy raster engine remains near 9fps to avoid tile redraw stalls.
      * Choreographer avoids the timer drift of repeated Handler.postDelayed.
      */
-    long lastVisualTickMs;
-    long motionStatsStartMs;
-    int motionFrames;
-    final android.view.Choreographer.FrameCallback smoothFrameClock =
+    private long lastVisualTickMs;
+    private long motionStatsStartMs;
+    private int motionFrames;
+    private final android.view.Choreographer.FrameCallback smoothFrameClock =
             new android.view.Choreographer.FrameCallback() {
         @Override public void doFrame(long frameTimeNanos) {
             if (!active || !followLocation || smoothFollow == null || isFinishing()) {
@@ -177,33 +159,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     lastCameraBearing = frame.bearing;
                     if(drivingCompass!=null)drivingCompass.setRotation((float)-frame.bearing);
                     lastTravelBearing = frame.travelBearing;
-                    if (showingVector() && vectorMap != null) {
-                        vectorMap.followFrame(frame);
-                    } else {
-                        if (map != null) {
-                            if (userPin != null) {
-                                userPin.setPosition(new GeoPoint(
-                                        frame.vehicle.lat, frame.vehicle.lon));
-                                // A flat screen-facing arrow must show travel
-                                // direction *relative to* the moving map camera.
-                                userPin.setRotation(CameraHeadingPolicy.rasterMarkerRotation(
-                                        frame.travelBearing, frame.bearing));
-                            }
-                            map.getController().setCenter(new GeoPoint(
-                                    frame.center.lat, frame.center.lon));
-                            if (smoothTick % 3 == 0
-                                    && Math.abs(map.getZoomLevelDouble() - frame.zoom) >= 0.12)
-                                map.getController().setZoom(frame.zoom);
-                            float delta = (float) MapFollowPolicy.shortestHeadingDifference(
-                                    -frame.bearing, map.getMapOrientation());
-                            if (smoothTick % 2 == 0 && Math.abs(delta) >= 1.5)
-                                map.setMapOrientation(map.getMapOrientation() + delta);
-                            if (routeLine != null) routeLine.getOutlinePaint().setStrokeWidth(dp(RouteMapPolicy.rasterWidthDp(map.getZoomLevelDouble())));
-                            map.postInvalidateOnAnimation();
-                        }
-                        if (vectorMap != null && !matchingTomTomMap() && useLocalMap && !autoFallback
-                                && smoothTick % 5 == 0) vectorMap.followFrame(frame);
-                    }
+                    if(vectorMap!=null)vectorMap.followFrame(frame);
                     motionFrames++;
                 }
                 smoothTick++;
@@ -224,7 +180,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     };
 
-    void startSmoothLoop() {
+    private void startSmoothLoop() {
         if (smoothLoopRunning || !foreground || !active
                 || !followLocation || smoothFollow == null) return;
         smoothLoopRunning = true;
@@ -235,12 +191,12 @@ public final class MainActivity extends Activity implements LocationListener {
         android.view.Choreographer.getInstance().postFrameCallback(smoothFrameClock);
     }
 
-    void stopSmoothLoop() {
+    private void stopSmoothLoop() {
         android.view.Choreographer.getInstance().removeFrameCallback(smoothFrameClock);
         smoothLoopRunning = false;
     }
 
-    void disengageFollowForGesture() {
+    private void disengageFollowForGesture() {
         if (!active || !followLocation) return;
         followLocation = false;
         stopSmoothLoop();
@@ -252,7 +208,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    void updateFollowButton() {
+    private void updateFollowButton() {
         if (followButton == null) return;
         boolean paused = active && !followLocation;
         followButton.setText(paused ? "↪" : "◎");
@@ -263,183 +219,181 @@ public final class MainActivity extends Activity implements LocationListener {
                 paused ? CYAN : DARK));
         followButton.setTextColor(paused ? DARK : Color.WHITE);
     }
-
-    MapView map;
-    DriveTileServer driveTiles;
-    VectorDriveMap vectorMap;
-    Bundle vectorSavedState;
-    boolean useLocalMap = true;
-    boolean vectorRoadsReady;
-    boolean autoFallback;
-    View speedBadgeView;
-    boolean keyboardOpen;
-    boolean homeMode = true;
-    boolean freeDriving;
-    boolean advanceSpeedVoice = true;
-    double freeDriveBearing=Double.NaN;
-    final FreeDriveRoadMatch freeRoadMatch=new FreeDriveRoadMatch();
-    DriveMateProvider.RoadContext freeRoadContext;
-    long freeContextRequestedAt;
-    int freeContextGeneration;
-    boolean freeContextBusy;
-    int freeLastLimit=-1;
-    long freeAdvanceNode=-1,freeLastLimitAt;
-    String freeContextEndpoint="";
-    LinearLayout homePanel;
-    LinearLayout navigationPanel;
-    LinearLayout topMapOverlay;
-    LinearLayout searchBar;
-    LinearLayout drivingTopPanel;
-    LinearLayout brandHeader;
-    LinearLayout tripMetricsRow;
-    LinearLayout drivingTurnCard;
-    TextView drivingCompass;
-    Button drivingMore;
-    boolean drivingControlsExpanded;
-    LinearLayout previewTurnRow;
-    LinearLayout previewDetailsRow;
-    LinearLayout bottomActionRow;
-    LinearLayout.LayoutParams bottomActionsParams;
-    TextView tripEtaValue;
-    TextView tripMinutesValue;
-    TextView tripDistanceValue;
-    TextView topInstructionText;
-    TextView topRoadText;
-    TextView lanePromptText;
-    String currentLanePrompt = "";
-    int spokenLaneIndex = -1;
-    String spokenLanePrompt = "";
-    int traceInstructionIndex = -1;
-    float[] currentRoundaboutTrace;
-    List<GeoMath.Point> currentJunctionPath = java.util.Collections.emptyList();
-    JunctionManeuverView junctionPathView;
-    AlertDialog upcomingDialog;
-    int reassuranceIndex=-1;
+    private NativeMapController vectorMap;
+    private Bundle vectorSavedState;
+    private boolean useLocalMap = true;
+    private boolean vectorRoadsReady;
+    private boolean autoFallback;
+    private View speedBadgeView;
+    private boolean keyboardOpen;
+    private boolean homeMode = true;
+    private boolean freeDriving;
+    private boolean advanceSpeedVoice = true;
+    private double freeDriveBearing=Double.NaN;
+    private final FreeDriveRoadMatch freeRoadMatch=new FreeDriveRoadMatch();
+    private NativeRegionalRouter.RoadContext freeRoadContext;
+    private long freeContextRequestedAt;
+    private int freeContextGeneration;
+    private boolean freeContextBusy;
+    private int freeLastLimit=-1;
+    private long freeAdvanceNode=-1,freeLastLimitAt;
+    private String freeContextEndpoint="";
+    private LinearLayout homePanel;
+    private LinearLayout navigationPanel;
+    private LinearLayout topMapOverlay;
+    private LinearLayout searchBar;
+    private LinearLayout drivingTopPanel;
+    private LinearLayout brandHeader;
+    private LinearLayout tripMetricsRow;
+    private LinearLayout drivingTurnCard;
+    private TextView drivingCompass;
+    private Button drivingMore;
+    private Button overviewButton;
+    private long lastConfirmedMetricsAt=-1;
+    private String confirmedEta="",confirmedMinutes="",confirmedDistance="";
+    private boolean drivingControlsExpanded;
+    private LinearLayout previewTurnRow;
+    private LinearLayout previewDetailsRow;
+    private LinearLayout bottomActionRow;
+    private LinearLayout.LayoutParams bottomActionsParams;
+    private TextView tripEtaValue;
+    private TextView tripMinutesValue;
+    private TextView tripDistanceValue;
+    private TextView topInstructionText;
+    private TextView topRoadText;
+    private TextView lanePromptText;
+    private String currentLanePrompt = "";
+    private int spokenLaneIndex = -1;
+    private String spokenLanePrompt = "";
+    private int traceInstructionIndex = -1;
+    private float[] currentRoundaboutTrace;
+    private List<GeoMath.Point> currentJunctionPath = java.util.Collections.emptyList();
+    private JunctionManeuverView junctionPathView;
+    private AlertDialog upcomingDialog;
+    private int reassuranceIndex=-1;
     /** Large distance to the next manoeuvre, on its own line above the road. */
-    TextView topDistanceText;
-    TextView topTurnTitle;
-    TextView topNextTurnText;
-    TurnArrowView topTurnArrow;
-    TextView verifiedJunctionRoad;
-    LinearLayout recentList;
-    Button homeTile;
-    Button workTile;
-    FrameLayout.LayoutParams speedBadgePos;
-    FrameLayout.LayoutParams gpsButtonPos;
-    AutoCompleteTextView destinationInput;
-    final List<TomTomApi.Destination> suggestionMatches = new ArrayList<>();
-    Button trafficButton;
-    Button voiceButton;
-    Button followButton;
-    TextView banner;
-    TextView instructionText;
-    TurnArrowView maneuverIcon;
-    TextView nextTurnText;
-    TextView journeyTimeText;
-    TextView gpsAccuracyText;
-    TextView distanceText;
-    TextView etaText;
-    TextView speedText;
-    TextView speedLimitText;
-    LaneGuidanceView laneGuidanceText;
-    NavigationMatch navigationMatch;
-    final MapReview mapReview = new MapReview();
-    TomTomApi.Route comparisonRoute;
-    boolean comparisonBusy;
-    int reviewGeneration;
-    long comparisonRequestedAt;
-    long lastRoutePrefetchAt = -1;
-    TextView trafficNoticeText;
-    TextView arrivalHintText;
-    Button findParkingButton;
-    Button previewParkingButton;
-    final ArrivalPolicy arrivalPolicy = new ArrivalPolicy();
-    LinearLayout rerouteSuggestionRow;
-    TextView rerouteSuggestionText;
-    TomTomApi.Route pendingRoute;
-    long pendingRouteAtMs;
-    GeoMath.Point pendingRouteOrigin;
-    int pendingSavingSeconds;
-    int rerouteMode = 1; // 0 automatic, 1 ask first
-    int speedToleranceMph = 5;
-    long lastSpeedWarningAt;
-    TextView upcomingSpeedText, upcomingRoadsideText;
-    final RouteRoadsideAwareness roadsideAwareness=new RouteRoadsideAwareness();
-    final SpeedChangeAwareness speedChangeAwareness = new SpeedChangeAwareness();
-    long lastTrafficWarningAt;
-    double lastTrafficWarningStart = -1;
-    Button stopButton;
-    Button startButton;
-    Button saveButton;
-    Button repeatButton;
-    Button refreshButton;
-    Button unitsButton;
-    TextView routeSummary;
-    DestinationStore places;
-    boolean metricUnits;
-    String nextInstruction = "";
-    final VehicleFilter vehicleFilter = new VehicleFilter();
-    int voiceMode = DrivingVoicePolicy.NORMAL;
-    int cameraMode = DrivingDisplayPolicy.CAMERA_AUTO_3D;
-    int themePreference = DrivingDisplayPolicy.DEFAULT_THEME;
-    boolean nightDisplay;
-    boolean themeApplied;
-    boolean hazardWarningEnabled = true;
-    boolean speedWarningEnabled = true;
+    private TextView topDistanceText;
+    private TextView topTurnTitle;
+    private TextView topNextTurnText;
+    private TurnArrowView topTurnArrow;
+    private TextView verifiedJunctionRoad;
+    private LinearLayout recentList;
+    private Button homeTile;
+    private Button workTile;
+    private FrameLayout.LayoutParams speedBadgePos;
+    private FrameLayout.LayoutParams gpsButtonPos;
+    private AutoCompleteTextView destinationInput;
+    private final List<TomTomApi.Destination> suggestionMatches = new ArrayList<>();
+    private Button trafficButton;
+    private Button voiceButton;
+    private Button followButton;
+    private TextView banner;
+    private TextView instructionText;
+    private TurnArrowView maneuverIcon;
+    private TextView nextTurnText;
+    private TextView journeyTimeText;
+    private TextView gpsAccuracyText;
+    private TextView distanceText;
+    private TextView etaText;
+    private TextView speedText;
+    private TextView speedLimitText;
+    private LaneGuidanceView laneGuidanceText;
+    private NavigationMatch navigationMatch;
+    private final MapReview mapReview = new MapReview();
+    private TomTomApi.Route comparisonRoute;
+    private boolean comparisonBusy;
+    private int reviewGeneration;
+    private long comparisonRequestedAt;
+    private long lastRoutePrefetchAt = -1;
+    private TextView trafficNoticeText;
+    private TextView arrivalHintText;
+    private Button findParkingButton;
+    private Button previewParkingButton;
+    private final ArrivalPolicy arrivalPolicy = new ArrivalPolicy();
+    private LinearLayout rerouteSuggestionRow;
+    private TextView rerouteSuggestionText;
+    private TomTomApi.Route pendingRoute;
+    private long pendingRouteAtMs;
+    private GeoMath.Point pendingRouteOrigin;
+    private int pendingSavingSeconds;
+    private int rerouteMode = 1; // 0 automatic, 1 ask first
+    private int speedToleranceMph = 5;
+    private long lastSpeedWarningAt;
+    private TextView upcomingSpeedText, upcomingRoadsideText;
+    private final RouteRoadsideAwareness roadsideAwareness=new RouteRoadsideAwareness();
+    private final SpeedChangeAwareness speedChangeAwareness = new SpeedChangeAwareness();
+    private long lastTrafficWarningAt;
+    private double lastTrafficWarningStart = -1;
+    private Button stopButton;
+    private Button startButton;
+    private Button saveButton;
+    private Button repeatButton;
+    private Button refreshButton;
+    private Button unitsButton;
+    private TextView routeSummary;
+    private DestinationStore places;
+    private boolean metricUnits;
+    private String nextInstruction = "";
+    private final VehicleFilter vehicleFilter = new VehicleFilter();
+    private int voiceMode = DrivingVoicePolicy.NORMAL;
+    private int cameraMode = DrivingDisplayPolicy.CAMERA_AUTO_3D;
+    private int themePreference = DrivingDisplayPolicy.DEFAULT_THEME;
+    private boolean nightDisplay;
+    private boolean themeApplied;
+    private boolean hazardWarningEnabled = true;
+    private boolean speedWarningEnabled = true;
     /** Extruded building blocks on the map (Settings). */
-    boolean buildings3d = true;
-    final List<TextView> tripMetricCaptions = new ArrayList<>();
-    float guidanceVolume = 0.85f;
-    boolean closeZoom;
-    boolean highDetailOnline = true;
-    int previousInstructionIndex;
-    double stabilizedAlong = -1;
-    double observedSpeed;
-    long lastNetworkWarning;
-    boolean networkLost;
-    long lastRerouteAttempt;
+    private boolean buildings3d = true;
+    private final List<TextView> tripMetricCaptions = new ArrayList<>();
+    private float guidanceVolume = 0.85f;
+    private boolean closeZoom;
+    private boolean highDetailOnline = true;
+    private int previousInstructionIndex;
+    private double stabilizedAlong = -1;
+    private double observedSpeed;
+    private long lastNetworkWarning;
+    private boolean networkLost;
+    private long lastRerouteAttempt;
 
-    LocationManager locationManager;
-    Location currentLocation;
+    private LocationManager locationManager;
+    private Location currentLocation;
     /** Last fix that passed FixQualityPolicy; the gate compares every new fix to it. */
-    FixQualityPolicy.Sample lastAcceptedFix;
+    private FixQualityPolicy.Sample lastAcceptedFix;
     /** Whether the current location registration uses the navigating rate. */
-    boolean subscribedForNavigation;
-    boolean resubscribing;
-    boolean fusedActive;
+    private boolean subscribedForNavigation;
+    private boolean resubscribing;
+    private boolean fusedActive;
     /** Latest camera angles, kept only for the shareable diagnostics report. */
-    double lastCameraBearing = Double.NaN;
-    double lastTravelBearing = Double.NaN;
-    double lastOffRouteMetres = Double.NaN;
-    String lastMatchReason="not matched";
-    boolean guidancePositionConfirmed;
-    boolean confirmedSinceRouteInstall;
-    boolean joiningRoute;
-    long lastJoinCameraAt=-1;
+    private double lastCameraBearing = Double.NaN;
+    private double lastTravelBearing = Double.NaN;
+    private double lastOffRouteMetres = Double.NaN;
+    private String lastMatchReason="not matched";
+    private boolean guidancePositionConfirmed;
+    private boolean confirmedSinceRouteInstall;
+    private boolean joiningRoute;
+    private long lastJoinCameraAt=-1;
     /** Real Home/Work drive times from TomTom, refreshed at most every 5 minutes. */
-    String homeEtaLabel;
+    private String homeEtaLabel;
     /** Whether the highlighted junction is a roundabout (its diagram stays visible). */
-    String workEtaLabel;
-    long quickEtaFetchedAt;
+    private String workEtaLabel;
+    private long quickEtaFetchedAt;
     /** Display-only estimate of the vehicle position during short GPS gaps. */
-    final DeadReckoner deadReckoner = new DeadReckoner();
-    final Runnable deadReckonTick = new Runnable() {
+    private final DeadReckoner deadReckoner = new DeadReckoner();
+    private final Runnable deadReckonTick = new Runnable() {
         @Override public void run() {
-            if (foreground && userPin != null) {
+            if (foreground && displayGps != null) {
                 GeoMath.Point estimate = deadReckoner.estimate(System.currentTimeMillis());
                 // While guidance runs, SmoothFollowCamera owns the marker position.
                 if (estimate != null && (!active || smoothFollow == null)) {
-                    userPin.setPosition(new GeoPoint(estimate.lat, estimate.lon));
                     if (vectorMap != null && useLocalMap) vectorMap.setVehicle(estimate);
-                    map.postInvalidateOnAnimation();
                 }
             }
             gpsHandler.postDelayed(this, 500);
         }
     };
     /** Satellites used in the current GPS fix, or -1 until the first GNSS report. */
-    int satellitesUsed = -1;
-    final GnssStatus.Callback gnssCallback = new GnssStatus.Callback() {
+    private int satellitesUsed = -1;
+    private final GnssStatus.Callback gnssCallback = new GnssStatus.Callback() {
         @Override public void onSatelliteStatusChanged(GnssStatus status) {
             int used = 0;
             for (int i = 0; i < status.getSatelliteCount(); i++) {
@@ -448,58 +402,41 @@ public final class MainActivity extends Activity implements LocationListener {
             satellitesUsed = used;
         }
     };
-    Marker userPin;
-    Marker destinationPin;
-    Marker entrancePin;
-    Marker parkedCarPin;
-    Polyline routeLine;
-    List<GeoMath.Point> junctionFramePoints = java.util.Collections.emptyList();
-    int highlightedJunctionIndex = -1;
-    TilesOverlay trafficTiles;
-    TextToSpeech speech;
-    boolean speechReady;
-    boolean trafficEnabled = true;
-    boolean followLocation = true;
-    boolean routing;
-    boolean active;
-    String apiKey = "";
-    TomTomApi.Destination destination;
-    TomTomApi.Route route;
-    long lastRouteRequest;
-    long offRouteSince;
-    long lastCameraUpdate;
-    GeoMath.Point lastCameraCenter;
-    GeoMath.Point displayGps;
-    MapStartupPolicy.Viewport startupMapView;
-    boolean locationSubscribed;
-    long lastMapAreaSavedAt;
-    SmoothFollowCamera smoothFollow;
-    boolean smoothLoopRunning;
-    boolean foreground;
-    int smoothTick;
-    boolean mapGestureWasNotified;
-    int requestGeneration;
-    int spokenDistanceIndex = -1;
-    int spokenCloseIndex = -1;
-    int spokenNowIndex = -1;
+    private long lastSpeechAt=-1;
+    private List<GeoMath.Point> junctionFramePoints = java.util.Collections.emptyList();
+    private int highlightedJunctionIndex = -1;
+    private TextToSpeech speech;
+    private boolean speechReady;
+    private boolean trafficEnabled = false;
+    private String incidentEnhancementKey="";
+    private boolean followLocation = true;
+    private boolean routing;
+    private boolean active;
+    private String apiKey = "";
+    private TomTomApi.Destination destination;
+    private TomTomApi.Route route;
+    private long lastRouteRequest;
+    private long offRouteSince;
+    private long lastCameraUpdate;
+    private GeoMath.Point lastCameraCenter;
+    private GeoMath.Point displayGps;
+    private MapStartupPolicy.Viewport startupMapView;
+    private boolean locationSubscribed;
+    private long lastMapAreaSavedAt;
+    private SmoothFollowCamera smoothFollow;
+    private boolean smoothLoopRunning;
+    private boolean foreground;
+    private int smoothTick;
+    private boolean mapGestureWasNotified;
+    private int requestGeneration;
+    private int spokenDistanceIndex = -1;
+    private int spokenCloseIndex = -1;
+    private int spokenNowIndex = -1;
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Configure osmdroid before constructing MapView. Cache tiles in the
-        // app-private cache, and allow additional parallel tile downloads.
-        // TomTom traffic remains a separate, optional overlay.
-        Configuration.getInstance().setUserAgentValue(getPackageName());
-        File mapCache = new File(getCacheDir(), "drivemate-map-tiles");
-        if (!mapCache.exists()) mapCache.mkdirs();
-        Configuration.getInstance().setOsmdroidBasePath(mapCache);
-        Configuration.getInstance().setOsmdroidTileCache(new File(mapCache, "tiles"));
-        Configuration.getInstance().setCacheMapTileCount((short) 36);
-        Configuration.getInstance().setTileDownloadThreads((short) 4);
-        Configuration.getInstance().setTileDownloadMaxQueueSize((short) 60);
-        Configuration.getInstance().setTileFileSystemCacheMaxBytes(180L * 1024L * 1024L);
-        Configuration.getInstance().setTileFileSystemCacheTrimBytes(140L * 1024L * 1024L);
         SharedPreferences settings = getSharedPreferences(PREFS, MODE_PRIVATE);
-        apiKey = settings.getString("tomtom_key", "");
+        apiKey = ""; // Native-only candidate: ignore saved external service credentials.
         metricUnits = settings.getBoolean("metric_units", false);
         voiceMode = settings.contains("voice_mode_v2")
                 ? Math.max(0, Math.min(3, settings.getInt("voice_mode_v2", 1)))
@@ -523,20 +460,15 @@ public final class MainActivity extends Activity implements LocationListener {
         closeZoom = settings.getBoolean("close_zoom", true);
         highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
-        trafficEnabled = settings.getBoolean("traffic", false);
-        useLocalMap = settings.getBoolean("drivemate_vector_map", true);
+        incidentEnhancementKey=settings.getString("incident_enhancement_key","");
+        trafficEnabled=NativeEnhancementPolicy.enabled(settings.getBoolean("incident_enhancement_consent",false),incidentEnhancementKey);
+        useLocalMap = true;
         vectorSavedState = savedInstanceState;
         startupMapView = MapStartupPolicy.initial(
                 settings.getFloat("last_map_lat", Float.NaN),
                 settings.getFloat("last_map_lon", Float.NaN),
                 settings.getLong("last_map_at", 0L),
                 System.currentTimeMillis());
-        try {
-            driveTiles = new DriveTileServer(this);
-        } catch (java.io.IOException e) {
-            driveTiles = null;
-            useLocalMap = false;
-        }
         buildScreen();
         applyTheme();
         updateVoiceButton();
@@ -562,82 +494,25 @@ public final class MainActivity extends Activity implements LocationListener {
      * navy header, cyan road mark, white search, live map, speed/GPS badges,
      * Home/Work/Favourites and recent destinations in a dark bottom panel.
      */
-    void buildScreen() {
+    private void buildScreen() {
         getWindow().setStatusBarColor(DARK);
         getWindow().setNavigationBarColor(DARK);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         FrameLayout frame = new FrameLayout(this);
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
-        map = new MapView(this);
-        map.setMultiTouchControls(true);
-        final float[] touchAnchor = new float[2];
-        map.setOnTouchListener((v, event) -> {
-            if (event.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) {
-                touchAnchor[0] = event.getX();
-                touchAnchor[1] = event.getY();
-            } else if (event.getActionMasked() == android.view.MotionEvent.ACTION_MOVE
-                    && Math.hypot(event.getX() - touchAnchor[0],
-                            event.getY() - touchAnchor[1]) > dp(16)) {
-                disengageFollowForGesture();
-            }
-            return false;
+        FrameLayout mapHost=new FrameLayout(this);
+        frame.addView(mapHost,new FrameLayout.LayoutParams(-1,-1));
+        vectorMap=new NativeMapController(this,(status,roads)->{
+            vectorRoadsReady=status==RoadDisplayHealth.State.READY;
+            if(!active&&route==null&&status==RoadDisplayHealth.State.FAILED)
+                setStatus("DriveMate detail unavailable · regional coverage required");
         });
-        map.setMinZoomLevel(2.0);
-        // Never initialise a UK navigation app at MapLibre's world-default
-        // camera. An approximate saved map area is DISPLAY ONLY, never GPS.
-        map.getController().setZoom(startupMapView.zoom);
-        map.getController().setCenter(new GeoPoint(
-                startupMapView.center.lat, startupMapView.center.lon));
-        map.setVisibility(apiKey.isEmpty() ? View.INVISIBLE : View.VISIBLE);
-        // Keep both map engines inside the SAME background-only host:
-        // the visible TomTom raster map covers MapLibre until actual UK roads
-        // (not merely an HTTP tile) are drawn. Control overlays remain on top.
-        FrameLayout mapHost = new FrameLayout(this);
-        frame.addView(mapHost, new FrameLayout.LayoutParams(-1, -1));
-        mapHost.addView(map, new FrameLayout.LayoutParams(-1, -1));
-        if (driveTiles != null) {
-            try {
-                vectorMap = new VectorDriveMap(this, vectorSavedState, driveTiles,
-                        apiKey, trafficEnabled, (status, roads) -> {
-                            if (status == RoadDisplayHealth.State.READY) {
-                                vectorRoadsReady = true;
-                                if (useLocalMap && !autoFallback) {
-                                    updateMapVisibility();
-                                    if (!active) setStatus("DriveMate map ready · UK streets visible");
-                                }
-                            } else if (status == RoadDisplayHealth.State.FAILED
-                                    && useLocalMap && !autoFallback) {
-                                vectorRoadsReady = false;
-                                if (!ownRouting() && !apiKey.isEmpty()) {
-                                    autoFallback = true;
-                                    updateMapVisibility();
-                                    if (route != null && !active) showRoute(route, true);
-                                    else if (currentLocation != null) centreOnLocation(true);
-                                    setStatus("DriveMate streets not rendering · TomTom map active");
-                                } else {
-                                    setStatus("Map roads unavailable · check map connection");
-                                }
-                            }
-                        });
-                applyHighDetailPolicy();
-                vectorMap.setOnUserGesture(this::disengageFollowForGesture);
-                vectorMap.setCamera(startupMapView.center, startupMapView.zoom, 0);
-                // Place MapLibre below the existing TomTom map while waiting
-                // for first verifiably painted UK street features.
-                mapHost.addView(vectorMap.view(), 0,
-                        new FrameLayout.LayoutParams(-1, -1));
-                updateMapVisibility();
-            } catch (Throwable error) {
-                android.util.Log.e("DriveMateMap", "Vector map initialization failed", error);
-                vectorMap = null;
-                useLocalMap = false;
-                if (driveTiles != null) {
-                    driveTiles.close();
-                    driveTiles = null;
-                }
-            }
-        }
+        mapHost.addView(vectorMap.view(),0,new FrameLayout.LayoutParams(-1,-1));
+        useLocalMap=true;autoFallback=false;
+        vectorMap.setOnUserGesture(this::disengageFollowForGesture);
+        vectorMap.setCamera(startupMapView.center,startupMapView.zoom,0);
+        applyHighDetailPolicy();updateMapVisibility();
 
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.VERTICAL);
@@ -664,7 +539,7 @@ public final class MainActivity extends Activity implements LocationListener {
         branding.addView(brandName);
         // The installed version, read from the package itself so it is always
         // the one actually running (never a hard-coded label).
-        TextView subtitle = text("UK NAV  ·  v" + settingsController.installedVersionName(), 10,
+        TextView subtitle = text("UK NAV  ·  v" + installedVersionName(), 10,
                 Color.rgb(180, 222, 235), true);
         subtitle.setLetterSpacing(0.11f);
         branding.addView(subtitle);
@@ -675,7 +550,7 @@ public final class MainActivity extends Activity implements LocationListener {
         settings.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
                 Color.rgb(28, 68, 84)));
         settings.setTextColor(Color.WHITE);
-        settings.setOnClickListener(v -> settingsController.showSettings());
+        settings.setOnClickListener(v -> showSettings());
         header.addView(settings, new LinearLayout.LayoutParams(dp(49), dp(49)));
         top.addView(header, new LinearLayout.LayoutParams(-1, dp(68)));
         brandHeader = header;
@@ -703,23 +578,23 @@ public final class MainActivity extends Activity implements LocationListener {
         destinationInput.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEARCH ||
                     (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
-                destinationController.searchDestination();
+                searchDestination();
                 return true;
             }
             return false;
         });
         search.addView(destinationInput, new LinearLayout.LayoutParams(0, dp(48), 1));
         destinationInput.setOnFocusChangeListener((v, focused) -> {
-            if (focused) destinationController.refreshSearchSuggestions();
+            if (focused) refreshSearchSuggestions();
         });
         destinationInput.setOnClickListener(v -> {
-            destinationController.refreshSearchSuggestions();
+            refreshSearchSuggestions();
             if (destinationInput.length() > 0) destinationInput.showDropDown();
         });
         destinationInput.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
-                destinationController.refreshSearchSuggestions();
+                refreshSearchSuggestions();
             }
             @Override public void afterTextChanged(Editable value) { }
         });
@@ -734,7 +609,7 @@ public final class MainActivity extends Activity implements LocationListener {
         Button mic = chip("🎙");
         mic.setContentDescription("Search by voice");
         mic.setTextSize(19);
-        mic.setOnClickListener(v -> destinationController.voiceSearch());
+        mic.setOnClickListener(v -> voiceSearch());
         search.addView(mic, new LinearLayout.LayoutParams(dp(44), dp(43)));
         // No separate Find button: the keyboard's search key runs the same search.
         LinearLayout.LayoutParams searchPos = new LinearLayout.LayoutParams(-1, dp(60));
@@ -832,12 +707,12 @@ public final class MainActivity extends Activity implements LocationListener {
         navActions.addView(startButton, new LinearLayout.LayoutParams(0, dp(45), 2));
         saveButton = chip("★ Save");
         saveButton.setVisibility(View.GONE);
-        saveButton.setOnClickListener(v -> destinationController.saveCurrentDestination());
+        saveButton.setOnClickListener(v -> saveCurrentDestination());
         navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         previewParkingButton = chip("🅿 Nearby");
         previewParkingButton.setContentDescription("Find verified parking near destination");
         previewParkingButton.setVisibility(View.GONE);
-        previewParkingButton.setOnClickListener(v -> parkingController.findNearbyParking());
+        previewParkingButton.setOnClickListener(v -> findNearbyParking());
         navActions.addView(previewParkingButton,
                 new LinearLayout.LayoutParams(0, dp(45), 1));
         // Driving controls: distinct icon plus a one-word label each, dark to
@@ -870,7 +745,7 @@ public final class MainActivity extends Activity implements LocationListener {
         voiceButton.setTextColor(Color.WHITE);
         voiceButton.setContentDescription("Change navigation voice mode");
         voiceButton.setVisibility(View.GONE);
-        voiceButton.setOnClickListener(v -> settingsController.cycleVoiceMode());
+        voiceButton.setOnClickListener(v -> cycleVoiceMode());
         navActions.addView(voiceButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         bottomActionsParams = new LinearLayout.LayoutParams(-1, -2);
         bottomActionsParams.topMargin = dp(10);
@@ -900,7 +775,7 @@ public final class MainActivity extends Activity implements LocationListener {
         navActions.addView(drivingMore,new LinearLayout.LayoutParams(0,dp(45),1));
         overviewButton=chip("Route");overviewButton.setTextColor(Color.WHITE);overviewButton.setBackgroundTintList(driveControl);
         overviewButton.setContentDescription("View remaining route overview");overviewButton.setVisibility(View.GONE);
-        overviewButton.setOnClickListener(v->guidanceDialogs.showRemainingRouteOverview());
+        overviewButton.setOnClickListener(v->showRemainingRouteOverview());
         navActions.addView(overviewButton,new LinearLayout.LayoutParams(0,dp(45),1));
         FrameLayout.LayoutParams navPanelPos = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         navPanelPos.setMargins(dp(8), 0, dp(8), dp(9));
@@ -917,14 +792,14 @@ public final class MainActivity extends Activity implements LocationListener {
         homePanel.addView(heading);
 
         LinearLayout tiles = new LinearLayout(this);
-        homeTile = homePanelController.quickTile(R.drawable.ic_quick_home, "Home", "Not set");
-        workTile = homePanelController.quickTile(R.drawable.ic_quick_work, "Work", "Not set");
-        Button savedPlaces = homePanelController.quickTile(R.drawable.ic_quick_star, "Saved", "Places");
-        homeTile.setOnClickListener(v -> destinationController.openQuickDestination(true));
-        homeTile.setOnLongClickListener(v -> { destinationController.configureQuickDestination(true); return true; });
-        workTile.setOnClickListener(v -> destinationController.openQuickDestination(false));
-        workTile.setOnLongClickListener(v -> { destinationController.configureQuickDestination(false); return true; });
-        savedPlaces.setOnClickListener(v -> destinationController.showSavedDestinations());
+        homeTile = quickTile(R.drawable.ic_quick_home, "Home", "Not set");
+        workTile = quickTile(R.drawable.ic_quick_work, "Work", "Not set");
+        Button savedPlaces = quickTile(R.drawable.ic_quick_star, "Saved", "Places");
+        homeTile.setOnClickListener(v -> openQuickDestination(true));
+        homeTile.setOnLongClickListener(v -> { configureQuickDestination(true); return true; });
+        workTile.setOnClickListener(v -> openQuickDestination(false));
+        workTile.setOnLongClickListener(v -> { configureQuickDestination(false); return true; });
+        savedPlaces.setOnClickListener(v -> showSavedDestinations());
         tiles.addView(homeTile, new LinearLayout.LayoutParams(0, dp(72), 1));
         LinearLayout.LayoutParams workPos = new LinearLayout.LayoutParams(0, dp(72), 1);
         workPos.setMargins(dp(6), 0, dp(6), 0);
@@ -1056,32 +931,21 @@ public final class MainActivity extends Activity implements LocationListener {
             boolean imeNow = rootHeight - visible.bottom > dp(160);
             if (imeNow != keyboardOpen) {
                 keyboardOpen = imeNow;
-                homePanelController.setHomeVisible(homeMode);
+                setHomeVisible(homeMode);
             }
         });
-        homePanelController.setHomeVisible(true);
-        homePanelController.refreshHomePanel();
+        setHomeVisible(true);
+        refreshHomePanel();
     }
 
-    boolean matchingTomTomMap() {
-        return RouteMapPolicy.useTomTomMap(route == null ? null : route.provider, !apiKey.isEmpty());
+    private boolean matchingTomTomMap(){return false;}
+
+    private boolean showingVector() {
+        return vectorMap != null; // Native renderer owns camera, even during loading.
     }
 
-    boolean showingVector() {
-        return !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null
-                && vectorRoadsReady;
-    }
-
-    void updateMapVisibility() {
-        boolean vector = showingVector();
-        // Keep the vector engine running *behind* the raster fallback until
-        // its own rendered-road query proves the UK streets are visible.
-        boolean vectorLoading = !matchingTomTomMap() && useLocalMap && !autoFallback && vectorMap != null;
-        if (vectorMap != null)
-            vectorMap.setVisible(!matchingTomTomMap() && (vectorLoading || ownRouting() || apiKey.isEmpty()));
-        if (map != null)
-            map.setVisibility((matchingTomTomMap() || (!ownRouting() && !vector)) && !apiKey.isEmpty()
-                    ? View.VISIBLE : View.INVISIBLE);
+    private void updateMapVisibility(){
+        if(vectorMap!=null)vectorMap.setVisible(true);
     }
 
     /**
@@ -1089,7 +953,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * below the DriveMate brand bar. Search and the large bottom guidance pane
      * are reserved for Home / route preview, not live driving.
      */
-    LinearLayout createDrivingTopPanel() {
+    private LinearLayout createDrivingTopPanel() {
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
         container.setElevation(dp(7));
@@ -1106,7 +970,7 @@ public final class MainActivity extends Activity implements LocationListener {
         LinearLayout turnCard = new LinearLayout(this);
         turnCard.setOrientation(LinearLayout.VERTICAL);
         turnCard.setPadding(dp(12), dp(8), dp(12), dp(8));
-        turnCard.setOnClickListener(v -> guidanceDialogs.showUpcomingManoeuvres());
+        turnCard.setOnClickListener(v -> showUpcomingManoeuvres());
         turnCard.setBackground(drivingCard(18));
         drivingTurnCard = turnCard;
         LinearLayout.LayoutParams turnCardPos = new LinearLayout.LayoutParams(-1, -2);
@@ -1187,7 +1051,7 @@ public final class MainActivity extends Activity implements LocationListener {
         trafficNoticeText.setSingleLine(true);
         trafficNoticeText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         trafficNoticeText.setVisibility(View.GONE);
-        trafficNoticeText.setOnClickListener(v -> guidanceDialogs.showTrafficTimeline());
+        trafficNoticeText.setOnClickListener(v -> showTrafficTimeline());
         LinearLayout.LayoutParams trafficPos = new LinearLayout.LayoutParams(-1, dp(25));
         trafficPos.topMargin = dp(3);
         container.addView(trafficNoticeText, trafficPos);
@@ -1212,7 +1076,7 @@ public final class MainActivity extends Activity implements LocationListener {
         arrivalRow.addView(arrivalHintText, new LinearLayout.LayoutParams(0, -2, 1));
         findParkingButton = chip("🅿 Parking");
         findParkingButton.setContentDescription("Find verified parking near destination while stopped");
-        findParkingButton.setOnClickListener(v -> parkingController.findNearbyParking());
+        findParkingButton.setOnClickListener(v -> findNearbyParking());
         arrivalRow.addView(findParkingButton, new LinearLayout.LayoutParams(dp(98), dp(38)));
         arrivalRow.setTag("arrival");
         arrivalRow.setVisibility(View.GONE);
@@ -1221,7 +1085,7 @@ public final class MainActivity extends Activity implements LocationListener {
         return container;
     }
 
-    TextView addDrivingMetric(LinearLayout row, String label) {
+    private TextView addDrivingMetric(LinearLayout row, String label) {
         LinearLayout cell = new LinearLayout(this);
         cell.setOrientation(LinearLayout.VERTICAL);
         cell.setGravity(Gravity.CENTER);
@@ -1239,11 +1103,11 @@ public final class MainActivity extends Activity implements LocationListener {
         return number;
     }
 
-    GradientDrawable drivingCard(int radius){
+    private GradientDrawable drivingCard(int radius){
         GradientDrawable d=new GradientDrawable(GradientDrawable.Orientation.TL_BR,new int[]{0xff123d53,0xff071d31});
         d.setCornerRadius(dp(radius));d.setStroke(dp(1),0xff397b95);return d;
     }
-    void applyDrivingControls(){
+    private void applyDrivingControls(){
         if(drivingMore==null)return;
         drivingMore.setVisibility(active?View.VISIBLE:View.GONE);
         if(overviewButton!=null)overviewButton.setVisibility(active?View.VISIBLE:View.GONE);
@@ -1251,8 +1115,14 @@ public final class MainActivity extends Activity implements LocationListener {
         drivingMore.setContentDescription(drivingControlsExpanded?"Hide extra navigation controls":"Show extra navigation controls");
         if(active){stopButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);repeatButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);refreshButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);voiceButton.setVisibility(drivingControlsExpanded?View.VISIBLE:View.GONE);}
     }
-    
-    void applyNavigationChrome() {
+    private void showRemainingRouteOverview(){
+        if(!active||route==null||route.points.size()<2)return;
+        followLocation=false;stopSmoothLoop();updateFollowButton();
+        List<GeoMath.Point> remaining=GeoMath.slice(route.points,Math.max(0,stabilizedAlong),GeoMath.length(route.points));
+        if(remaining.size()<2)remaining=route.points;
+        if(vectorMap!=null){int top=(topMapOverlay!=null?topMapOverlay.getHeight():dp(140))+dp(18);int bottom=navigationPanel.getHeight()+dp(18);vectorMap.previewRoute(remaining,top,bottom,dp(36));}
+    }
+    private void applyNavigationChrome() {
         boolean navigating = active;
         if (drivingTopPanel != null)
             drivingTopPanel.setVisibility(navigating ? View.VISIBLE : View.GONE);
@@ -1298,30 +1168,169 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    
+    private Button quickTile(int iconRes, String label, String detail) {
+        Button button = new Button(this);
+        button.setAllCaps(false);
+        button.setTextSize(14);
+        button.setTextColor(Color.WHITE);
+        button.setPadding(dp(4), dp(6), dp(4), dp(6));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setCompoundDrawablePadding(dp(3));
+        button.setCompoundDrawablesWithIntrinsicBounds(null, getDrawable(iconRes), null, null);
+        button.setMaxLines(2);
+        button.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        GradientDrawable background = rounded(Color.rgb(25, 69, 85), 12);
+        background.setStroke(dp(1), CYAN);
+        button.setBackground(background);
+        setTileText(button, label, detail);
+        return button;
+    }
 
-    
+    /** Bold label on the first line, smaller destination name (or hint) below. */
+    private void setTileText(Button tile, String label, String detail) {
+        SpannableString content = new SpannableString(label + "\n" + detail);
+        content.setSpan(new android.text.style.RelativeSizeSpan(0.8f),
+                label.length() + 1, content.length(), 0);
+        tile.setText(content);
+    }
 
-    
+    private void setHomeVisible(boolean show) {
+        homeMode = show;
+        if(!show&&freeDriving){freeDriving=false;freeDriveBearing=Double.NaN;clearFreeRoadContext();getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
+        if (homePanel == null || navigationPanel == null) return;
+        homePanel.setVisibility(show && !keyboardOpen && !freeDriving ? View.VISIBLE : View.GONE);
+        navigationPanel.setVisibility(!show && !keyboardOpen ? View.VISIBLE : View.GONE);
+        if (speedBadgeView != null) {
+            // Speed only while actually navigating: not on home or route preview.
+            speedBadgeView.setVisibility(keyboardOpen || (!active&&!freeDriving) || (show&&!freeDriving)
+                    ? View.GONE : View.VISIBLE);
+        }
+        if (followButton != null) {
+            followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
+            updateFollowButton();
+        }
+        if (speedBadgePos != null && gpsButtonPos != null) {
+            // During navigation the compact control row is only ~60dp tall.
+            // Keep GPS speed and recenter reachable without hiding the road.
+            // Off the home screen, sit just above the bottom panel (its own
+            // 9 dp margin plus a 10 dp gap). Before its first layout, fall back
+            // to the previous estimates.
+            int navHeight = navigationPanel.getHeight();
+            int above = navHeight > 0 ? navHeight + dp(19) : dp(active ? 100 : 225);
+            speedBadgePos.bottomMargin = freeDriving ? dp(16) : show ? dp(320) : above;
+            gpsButtonPos.bottomMargin = freeDriving ? dp(16) : show ? dp(327) : above;
+            if(speedBadgeView!=null)speedBadgeView.requestLayout();
+            if(followButton!=null)followButton.requestLayout();
+        }
+        applyNavigationChrome();
+        if (show && !keyboardOpen) refreshHomePanel();
+    }
 
-    
+    private void refreshHomePanel() {
+        if (places == null || recentList == null) return;
+        TomTomApi.Destination home = places.home();
+        TomTomApi.Destination work = places.work();
+        homeTile.setContentDescription(home == null ? "Set Home" : "Navigate Home to " + home);
+        workTile.setContentDescription(work == null ? "Set Work" : "Navigate Work to " + work);
+        // Real drive time from TomTom when available, otherwise the place name.
+        setTileText(homeTile, "Home", home == null ? "Not set"
+                : homeEtaLabel != null ? homeEtaLabel : home.title);
+        setTileText(workTile, "Work", work == null ? "Not set"
+                : workEtaLabel != null ? workEtaLabel : work.title);
+        maybeFetchQuickEtas();
+        recentList.removeAllViews();
+        List<TomTomApi.Destination> recents = places.recent();
+        if (recents.isEmpty()) {
+            TextView empty = text("No recent journeys yet. Find a destination to begin.",
+                    12, Color.rgb(202, 219, 224), false);
+            empty.setPadding(dp(2), dp(18), dp(2), dp(8));
+            recentList.addView(empty);
+        } else {
+            for (TomTomApi.Destination item : recents) {
+                LinearLayout row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(7), 0, dp(6), 0);
+                TextView name = text(item.title, 15, Color.WHITE, false);
+                name.setSingleLine(true);
+                name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+                if (currentLocation != null && item.point != null) {
+                    // Straight-line distance from the live GPS fix, shown on the right.
+                    TextView distance = text(NavigationUnits.displayDistance(
+                            GeoMath.distance(gpsPoint(currentLocation), item.point),
+                            metricUnits), 13, Color.rgb(143, 176, 192), false);
+                    distance.setPadding(dp(8), 0, 0, 0);
+                    row.addView(distance);
+                }
+                // Remove just this entry; "Clear recent destinations" in
+                // Settings still clears them all.
+                TextView remove = text("×", 22, Color.rgb(143, 176, 192), false);
+                remove.setGravity(Gravity.CENTER);
+                remove.setContentDescription("Remove " + item.title + " from recent destinations");
+                remove.setOnClickListener(v -> {
+                    places.removeRecent(item);
+                    refreshHomePanel();
+                    refreshSearchSuggestions();
+                });
+                row.addView(remove, new LinearLayout.LayoutParams(dp(44), dp(44)));
+                row.setOnClickListener(v -> selectDestination(item));
+                recentList.addView(row, new LinearLayout.LayoutParams(-1, dp(46)));
+                View line = new View(this);
+                line.setBackgroundColor(Color.rgb(40, 86, 104));
+                recentList.addView(line, new LinearLayout.LayoutParams(-1, dp(1)));
+            }
+        }
+    }
 
-    
+    /**
+     * Fetch real Home/Work drive times (with traffic) from TomTom when the home
+     * screen is showing. At most once every 5 minutes, and only with a fresh
+     * GPS fix and a TomTom key, to keep API use low.
+     */
+    private void maybeFetchQuickEtas() {
+        if (localRouting() || (!ownRouting() && apiKey.isEmpty()) || places == null || currentLocation == null || active) return;
+        if (!MapStartupPolicy.freshForRouting(
+                currentLocation.getLatitude(), currentLocation.getLongitude(),
+                currentLocation.getTime(), System.currentTimeMillis(),
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : 101f)) return;
+        long now = SystemClock.elapsedRealtime();
+        if (quickEtaFetchedAt != 0 && now - quickEtaFetchedAt < 5 * 60_000L) return;
+        TomTomApi.Destination home = places.home();
+        TomTomApi.Destination work = places.work();
+        if (home == null && work == null) return;
+        quickEtaFetchedAt = now;
+        GeoMath.Point from = gpsPoint(currentLocation);
+        String key = apiKey, own = ownEndpoint();
+        network.execute(() -> {
+            String homeLabel = home == null ? null : quickEta(key, own, from, home);
+            String workLabel = work == null ? null : quickEta(key, own, from, work);
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                homeEtaLabel = homeLabel;
+                workEtaLabel = workLabel;
+                if (homeMode) refreshHomePanel();
+            });
+        });
+    }
 
-    
+    /** Drive time such as "14 min", or null if TomTom can't route right now. */
+    private static String quickEta(String key,String own,GeoMath.Point from,TomTomApi.Destination to){return null;}
 
-    int dp(float dp) {
+    private int dp(float dp) {
         return Math.round(dp * getResources().getDisplayMetrics().density);
     }
 
-    GradientDrawable rounded(int color, int radiusDp) {
+    private GradientDrawable rounded(int color, int radiusDp) {
         GradientDrawable background = new GradientDrawable();
         background.setColor(color);
         background.setCornerRadius(dp(radiusDp));
         return background;
     }
 
-    TextView text(String content, int size, int color, boolean bold) {
+    private TextView text(String content, int size, int color, boolean bold) {
         TextView view = new TextView(this);
         view.setText(content);
         view.setTextColor(color);
@@ -1330,7 +1339,7 @@ public final class MainActivity extends Activity implements LocationListener {
         return view;
     }
 
-    Button chip(String label) {
+    private Button chip(String label) {
         Button button = new Button(this);
         button.setText(label);
         button.setTextSize(12);
@@ -1346,61 +1355,402 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
 
-    
-
-    String ownEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_route_endpoint","");}
-    String ownSearchEndpoint(){return getSharedPreferences(PREFS,MODE_PRIVATE).getString("own_search_endpoint","");}
-    boolean localRouting(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("local_routing_preview",false);}
-    boolean ownRouting(){return localRouting()||!ownEndpoint().isEmpty();}
-    
-    
-    
-    boolean comparisonPermitted(){return getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("licensed_comparison",false);}
-    
-    List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
-        if(localRouting())return new LocalRoutingPack(this).search(query);
-        return ownRouting()?DriveMateProvider.search(ownSearchEndpoint(),query,near):TomTomApi.search(apiKey,query,near);
+    private void showSettings() {
+        String[] options = {
+                "DriveMate native routing · coverage",
+                voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
+                "Voice guidance · " + voiceModeName(),
+                "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
+                "Optional area traffic reports · "+(trafficEnabled?"On":"Off"),
+                metricUnits ? "Use UK miles, yards and mph" : "Use metric kilometres and km/h",
+                "Camera · " + cameraModeName(),
+                closeZoom ? "Junction detail zoom · On" : "Junction detail zoom · Off",
+                "Map · "+(vectorMap!=null?vectorMap.geometryDescription():"DriveMate local vector"),
+                "Nearby map cache & Wi-Fi prefetch",
+                "Set or change Home",
+                "Set or change Work",
+                "Clear recent destinations",
+                "About DriveMate",
+                "Map colours · " + themeModeName(),
+                "Verified hazard alerts (when available) · " + (hazardWarningEnabled ? "On" : "Off"),
+                "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
+                "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
+                "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
+                "DriveMate original renderer · Stockport preview",
+                "Save where I parked",
+                places != null && places.parkedCar() != null
+                        ? "Find my parked car" : "Find my parked car · none saved",
+                "Share diagnostics (no location included)",
+                "3D buildings · " + (buildings3d ? "On" : "Off"),
+                "DriveMate native routing and search · preview",
+                "Journey map review · " + mapReview.snapshot().size() + " findings",
+                "Independent map survey drafts",
+                "Offline routing · regional coverage",
+                "Offline visual map · download full UK",
+                "DriveMate original stack · Wells pilot",
+                "Free driving · "+(freeDriving?"On":"Off"),
+                "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off")
+        };
+        new AlertDialog.Builder(this).setTitle("DriveMate settings")
+                .setItems(options, (dialog, which) -> {
+                    switch (which) {
+                        case 0: showKeyDialog(); break;
+                        case 1:
+                            setVoiceMode(voiceMode == DrivingVoicePolicy.SILENT
+                                    ? DrivingVoicePolicy.NORMAL : DrivingVoicePolicy.SILENT);
+                            break;
+                        case 2: selectVoiceMode(); break;
+                        case 3: selectSpeechVolume(); break;
+                        case 4:
+                            configureIncidentEnhancement();
+                            break;
+                        case 5:
+                            metricUnits = !metricUnits;
+                            if(vectorMap!=null && route!=null)vectorMap.setRouteEvents(route.speedSections,route.trafficSections,metricUnits,route.fetchedAtMs);
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("metric_units", metricUnits).apply();
+                            if (currentLocation != null) {
+                                speedText.setText(NavigationUnits.displaySpeed(
+                                        currentLocation.getSpeed(), metricUnits));
+                                if (active) updateGuidance(currentLocation);
+                            }
+                            if (route != null && !active) showPreview(route);
+                            break;
+                        case 6: selectCameraMode(); break;
+                        case 7:
+                            closeZoom = !closeZoom;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("close_zoom", closeZoom).apply();
+                            lastCameraUpdate = 0;
+                            if (active && currentLocation != null) updateGuidance(currentLocation);
+                            break;
+                        case 8:
+                            if (vectorMap == null) {
+                                Toast.makeText(this,
+                                        "DriveMate local map is unavailable on this device",
+                                        Toast.LENGTH_LONG).show();
+                                break;
+                            }
+                            if (autoFallback && useLocalMap) {
+                                // A single tap retries DriveMate Map rather than
+                                // silently selecting the same TomTom fallback.
+                                autoFallback = false;
+                                vectorRoadsReady = false;
+                                setStatus("Retrying DriveMate streets…");
+                            } else {
+                                useLocalMap = true;
+                                autoFallback = false;
+                                vectorRoadsReady = vectorMap.hasRenderedRoads();
+                            }
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("drivemate_vector_map", useLocalMap).apply();
+                            updateMapVisibility();
+                            if (useLocalMap && currentLocation != null) {
+                                vectorMap.setCamera(gpsPoint(currentLocation),
+                                        vectorMap.currentZoom(), 0);
+                                vectorMap.prefetch(gpsPoint(currentLocation));
+                            }
+                            break;
+                        case 9:
+                            String stats = vectorMap == null ? "Local vector map unavailable"
+                                    : vectorMap.cacheStats();
+                            new AlertDialog.Builder(this).setTitle("DriveMate nearby map cache")
+                                    .setMessage(stats + "\n\nMaps are cached privately on your phone (up to 180 MB of street tiles). "
+                                            + "An approximately 20–30 km area is prefetched on unmetered Wi-Fi "
+                                            + "around a GPS fix. Online use fetches missing tiles individually. "
+                                            + "Native routing uses the verified packaged regional graph. "
+                                            + "Map data © OpenStreetMap contributors, ODbL 1.0.")
+                                    .setPositiveButton("Prefetch nearby", (d, button) -> {
+                                        if (vectorMap != null && currentLocation != null)
+                                            vectorMap.prefetch(gpsPoint(currentLocation));
+                                    })
+                                    .setNegativeButton("Close", null).show();
+                            break;
+                        case 10: configureQuickDestination(true); break;
+                        case 11: configureQuickDestination(false); break;
+                        case 12:
+                            new AlertDialog.Builder(this).setTitle("Clear recent destinations?")
+                                    .setMessage("Favourites, Home and Work will be kept.")
+                                    .setPositiveButton("Clear", (d, w) -> {
+                                        places.clearRecent();
+                                        refreshHomePanel();
+                                        refreshSearchSuggestions();
+                                    }).setNegativeButton("Cancel", null).show();
+                            break;
+                        case 13:
+                            new AlertDialog.Builder(this).setTitle("DriveMate v" + installedVersionName())
+                                    .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
+                                            + "Cached vector tiles are map display only. "
+                                            + "DriveMate local route previews and generated instructions. No live traffic feed. " +
+                                            "Road-matching and route camera are experimental. " +
+                                            "Keep DriveMate open; never use it as your sole navigator " +
+                                            "before testing directions on a real device.")
+                                    .setPositiveButton("OK", null).show();
+                            break;
+                        case 14: selectThemeMode(); break;
+                        case 15:
+                            hazardWarningEnabled = !hazardWarningEnabled;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("hazard_voice_alerts", hazardWarningEnabled).apply();
+                            break;
+                        case 16:
+                            speedWarningEnabled = !speedWarningEnabled;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("speed_voice_alerts", speedWarningEnabled).apply();
+                            break;
+                        case 17: selectRerouteMode(); break;
+                        case 18: selectSpeedTolerance(); break;
+                        case 19:
+                            if(!active) startActivity(new Intent(this,NativeMapPreviewActivity.class));
+                            else Toast.makeText(this,"Stop navigation before opening map preview",Toast.LENGTH_SHORT).show();
+                            break;
+                        case 20: promptSaveParking(); break;
+                        case 21: showParkedCar(); break;
+                        case 22: shareDiagnostics(); break;
+                        case 23:
+                            buildings3d = !buildings3d;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putBoolean("buildings_3d", buildings3d).apply();
+                            if (vectorMap != null) vectorMap.setBuildings3D(buildings3d);
+                            Toast.makeText(this, buildings3d
+                                    ? "3D buildings on (estimated height; map data has no real heights)"
+                                    : "Flat building outlines", Toast.LENGTH_SHORT).show();
+                            break;
+                        case 24: configureIndependent(); break;
+                        case 25: showMapReview(); break;
+                        case 26: showSurveyNotes(); break;
+                        case 27: showOfflineRouting(); break;
+                        case 28: showOfflineDisplay(); break;
+                        case 29: if(!active) DmPilotScreen.show(this); break;
+                        case 30: toggleFreeDriving(); break;
+                        case 31: advanceSpeedVoice=!advanceSpeedVoice;
+                            getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("advance_speed_voice",advanceSpeedVoice).apply(); break;
+                        default: break;
+                    }
+                }).setNegativeButton("Close", null).show();
     }
-    
-    
-    
-    
-    
-    
-    
 
-    
+    private String ownEndpoint(){return "";}
+    private String ownSearchEndpoint(){return "";}
+    private boolean localRouting(){return true;}
+    private boolean ownRouting(){return true;}
+    private void showOfflineRouting(){
+        if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
+        NativeRegionPacks packs=new NativeRegionPacks(this);
+        try{
+            List<NativeRegionPacks.Entry> entries=packs.catalog();
+            if(entries.isEmpty()){
+                new AlertDialog.Builder(this).setTitle("DriveMate native regional routing")
+                    .setMessage("Cheadle/Stockport is packaged. No additional verified GitHub regional release is pinned yet. Native route previews and local search only; no external fallback. Driving start remains blocked pending acceptance.")
+                    .setPositiveButton("Close",null).show();return;
+            }
+            String[] labels=new String[entries.size()];
+            for(int i=0;i<labels.length;i++){NativeRegionPacks.Entry e=entries.get(i);labels[i]=e.id+" · "+(packs.installed(e)?"Installed":(e.bytes/1000000)+" MB");}
+            new AlertDialog.Builder(this).setTitle("DriveMate regional downloads · preview").setItems(labels,(dialog,index)->{
+                NativeRegionPacks.Entry e=entries.get(index);
+                new AlertDialog.Builder(this).setTitle("Download "+e.id).setMessage("Verified GitHub data only, on unmetered Wi-Fi. No cross-region routing. Preview only until driving acceptance.")
+                    .setPositiveButton("Download",(d,w)->{
+                        if(active||route!=null||routing||downloadingLocalPack)return;
+                        downloadingLocalPack=true;packWorker.execute(()->{try{
+                            packs.install(e,message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));
+                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus("Regional pack installed · route preview only");});
+                        }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage());});}});
+                    }).setNegativeButton("Cancel",null).show();
+            }).setNegativeButton("Close",null).show();
+        }catch(Exception e){showError("Regional catalog invalid: "+e.getMessage());}
+    }
+    private void showOfflineDisplay(){
+        if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
+        LocalRoutingPack pack=new LocalRoutingPack(this);
+        new AlertDialog.Builder(this).setTitle("Full UK offline visual map")
+            .setMessage(pack.displayInstalled()?"A complete visual map is installed. Verify it again if needed.":"Download the pinned UK visual map (approximately 1.87 GB) over unmetered Wi-Fi. Offline rendering uses this archive; this does not install the routing graph.")
+            .setPositiveButton(pack.displayInstalled()?"Verify":"Download",(d,w)->{
+                if(downloadingLocalPack||active||route!=null||routing)return;
+                downloadingLocalPack=true;packWorker.execute(()->{try{pack.downloadDisplay(message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));
+                    runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing()){useLocalMap=true;autoFallback=false;updateMapVisibility();}});}
+                    catch(Exception e){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(e.getMessage());});}});
+            }).setNegativeButton("Close",null).show();
+    }
+    private void enableLocalRouting(boolean enabled){showOfflineRouting();}
+    private boolean comparisonPermitted(){return false;}
+    private void configureIndependent(){showOfflineRouting();}
+    private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
+        return new NativeRegionalRouter(this).search(query,near);
+    }
+    private void requestComparison(){/* Native-only: no external comparison requests. */}
+    private void showMapReview(){
+        if(active || currentLocation==null || !currentLocation.hasSpeed() || currentLocation.getSpeed()>=0.5f || System.currentTimeMillis()-currentLocation.getTime()>10000){showError("Review map differences only after ending navigation and parking safely.");return;}
+        List<MapReview.Finding> items=mapReview.snapshot();
+        if(items.isEmpty()){new AlertDialog.Builder(this).setTitle("Journey map review").setMessage("No comparable differences recorded. Comparison requires an authorised TomTom connection and aligned road data.").setPositiveButton("Close",null).show();return;}
+        String[] labels=new String[items.size()];for(int i=0;i<labels.length;i++)labels[i]=items.get(i).label();
+        new AlertDialog.Builder(this).setTitle("Map review · "+items.size()+" possible differences").setItems(labels,(d,i)->surveyFinding(items.get(i))).setNeutralButton("Clear",(d,w)->mapReview.clear()).setNegativeButton("Close",null).show();
+    }
+    private boolean safelyParked(){
+        return !active&&currentLocation!=null&&currentLocation.hasSpeed()&&currentLocation.getSpeed()<0.5f&&System.currentTimeMillis()-currentLocation.getTime()<10000;
+    }
+    private void showSurveyNotes(){
+        if(!safelyParked()){showError("Review surveys only when safely parked.");return;}
+        SurveyNotes notes=new SurveyNotes(this);List<String> saved=notes.list();
+        new AlertDialog.Builder(this).setTitle("Independent map survey drafts")
+            .setItems(saved.toArray(new String[0]),(d,i)->new AlertDialog.Builder(this).setTitle("Independent survey")
+                .setMessage(saved.get(i)).setPositiveButton("Share",(dd,w)->shareSurvey(saved.get(i)))
+                .setNeutralButton("Delete",(dd,w)->new AlertDialog.Builder(this).setMessage("Delete this private survey draft?").setPositiveButton("Delete",(ddd,www)->notes.delete(i)).setNegativeButton("Cancel",null).show()).setNegativeButton("Close",null).show())
+            .setPositiveButton("New independent survey",(d,w)->editSurvey()).setNegativeButton("Close",null).show();
+    }
+    private void editSurvey(){
+        if(!safelyParked())return;
+        EditText entry=new EditText(this);entry.setHint("Independent road observation: location, direction, sign, date and evidence");
+        new AlertDialog.Builder(this).setTitle("New survey").setMessage("Use only your own observations or compatible official data. No TomTom values or copied comparison locations.")
+            .setView(entry).setPositiveButton("Save draft",(d,w)->{
+                if(!safelyParked())return;
+                if(!new SurveyNotes(this).add(entry.getText().toString()))showError("Enter evidence (up to 2000 characters; maximum 100 drafts).");
+                else setStatus("Independent survey saved privately");
+            }).setNegativeButton("Cancel",null).show();
+    }
+    private void shareSurvey(String note){
+        if(!safelyParked())return;
+        android.content.Intent share=new android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"Independent road survey: "+note);
+        startActivity(android.content.Intent.createChooser(share,"Share independent survey"));
+    }
+    private void surveyFinding(MapReview.Finding item){
+        EditText evidence=new EditText(this);evidence.setHint("Independently observed location, sign, direction and date");
+        new AlertDialog.Builder(this).setTitle(item.label()).setMessage(String.format(Locale.UK,"DriveMate location: %.5f, %.5f · travel heading %.0f°\n\nNot proof of a map error. Verify road signs or permitted official records independently. Only independent observations can be shared; never copy TomTom results.",item.point.lat,item.point.lon,item.bearing))
+            .setView(evidence).setPositiveButton("Save independent draft",(d,w)->{
+                if(!safelyParked())return;
+                if(!new SurveyNotes(this).add(evidence.getText().toString()))showError("Independent survey evidence required (up to 2000 characters).");
+                else setStatus("Independent survey saved privately");
+            }).setNegativeButton("Close",null).show();
+    }
+
+    /** Always display the version installed in Android's package metadata.
+     * Avoid hard-coded labels that stay stale after a signed APK update. */
+    private String installedVersionName() {
+        try {
+            String version = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0).versionName;
+            return version != null && !version.isEmpty() ? version : "unknown";
+        } catch (android.content.pm.PackageManager.NameNotFoundException error) {
+            return "unknown";
+        }
+    }
 
 
-    
+    private String voiceModeName() {
+        return new String[]{"Full", "Normal", "Alerts only", "Silent"}[voiceMode];
+    }
 
-    
+    private void setVoiceMode(int selected) {
+        voiceMode = Math.max(DrivingVoicePolicy.FULL,
+                Math.min(DrivingVoicePolicy.SILENT, selected));
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putInt("voice_mode_v2", voiceMode).apply();
+        if ((voiceMode == DrivingVoicePolicy.SILENT
+                || voiceMode == DrivingVoicePolicy.ALERTS_ONLY) && speech != null)
+            speech.stop();
+        updateVoiceButton();
+        Toast.makeText(this, "Voice: " + voiceModeName(), Toast.LENGTH_SHORT).show();
+    }
 
-    void updateVoiceButton() {
+    private void updateVoiceButton() {
         if (voiceButton == null) return;
         String[] symbols = {"🔊 Full", "🔉 Voice", "⚠ Alerts", "🔇 Muted"};
         voiceButton.setText(symbols[voiceMode]);
-        voiceButton.setContentDescription("Voice: " + settingsController.voiceModeName()
+        voiceButton.setContentDescription("Voice: " + voiceModeName()
                 + ". Tap to change voice mode.");
     }
 
-    
+    private void cycleVoiceMode() {
+        setVoiceMode((voiceMode + 1) % 4);
+    }
 
-    
+    private void selectVoiceMode() {
+        new AlertDialog.Builder(this).setTitle("Voice guidance")
+                .setSingleChoiceItems(new String[]{
+                        "Full · early, approach and turn",
+                        "Normal · approach and turn",
+                        "Alerts only · no routine turns",
+                        "Silent · no navigation speech"
+                }, voiceMode, (dialog, which) -> {
+                    setVoiceMode(which);
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private String cameraModeName() {
+        return new String[]{"Auto 3D", "2D direction up", "2D north up"}[cameraMode];
+    }
 
-    
+    private void selectCameraMode() {
+        new AlertDialog.Builder(this).setTitle("Navigation camera")
+                .setSingleChoiceItems(new String[]{
+                        "Automatic 3D · adaptive tilt and zoom",
+                        "2D · direction of travel up",
+                        "2D · north always up"
+                }, cameraMode, (dialog, which) -> {
+                    cameraMode = which;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("camera_mode", which).apply();
+                    lastCameraUpdate = 0;
+                    applyHighDetailPolicy();
+                    if (active && route != null && currentLocation != null) {
+                        smoothFollow = new SmoothFollowCamera(new RouteMotionIndex(route.points));
+                        updateGuidance(currentLocation);
+                    } else if (which == DrivingDisplayPolicy.CAMERA_NORTH_2D) {
+                        if(vectorMap!=null&&displayGps!=null)vectorMap.setCamera(displayGps,vectorMap.currentZoom(),0);
+                    }
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private void selectRerouteMode() {
+        new AlertDialog.Builder(this).setTitle("Faster-route suggestions")
+                .setSingleChoiceItems(new String[]{
+                        "Automatic · switch for substantial estimated savings",
+                        "Ask first · stay on route until I approve"
+                }, rerouteMode, (dialog, which) -> {
+                    rerouteMode = which;
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("reroute_mode", which).apply();
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private void selectSpeedTolerance() {
+        final String[] labels = {"0 mph", "3 mph", "5 mph", "7 mph", "10 mph", "15 mph"};
+        final int[] values = {0, 3, 5, 7, 10, 15};
+        int selected = 1;
+        for (int i = 0; i < values.length; i++)
+            if (values[i] == speedToleranceMph) selected = i;
+        new AlertDialog.Builder(this).setTitle("Above mapped speed limit")
+                .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                    speedToleranceMph = values[which];
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("speed_tolerance_mph", speedToleranceMph).apply();
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private String themeModeName() {
+        return DrivingDisplayPolicy.themeName(themePreference);
+    }
 
-    
+    private void selectThemeMode() {
+        int[] order = DrivingDisplayPolicy.THEME_MENU;
+        int checked = 0;
+        for (int i = 0; i < order.length; i++) if (order[i] == themePreference) checked = i;
+        new AlertDialog.Builder(this).setTitle("Map colours")
+                .setSingleChoiceItems(new String[]{
+                        "Light", "Dark", "Automatic · follow phone light/dark setting"
+                }, checked, (dialog, which) -> {
+                    themePreference = order[which];
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putInt("map_theme", themePreference).apply();
+                    applyTheme();
+                    dialog.dismiss();
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    void applyTheme() {
+    private void applyTheme() {
         boolean systemNight = (getResources().getConfiguration().uiMode
                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                 == android.content.res.Configuration.UI_MODE_NIGHT_YES;
@@ -1416,9 +1766,7 @@ public final class MainActivity extends Activity implements LocationListener {
             vectorRoadsReady = false;
             vectorMap.setNightMode(night);
         }
-        if (map != null && !apiKey.isEmpty())
-            map.setTileSource(tileSource(night ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
-                    night ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
+        // Only DriveMate-owned style changes with theme.
         int panel = night || active ? DARK : Color.WHITE;
         int foreground = night || active ? Color.WHITE : Color.rgb(25, 48, 62);
         int subdued = night || active ? Color.rgb(191, 225, 236) : Color.rgb(55, 80, 96);
@@ -1456,15 +1804,144 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
 
-    
+    private void selectSpeechVolume() {
+        SeekBar slider = new SeekBar(this);
+        slider.setMax(100);
+        slider.setProgress(Math.round(guidanceVolume * 100));
+        slider.setPadding(dp(22), dp(12), dp(22), dp(12));
+        new AlertDialog.Builder(this).setTitle("Spoken guidance volume")
+                .setMessage("Uses Android text-to-speech navigation audio. Media volume also matters.")
+                .setView(slider)
+                .setPositiveButton("Save and test", (dialog, which) -> {
+                    guidanceVolume = Math.max(0.1f, slider.getProgress() / 100f);
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putFloat("speech_volume", guidanceVolume).apply();
+                    say("DriveMate guidance volume");
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private void refreshSearchSuggestions() {
+        if (destinationInput == null || places == null) return;
+        String text = destinationInput.getText().toString().trim().toLowerCase(Locale.UK);
+        suggestionMatches.clear();
+        List<String> labels = new ArrayList<>();
+        List<TomTomApi.Destination> candidates = new ArrayList<>(places.favorites());
+        candidates.addAll(places.recent());
+        for (TomTomApi.Destination candidate : candidates) {
+            if (!text.isEmpty()
+                    && !candidate.toString().toLowerCase(Locale.UK).contains(text)) continue;
+            boolean duplicate = false;
+            for (TomTomApi.Destination prior : suggestionMatches) {
+                if (GeoMath.distance(prior.point, candidate.point) < 3) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            suggestionMatches.add(candidate);
+            labels.add(candidate.toString());
+            if (labels.size() >= 8) break;
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_dropdown_item_1line, labels);
+        destinationInput.setAdapter(adapter);
+        destinationInput.setOnItemClickListener((parent, view, position, id) -> {
+            Object selected = parent.getItemAtPosition(position);
+            for (TomTomApi.Destination place : new ArrayList<>(suggestionMatches)) {
+                if (place.toString().equals(selected)) {
+                    destinationInput.dismissDropDown();
+                    selectDestination(place);
+                    return;
+                }
+            }
+        });
+    }
 
-    
+    private void openQuickDestination(boolean home) {
+        TomTomApi.Destination place = home ? places.home() : places.work();
+        if (place == null) {
+            configureQuickDestination(home);
+        } else {
+            selectDestination(place);
+        }
+    }
 
-    
+    private void configureQuickDestination(boolean home) {
+        String label = home ? "Home" : "Work";
+        EditText entry = new EditText(this);
+        entry.setSingleLine(true);
+        entry.setHint("Enter " + label + " address or postcode");
+        entry.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        FrameLayout container = new FrameLayout(this);
+        container.setPadding(dp(18), dp(6), dp(18), dp(4));
+        container.addView(entry, new FrameLayout.LayoutParams(-1, dp(55)));
+        new AlertDialog.Builder(this).setTitle("Set " + label)
+                .setMessage("Choose a destination to save as " + label + ".")
+                .setView(container)
+                .setPositiveButton("Search", (dialog, which) -> {
+                    String query = entry.getText().toString().trim();
+                    if (query.length() < 2) {
+                        showError("Enter a complete address or postcode.");
+                        return;
+                    }
+                    if (!ownRouting() && apiKey.isEmpty()) {
+                        showKeyDialog();
+                        return;
+                    }
+                    GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
+                    setStatus("Finding " + label + "…");
+                    network.execute(() -> {
+                        try {
+                            List<TomTomApi.Destination> options =
+                                    providerSearch(query, near);
+                            runOnUiThread(() -> {
+                                if (isFinishing()) return;
+                                if (options.isEmpty()) {
+                                    showError("No matching addresses. Try a fuller address.");
+                                    return;
+                                }
+                                String[] labels = new String[options.size()];
+                                for (int i = 0; i < options.size(); i++) {
+                                    labels[i] = options.get(i).toString();
+                                }
+                                new AlertDialog.Builder(this)
+                                        .setTitle("Save " + label + " location")
+                                        .setItems(labels, (d, index) -> {
+                                            TomTomApi.Destination chosen = options.get(index);
+                                            // A new Home/Work needs a fresh drive time.
+                                            quickEtaFetchedAt = 0;
+                                            homeEtaLabel = null;
+                                            workEtaLabel = null;
+                                            if (home) places.setHome(chosen);
+                                            else places.setWork(chosen);
+                                            refreshHomePanel();
+                                            Toast.makeText(this, label + " saved",
+                                                    Toast.LENGTH_SHORT).show();
+                                            selectDestination(chosen);
+                                        })
+                                        .setNegativeButton("Cancel", null).show();
+                            });
+                        } catch (Exception error) {
+                            runOnUiThread(() -> {
+                                if (!isFinishing()) showError(error.getMessage());
+                            });
+                        }
+                    });
+                }).setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private void voiceSearch() {
+        try {
+            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB");
+            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Say an address or postcode");
+            startActivityForResult(intent, VOICE_SEARCH_REQUEST);
+        } catch (Exception e) {
+            showError("Speech search is not available on this phone.");
+        }
+    }
 
     @Override @SuppressWarnings("deprecation")
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -1475,55 +1952,39 @@ public final class MainActivity extends Activity implements LocationListener {
                 RecognizerIntent.EXTRA_RESULTS);
         if (results != null && !results.isEmpty()) {
             destinationInput.setText(results.get(0));
-            destinationController.searchDestination();
+            searchDestination();
         }
     }
 
-    
+    private void showKeyDialog(){showOfflineRouting();}
 
-    XYTileSource tileSource(String name, String prefix) {
-        final String key = Uri.encode(apiKey);
-        return new XYTileSource(name, 0, 20, 256, ".png",
-                new String[]{"https://api.tomtom.com/"}) {
-            @Override public String getTileURLString(long tileIndex) {
-                return "https://api.tomtom.com/" + prefix
-                        + MapTileIndex.getZoom(tileIndex) + "/"
-                        + MapTileIndex.getX(tileIndex) + "/"
-                        + MapTileIndex.getY(tileIndex) + ".png?key=" + key;
-            }
-        };
+    private void configureTiles(){updateMapVisibility();}
+
+    private void configureTrafficTiles(){
+        if(vectorMap!=null)vectorMap.setTraffic(trafficEnabled);
+        if(!trafficEnabled)clearLiveIncidents();
+    }
+    private void configureIncidentEnhancement(){
+        if(active||routing){showError("Stop safely before changing optional traffic settings.");return;}
+        EditText input=new EditText(this);input.setSingleLine(true);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setHint("Optional traffic API key");input.setText(incidentEnhancementKey);
+        new AlertDialog.Builder(this).setTitle("Optional TomTom area traffic reports")
+            .setMessage("Off by default. Enable only if your key and licence allow incident data on DriveMate maps. When enabled, a nearby geographic bounding box is sent to TomTom over HTTPS. Reports are labelled area markers, never route instructions, road closures, speed limits or ETA changes. DriveMate routing and base map do not depend on this service.")
+            .setView(input).setPositiveButton("Enable area reports",(d,w)->{
+                String key=input.getText().toString().trim();
+                if(!NativeEnhancementPolicy.enabled(true,key)){showError("Enter a valid optional traffic key.");return;}
+                clearLiveIncidents();incidentEnhancementKey=key;trafficEnabled=true;
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("incident_enhancement_key",key).putBoolean("incident_enhancement_consent",true).apply();
+                configureTrafficTiles();
+            }).setNeutralButton("Disable",(d,w)->{
+                trafficEnabled=false;incidentEnhancementKey="";
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit().remove("incident_enhancement_key").putBoolean("incident_enhancement_consent",false).apply();
+                configureTrafficTiles();
+            }).setNegativeButton("Cancel",null).show();
     }
 
-    void configureTiles() {
-        if (apiKey.isEmpty()) return;
-        map.setTileSource(tileSource(
-                nightDisplay ? "DriveMate-TomTom-Night" : "DriveMate-TomTom-Map",
-                nightDisplay ? "map/1/tile/basic/night/" : "map/1/tile/basic/main/"));
-        if (vectorMap != null) vectorMap.setTomTomKey(apiKey);
-        updateMapVisibility();
-        configureTrafficTiles();
-        map.invalidate();
-    }
-
-    void configureTrafficTiles() {
-        if (trafficTiles != null) {
-            map.getOverlays().remove(trafficTiles);
-            trafficTiles = null;
-        }
-        if (trafficEnabled && !apiKey.isEmpty()) {
-            trafficTiles = new TilesOverlay(
-                    new MapTileProviderBasic(this, tileSource("DriveMate-TomTom-Traffic",
-                            "traffic/map/4/tile/flow/relative0/")), this);
-            trafficTiles.setLoadingBackgroundColor(Color.TRANSPARENT);
-            trafficTiles.setLoadingLineColor(Color.TRANSPARENT);
-            map.getOverlays().add(0, trafficTiles);
-        }
-        if (vectorMap != null) vectorMap.setTraffic(trafficEnabled);
-        if(!trafficEnabled)roadContextController.clearLiveIncidents();
-        map.invalidate();
-    }
-
-    void ensureLocationPermission() {
+    private void ensureLocationPermission() {
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED) {
             startLocation();
@@ -1547,12 +2008,12 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    boolean hasPreciseLocationPermission() {
+    private boolean hasPreciseLocationPermission() {
         return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 == PackageManager.PERMISSION_GRANTED;
     }
 
-    boolean hasEnabledLocationProvider() {
+    private boolean hasEnabledLocationProvider() {
         if (locationManager == null) return false;
         try {
             return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
@@ -1561,7 +2022,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** Human-readable reason, without falsely claiming mobile data is GPS. */
-    String gpsUnavailableMessage() {
+    private String gpsUnavailableMessage() {
         if (!hasPreciseLocationPermission())
             return "Allow Precise Location for DriveMate in Android app permissions.";
         if (!hasEnabledLocationProvider())
@@ -1576,7 +2037,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * Restore the map camera from the phone's last GPS OR network provider
      * result without advertising an old fix as current navigation position.
      */
-    void restoreLastKnownMapArea() {
+    private void restoreLastKnownMapArea() {
         if (locationManager == null || !hasPreciseLocationPermission()
                 || currentLocation != null || !followLocation) return;
         Location chosen = null;
@@ -1608,14 +2069,12 @@ public final class MainActivity extends Activity implements LocationListener {
                 chosen.getLatitude(), chosen.getLongitude());
         double zoom = chosen.hasAccuracy() && chosen.getAccuracy() > 1000
                 ? 11.0 : 13.5;
-        map.getController().setZoom(zoom);
-        map.getController().setCenter(new GeoPoint(preview.lat, preview.lon));
         if (vectorMap != null) vectorMap.setCamera(preview, zoom, 0);
         // No blue GPS marker is created: this is historical positioning only.
         setStatus("Showing last known area · waiting for live GPS");
     }
 
-    void startLocation() {
+    private void startLocation() {
         if (locationManager == null || !hasPreciseLocationPermission()) {
             setStatus("Precise Location permission is required for navigation.");
             return;
@@ -1685,7 +2144,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * Re-register location updates when guidance starts or ends, so the rate
      * matches the mode: fastest while navigating, lighter otherwise.
      */
-    void resubscribeLocationForMode() {
+    private void resubscribeLocationForMode() {
         if (locationManager == null || !locationSubscribed
                 || subscribedForNavigation == active) return;
         try {
@@ -1722,7 +2181,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (gpsLost) {
             gpsLost = false;
             if (active) {
-                setStatus("GPS signal restored · guidance resumed");
+                setStatus("GPS signal restored · checking route position");
                 saySystemWarning("GPS signal restored.");
             }
         }
@@ -1753,25 +2212,11 @@ public final class MainActivity extends Activity implements LocationListener {
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fix.hasSpeed() ? fix.getSpeed() : 0f);
         displayGps = smoothed;
-        GeoPoint point = new GeoPoint(smoothed.lat, smoothed.lon);
-        if (userPin == null) {
-            userPin = new Marker(map);
-            userPin.setTitle("Your live GPS position");
-            userPin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER);
-            userPin.setFlat(true);
-            userPin.setIcon(makeCarIcon());
-            map.getOverlays().add(userPin);
-        }
-        // The independent frame clock owns the moving marker while driving.
-        // Never teleport it back to each noisy 1Hz GPS fix.
-        if (!active || smoothFollow == null || !followLocation) userPin.setPosition(point);
         if (vectorMap != null && useLocalMap) {
-            if (!active || smoothFollow == null || !followLocation) vectorMap.setVehicle(smoothed);
+            if (!active || smoothFollow == null || !followLocation) vectorMap.setUnsnappedVehicle(smoothed,
+                    fix.hasBearing()&&fix.hasSpeed()&&fix.getSpeed()>1.5f?fix.getBearing():Double.NaN);
             if (!autoFallback && !active) vectorMap.prefetch(gpsPoint(fix));
         }
-        if ((!active || smoothFollow == null || !followLocation) && fix.hasBearing()
-                && fix.hasSpeed() && fix.getSpeed() > 1.5f)
-            userPin.setRotation(-fix.getBearing());
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
         speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
@@ -1792,21 +2237,20 @@ public final class MainActivity extends Activity implements LocationListener {
                 lastCameraCenter = gps;
             }
         }
-        if(freeDriving&&!active&&!routing)roadContextController.updateFreeRoadIntelligence(fix);
-        roadContextController.updateLiveIncidents(fix);
+        if(freeDriving&&!active&&!routing)updateFreeRoadIntelligence(fix);
+        updateLiveIncidents(fix);
         if (gpsAccuracyText != null && active) {
             gpsAccuracyText.setText("GPS accuracy "
                     + (fix.hasAccuracy() ? "±" + Math.round(fix.getAccuracy()) + " m" : "unknown")
                     + satelliteSuffix()
                     + (routing ? "  ·  updating traffic route…" : ""));
         }
-        if (active && route != null && (!routing || guidancePositionConfirmed)) updateGuidance(fix);
+        if (active && route != null) updateGuidance(fix);
         else if(active&&joiningRoute&&followLocation&&lastJoinCameraAt>=0&&SystemClock.elapsedRealtime()-lastJoinCameraAt>=1000){centreOnLocation(false);lastJoinCameraAt=SystemClock.elapsedRealtime();}
-        if (!active && !showingVector()) map.postInvalidateOnAnimation();
     }
 
     /** Maps a fix's provider to its FixQualityPolicy rank. */
-    static int fixSource(Location fix) {
+    private static int fixSource(Location fix) {
         String provider = fix.getProvider();
         // "fused" is LocationManager.FUSED_PROVIDER (API 31); the literal keeps
         // this method safe to call on older phones.
@@ -1816,33 +2260,129 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** " · N satellites" once GNSS has reported; empty before that. */
-    String satelliteSuffix() {
+    private String satelliteSuffix() {
         return satellitesUsed >= 0 ? " · " + satellitesUsed + " satellites" : "";
     }
 
-    BitmapDrawable makeCarIcon() {
-        Bitmap source=VectorDriveMap.makeVehicleArrow();
+    private BitmapDrawable makeCarIcon() {
+        Bitmap source=NativeMapController.makeVehicleArrow();
         Bitmap scaled=Bitmap.createScaledBitmap(source,dp(55),dp(55),true);
         return new BitmapDrawable(getResources(),scaled);
     }
 
-    
-    
-    
-    
-    void toggleFreeDriving(){
+    private void clearLiveIncidents(){
+        incidentGeneration++;lastIncidentRequest=0;lastIncidentCentre=null;
+        if(vectorMap!=null)vectorMap.setLiveIncidents(null,0);
+    }
+    private void updateLiveIncidents(Location fix){
+        if(!foreground||!(freeDriving||active)||!NativeEnhancementPolicy.enabled(trafficEnabled,incidentEnhancementKey)
+                ||gpsLost||!showingVector()||!vectorMap.supportsLiveIncidents())return;
+        if(!fix.hasAccuracy()||fix.getAccuracy()>50||incidentBusy)return;
+        long now=SystemClock.elapsedRealtime();
+        GeoMath.Point p=gpsPoint(fix);
+        if(lastIncidentRequest!=0 && (now-lastIncidentRequest<45000 ||
+                now-lastIncidentRequest<120000 && lastIncidentCentre!=null && GeoMath.distance(p,lastIncidentCentre)<1000))return;
+        lastIncidentRequest=now;lastIncidentCentre=p;incidentBusy=true;
+        final int generation=incidentGeneration;
+        final String key=incidentEnhancementKey;
+        incidentWorker.execute(()->{
+            List<LiveTrafficIncidents.Event> data;
+            try{data=TomTomApi.liveIncidents(key,p);}catch(Exception ignored){data=null;}
+            final List<LiveTrafficIncidents.Event> result=data;
+            final long fetched=System.currentTimeMillis();
+            runOnUiThread(()->{
+                incidentBusy=false;
+                if(generation!=incidentGeneration||!foreground||!(freeDriving||active)
+                    ||!NativeEnhancementPolicy.enabled(trafficEnabled,incidentEnhancementKey)||!key.equals(incidentEnhancementKey)||vectorMap==null||!vectorMap.supportsLiveIncidents()||gpsLost)return;
+                if(currentLocation==null||GeoMath.distance(p,gpsPoint(currentLocation))>2000)return;
+                if(result!=null)vectorMap.setLiveIncidents(result,fetched);
+                // On failure the last successful snapshot expires independently; never imply clear roads.
+            });
+        });
+    }
+    private void clearFreeRoadContext(){
+        freeContextGeneration++;freeContextBusy=false;freeContextRequestedAt=0;freeRoadContext=null;
+        freeRoadMatch.reset();freeLastLimit=-1;freeLastLimitAt=0;freeAdvanceNode=-1;freeContextEndpoint="";
+        if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
+        if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
+    }
+    private void updateFreeRoadIntelligence(Location fix){
+        GeoMath.Point point=gpsPoint(fix);
+        final String endpoint="native-regional";
+        if(freeRoadContext!=null && !freeRoadContext.freshAt(point)){
+            freeRoadContext=null;freeRoadMatch.reset();freeLastLimit=-1;
+            if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
+        }
+        long now=SystemClock.elapsedRealtime();
+        if(freeRoadContext==null&&!freeContextBusy
+                &&(freeContextRequestedAt==0||now-freeContextRequestedAt>=15000)){
+            freeContextBusy=true;freeContextRequestedAt=now;
+            final int generation=freeContextGeneration;
+            network.execute(()->{
+                NativeRegionalRouter.RoadContext result;
+                try{result=new NativeRegionalRouter(this).roadContext(point);}catch(Exception e){result=null;}
+                final NativeRegionalRouter.RoadContext context=result;
+                runOnUiThread(()->{
+                    if(generation!=freeContextGeneration||!freeDriving||active)return;
+                    freeContextBusy=false;
+                    if(currentLocation!=null&&context!=null&&context.freshAt(gpsPoint(currentLocation))){
+                        freeRoadContext=context;freeContextEndpoint=endpoint;
+                        if(vectorMap!=null&&followLocation)vectorMap.setBrowseGeometry(context.map);
+                    }
+                });
+            });
+        }
+        FreeDriveRoadMatch.Match match=null;
+        if(freeRoadContext!=null&&!gpsLost&&fix.hasBearing()&&fix.hasSpeed()&&fix.hasAccuracy()
+                &&(!fix.hasBearingAccuracy()||fix.getBearingAccuracyDegrees()<=20)){
+            try{match=freeRoadMatch.confirm(FreeDriveRoadMatch.match(freeRoadContext.ways,point,fix.getAccuracy(),fix.getBearing(),fix.getSpeed()),fix.getTime());}
+            catch(Exception ignored){freeRoadMatch.reset();}
+        }else freeRoadMatch.reset();
+        if(match==null){
+            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);
+            if(now-freeLastLimitAt>10000)freeLastLimit=-1;
+            return;
+        }
+        int shown=metricUnits?match.kmh:(int)Math.round(match.kmh/1.609344);
+        speedLimitText.setText(String.valueOf(shown));speedLimitText.setVisibility(View.VISIBLE);
+        speedLimitText.setContentDescription("Mapped speed limit "+shown+(metricUnits?" km/h":" mph")+". Check road signs.");
+        String status="Free driving · mapped limit "+shown+(metricUnits?" km/h":" mph")+(match.name.isEmpty()?"":" · "+match.name);
+        FreeDriveRoadMatch.Upcoming next=null;
+        try{next=FreeDriveRoadMatch.upcoming(freeRoadContext.ways,match,point,fix.getSpeed(),freeRoadContext.bounds);}catch(Exception ignored){}
+        if(next!=null){
+            int future=metricUnits?next.kmh:(int)Math.round(next.kmh/1.609344);
+            status+=" · "+future+(metricUnits?" km/h":" mph")+" in "+NavigationUnits.displayDistance(next.distance,metricUnits)+" if continuing";
+            if(advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()&&freeAdvanceNode!=next.node){
+                freeAdvanceNode=next.node;
+                speak("If continuing on this road, mapped limit "+future+(metricUnits?" kilometres per hour in ":" miles per hour in ")
+                    +NavigationUnits.spokenDistance(next.distance,metricUnits)+". Check road signs.");
+            }
+        }
+        setStatus(status);
+        boolean speeding=fix.getSpeed()*2.2369362921>match.kmh/1.609344+speedToleranceMph;
+        speedText.setTextColor(speeding?Color.rgb(255,197,85):Color.WHITE);
+        if(speeding&&speedWarningEnabled&&speechReady&&speech!=null&&!speech.isSpeaking()
+            &&(lastSpeedWarningAt==0||now-lastSpeedWarningAt>120000)){
+            lastSpeedWarningAt=now;sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",true);
+        }
+        if(freeLastLimit>0&&freeLastLimit!=match.kmh&&advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT
+                &&speechReady&&speech!=null&&!speech.isSpeaking())
+            speak("Mapped speed limit now "+shown+(metricUnits?" kilometres per hour.":" miles per hour.")+" Check road signs.");
+        freeLastLimit=match.kmh;freeLastLimitAt=now;
+    }
+    private void toggleFreeDriving(){
         if(active||route!=null||routing){Toast.makeText(this,"End the route before using free driving.",Toast.LENGTH_SHORT).show();return;}
         freeDriving=!freeDriving;
-        roadContextController.clearFreeRoadContext();
+        clearFreeRoadContext();
         freeDriveBearing=Double.NaN;followLocation=true;updateFollowButton();
         if(freeDriving)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        homePanelController.setHomeVisible(true);
+        setHomeVisible(true);
         setStatus(freeDriving?"Free driving · GPS and mapped features · road limits not verified":"Map browsing");
         if(currentLocation!=null)centreOnLocation(true);
     }
 
-    void centreOnLocation(boolean forceZoom) {
+    private void centreOnLocation(boolean forceZoom) {
         if (currentLocation == null) return;
         GeoMath.Point position = gpsPoint(currentLocation);
         boolean vector = showingVector();
@@ -1863,23 +2403,11 @@ public final class MainActivity extends Activity implements LocationListener {
                         position.lon+Math.sin(rad)*ahead/(111320*Math.max(.15,Math.cos(Math.toRadians(position.lat)))));
             }
             if(vector)vectorMap.setBrowseCamera(centre,cameraZoom,bearing,pitch,heading);
-            else {map.setMapOrientation((float)-bearing);map.getController().setZoom(cameraZoom);map.getController().setCenter(new GeoPoint(centre.lat,centre.lon));}
             lastCameraCenter=position;return;
         }
-        double zoom = vector ? vectorMap.currentZoom() : map.getZoomLevelDouble();
-        if (forceZoom || zoom < 14.0) zoom = 16.5;
-        if (vector) {
-            vectorMap.setCamera(position, zoom, 0);
-        } else {
-            if (Math.abs(map.getZoomLevelDouble() - zoom) > 0.1)
-                map.getController().setZoom(zoom);
-            map.getController().setCenter(new GeoPoint(position.lat, position.lon));
-            if (useLocalMap && !autoFallback && vectorMap != null) {
-                // The candidate map needs the same real UK camera position
-                // in order to request and *render* street tiles for verification.
-                vectorMap.setCamera(position, zoom, 0);
-            }
-        }
+        double zoom=vectorMap!=null?vectorMap.currentZoom():16.5;
+        if(forceZoom||zoom<14)zoom=16.5;
+        if(vectorMap!=null)vectorMap.setCamera(position,zoom,0);
         lastCameraCenter = position;
     }
 
@@ -1893,7 +2421,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * never run on every rendered frame. SmoothFollowCamera owns interpolation,
      * zoom hysteresis and bearing changes on the independent UI clock.
      */
-    void updateDrivingCamera(Location fix, GeoMath.Progress progress,
+    private void updateDrivingCamera(Location fix, GeoMath.Progress progress,
                                      double nextJunctionOffsetMetres) {
         // The first fresh fix always starts the driving camera, so the map
         // switches from the route overview to a heading-up driving view straight
@@ -1901,7 +2429,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // SmoothFollowCamera itself ignores untrustworthy ones.
         boolean cameraStarted = smoothFollow != null && smoothFollow.initialized();
         if (!active || !followLocation || route == null || gpsLost
-                || map.getHeight() < dp(350)) return;
+                || vectorMap.view().getHeight() < dp(350)) return;
         if (cameraStarted && (progress.offRouteMetres > 110
                 || (fix.hasAccuracy() && fix.getAccuracy() > 75))) return;
         long now = SystemClock.elapsedRealtime();
@@ -1917,14 +2445,14 @@ public final class MainActivity extends Activity implements LocationListener {
         float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
-                velocity, map.getHeight(), headerHeight, bottomPanelHeight,
+                velocity, vectorMap.view().getHeight(), headerHeight, bottomPanelHeight,
                 closeZoom || highlightedJunctionIndex >= 0);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
         double remaining=Math.max(0,GeoMath.length(route.points)-along);
         boolean shortTrip=RoadTestDisplayPolicy.wideApproach(remaining,nextJunctionOffsetMetres-along)
-                && !closeZoom && highlightedJunctionIndex<0;
+                && highlightedJunctionIndex<0 && (!closeZoom||nextJunctionOffsetMetres-along>420);
         List<GeoMath.Point> cameraContext=junctionFramePoints;
         if(shortTrip){
             cameraContext=new ArrayList<>();
@@ -1941,7 +2469,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     shortTrip?cameraContext:distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
         }
         boolean frameJunction=!junctionFramePoints.isEmpty()&&target.junctionMetres<=260;
-        double fittedZoom=(frameJunction||shortTrip)?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,map.getWidth(),map.getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
+        double fittedZoom=(frameJunction||shortTrip)?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,vectorMap.view().getWidth(),vectorMap.view().getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
         target = new NavigationCamera.Frame(target.center, fittedZoom,
                 target.roadBearingDegrees, target.junctionMetres,
                 target.cameraCenterAlongMetres,
@@ -1954,16 +2482,119 @@ public final class MainActivity extends Activity implements LocationListener {
         startSmoothLoop();
     }
 
-    
+    private void searchDestination() {
+        if (!ownRouting() && apiKey.isEmpty()) {
+            showKeyDialog();
+            return;
+        }
+        String query = UkSearch.normalize(destinationInput.getText().toString());
+        if (query.length() < 2) {
+            destinationInput.setError("Enter an address or postcode");
+            return;
+        }
+        destinationInput.dismissDropDown();
+        destinationInput.clearFocus();
+        InputMethodManager keyboard = (InputMethodManager)
+                getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (keyboard != null) {
+            keyboard.hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
+        }
+        setStatus("Finding " + query + "…");
+        GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
+        final int searchId = ++requestGeneration;
+        network.execute(() -> {
+            try {
+                List<TomTomApi.Destination> found = providerSearch(query, near);
+                runOnUiThread(() -> {
+                    if (searchId != requestGeneration || isFinishing()) return;
+                    if (found.isEmpty()) {
+                        showError("No matching destinations. Try a fuller address.");
+                        return;
+                    }
+                    String[] labels = new String[found.size()];
+                    for (int i = 0; i < found.size(); i++) labels[i] = found.get(i).toString();
+                    new AlertDialog.Builder(this)
+                            .setTitle("Choose destination")
+                            .setItems(labels, (d, which) -> selectDestination(found.get(which)))
+                            .setNegativeButton("Cancel", null)
+                            .show();
+                    setStatus("Select the matching destination.");
+                });
+            } catch (Exception error) {
+                runOnUiThread(() -> {
+                    if (searchId == requestGeneration) showError(error.getMessage());
+                });
+            }
+        });
+    }
 
 
-    
+    /** Select saved/recent destinations without making another search API call. */
+    private void showSavedDestinations() {
+        List<TomTomApi.Destination> favorites = places.favorites();
+        List<TomTomApi.Destination> recents = places.recent();
+        if (favorites.isEmpty() && recents.isEmpty()) {
+            new AlertDialog.Builder(this).setTitle("Places")
+                    .setMessage("No places saved yet. Search for a destination to build your list.")
+                    .setPositiveButton("OK", null).show();
+            return;
+        }
+        List<TomTomApi.Destination> results = new ArrayList<>();
+        List<String> descriptions = new ArrayList<>();
+        for (TomTomApi.Destination item : favorites) {
+            results.add(item);
+            descriptions.add("★ " + item.toString());
+        }
+        for (TomTomApi.Destination item : recents) {
+            boolean alreadyShown = false;
+            for (TomTomApi.Destination saved : favorites) {
+                if (GeoMath.distance(item.point, saved.point) < 2) {
+                    alreadyShown = true;
+                    break;
+                }
+            }
+            if (!alreadyShown) {
+                results.add(item);
+                descriptions.add("Recent · " + item.toString());
+            }
+        }
+        new AlertDialog.Builder(this).setTitle("Saved & recent places")
+                .setItems(descriptions.toArray(new String[0]), (dialog, which) ->
+                        selectDestination(results.get(which)))
+                .setNeutralButton("Remove favourite", (dialog, which) -> showRemoveFavorite())
+                .setNegativeButton("Close", null).show();
+    }
 
-    
+    private void showRemoveFavorite() {
+        List<TomTomApi.Destination> favorites = places.favorites();
+        if (favorites.isEmpty()) {
+            Toast.makeText(this, "No saved favourites to remove.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] names = new String[favorites.size()];
+        for (int i = 0; i < favorites.size(); i++) names[i] = favorites.get(i).toString();
+        new AlertDialog.Builder(this).setTitle("Remove a favourite")
+                .setItems(names, (dialog, which) -> {
+                    places.removeFavorite(favorites.get(which));
+                    if (destination != null && !active && route != null) showPreview(route);
+                    Toast.makeText(this, "Favourite removed", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private void saveCurrentDestination() {
+        if (destination == null) return;
+        if (places.isFavorite(destination)) {
+            Toast.makeText(this, "Already saved in favourites", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        places.addFavorite(destination);
+        saveButton.setText("★ Saved");
+        refreshHomePanel();
+        Toast.makeText(this, "Saved to favourites", Toast.LENGTH_SHORT).show();
+    }
 
-    String previewDetails(TomTomApi.Route calculated) {
+    private String previewDetails(TomTomApi.Route calculated) {
         String detail = NavigationUnits.displayDistance(calculated.lengthMetres, metricUnits)
                 + " · " + NavigationUnits.duration(calculated.timeSeconds);
         if (calculated.trafficDelaySeconds > 0) {
@@ -1971,15 +2602,15 @@ public final class MainActivity extends Activity implements LocationListener {
         } else {
             detail += NavigationStartPolicy.trafficStatus(calculated.provider);
         }
-        return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.sharedGeometry != null);
+        return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.nativeScene != null);
     }
 
-    void showPreview(TomTomApi.Route calculated) {
+    private void showPreview(TomTomApi.Route calculated) {
         active = false;
         applyHighDetailPolicy();
         NavigationService.stop(this);
         resubscribeLocationForMode();
-        homePanelController.setHomeVisible(false);
+        setHomeVisible(false);
         routeSummary.setText(previewDetails(calculated));
         routeSummary.setVisibility(View.VISIBLE);
         instructionText.setText(NavigationStartPolicy.previewOnly(calculated.provider)?"Experimental route preview — not for driving.":"Review your route before driving.");
@@ -2004,7 +2635,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setStatus(NavigationStartPolicy.previewOnly(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready");
     }
 
-    void startNavigation() {
+    private void startNavigation() {
         if (route == null || destination == null) return;
         if (NavigationStartPolicy.previewOnly(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
         if (currentLocation == null || !NavigationStartPolicy.freshFix(currentLocation.getLatitude(), currentLocation.getLongitude(), currentLocation.getTime(), System.currentTimeMillis(), currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.NaN)) {
@@ -2019,7 +2650,7 @@ public final class MainActivity extends Activity implements LocationListener {
         destinationInput.clearFocus();
         ((InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE))
                 .hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
-        homePanelController.setHomeVisible(false);
+        setHomeVisible(false);
         followLocation = true;
         updateFollowButton();
         topTurnTitle.setText("NEXT TURN");
@@ -2034,8 +2665,8 @@ public final class MainActivity extends Activity implements LocationListener {
         applyDrivingControls();
         stopButton.setText("End");
         stopButton.setContentDescription("End navigation");
-        setStatus("Navigating with "+route.provider+" · "+RouteMapPolicy.description(route.provider, route.sharedGeometry != null));
-        mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; reviewController.requestComparison();
+        setStatus("Navigating with "+route.provider+" · "+RouteMapPolicy.description(route.provider, route.nativeScene != null));
+        mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
         guidancePositionConfirmed=false;confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         nextInstruction="";
         say("Navigation started.");
@@ -2058,7 +2689,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * 13+ also needs the notification permission to show the ongoing
      * "navigating" notification; navigation still works if it is refused.
      */
-    void startBackgroundNavigation() {
+    private void startBackgroundNavigation() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                         != PackageManager.PERMISSION_GRANTED) {
@@ -2081,7 +2712,7 @@ public final class MainActivity extends Activity implements LocationListener {
      * streets instead (labels stay upright, no POI clutter). North-up and the
      * home screen keep the high-detail tiles when the setting is on.
      */
-    void applyHighDetailPolicy() {
+    private void applyHighDetailPolicy() {
         if (vectorMap == null) return;
         boolean rotating = active && cameraMode != DrivingDisplayPolicy.CAMERA_NORTH_2D;
         // Never swap the underlying map at a zoom threshold. Separate explicit map choice remains available.
@@ -2092,7 +2723,7 @@ public final class MainActivity extends Activity implements LocationListener {
         vectorMap.setNavigationDetail(active);
     }
 
-    void selectDestination(TomTomApi.Destination selected) {
+    private void selectDestination(TomTomApi.Destination selected) {
         if (currentLocation == null || !MapStartupPolicy.freshForRouting(
                 currentLocation.getLatitude(), currentLocation.getLongitude(),
                 currentLocation.getTime(), System.currentTimeMillis(),
@@ -2104,7 +2735,7 @@ public final class MainActivity extends Activity implements LocationListener {
             return;
         }
         if (route != null || active) stopNavigation(false);
-        homePanelController.setHomeVisible(false);
+        setHomeVisible(false);
         destination = selected;
         arrivalPolicy.reset();
         displayEntranceMarker(selected);
@@ -2113,36 +2744,17 @@ public final class MainActivity extends Activity implements LocationListener {
         updateFollowButton();
         destinationInput.setText(selected.title, false);
         destinationInput.dismissDropDown();
-        if (destinationPin == null) {
-            destinationPin = new Marker(map);
-            destinationPin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-            map.getOverlays().add(destinationPin);
-        }
-        destinationPin.setPosition(new GeoPoint(selected.point.lat, selected.point.lon));
-        if (vectorMap != null) vectorMap.setDestination(selected.point);
-        destinationPin.setTitle(selected.toString());
+        if(vectorMap!=null)vectorMap.setDestination(selected.point);
         planRoute(true);
     }
 
     /** Only a provider-listed POI main entry point is marked as an entrance. */
-    void displayEntranceMarker(TomTomApi.Destination selected) {
-        if (entrancePin != null) {
-            map.getOverlays().remove(entrancePin);
-            entrancePin = null;
-        }
-        GeoMath.Point entry = selected == null ? null : selected.mainEntrance;
-        if (vectorMap != null) vectorMap.setEntrance(entry);
-        if (entry != null) {
-            entrancePin = new Marker(map);
-            entrancePin.setPosition(new GeoPoint(entry.lat, entry.lon));
-            entrancePin.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM);
-            entrancePin.setTitle("Map-listed main entrance · verify road access");
-            map.getOverlays().add(entrancePin);
-        }
-        map.invalidate();
+    private void displayEntranceMarker(TomTomApi.Destination selected) {
+        GeoMath.Point entry=selected==null?null:selected.mainEntrance;
+        if(vectorMap!=null)vectorMap.setEntrance(entry);
     }
 
-    void showArrivalApproach(ArrivalPolicy.State state) {
+    private void showArrivalApproach(ArrivalPolicy.State state) {
         if (arrivalHintText == null || !(arrivalHintText.getTag() instanceof View))
             return;
         View panel = (View) arrivalHintText.getTag();
@@ -2176,24 +2788,117 @@ public final class MainActivity extends Activity implements LocationListener {
         findParkingButton.setAlpha(parked ? 1f : 0.45f);
     }
 
-    
+    /** Parking information is requested only on demand and never guessed. */
+    private void findNearbyParking(){showError("Native parking search is not yet validated. No external search fallback.");}
 
-    
+    private void offerSaveParkedCar() {
+        new AlertDialog.Builder(this).setTitle("Save where you parked?")
+                .setMessage("Store this GPS position on this phone only. "
+                        + "You can view or clear it from the DriveMate home screen.")
+                .setPositiveButton("Save location", (dialog, which) -> saveParkedCarNow())
+                .setNegativeButton("Not now", null).show();
+    }
 
-    
+    private void saveParkedCarNow() {
+        if (currentLocation == null || !ArrivalPolicy.canSaveParking(
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
+                currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
+                currentLocation.getTime(), System.currentTimeMillis())) {
+            showError("Parking location not saved · wait for fresh precise stationary GPS.");
+            return;
+        }
+        places.saveParkedCar(gpsPoint(currentLocation), System.currentTimeMillis());
+        refreshHomePanel();
+        Toast.makeText(this, "Parked car saved locally", Toast.LENGTH_LONG).show();
+    }
 
-    
+    /**
+     * Settings → "Share diagnostics": a text snapshot of GPS quality and the
+     * camera/arrow angles, for reporting display problems such as a sideways
+     * car arrow. No coordinates, addresses or destination names are included,
+     * and nothing is sent unless the driver picks an app to share it with.
+     */
+    private void shareDiagnostics() {
+        DiagnosticsReport.Snapshot s = new DiagnosticsReport.Snapshot();
+        s.appVersion = installedVersionName();
+        s.androidSdk = Build.VERSION.SDK_INT;
+        s.device = Build.MANUFACTURER + " " + Build.MODEL;
+        s.navigating = active;
+        s.gpsLost = gpsLost;
+        s.fixSource = lastAcceptedFix == null ? ""
+                : lastAcceptedFix.source == FixQualityPolicy.SOURCE_FUSED ? "fused"
+                : lastAcceptedFix.source == FixQualityPolicy.SOURCE_GPS ? "gps" : "network";
+        if (fusedActive && s.fixSource.isEmpty()) s.fixSource = "fused (no fix yet)";
+        if (currentLocation != null) {
+            if (currentLocation.hasAccuracy()) s.accuracyMetres = currentLocation.getAccuracy();
+            if (currentLocation.hasSpeed()) s.speedMps = currentLocation.getSpeed();
+            if (currentLocation.hasBearing()) s.gpsBearing = currentLocation.getBearing();
+        }
+        s.satellitesUsed = satellitesUsed;
+        s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
+        s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
+                +(route==null?"":" / map: "+(vectorMap!=null&&showingVector()?vectorMap.geometryDescription():RouteMapPolicy.description(route.provider,false)))
+                +(showingVector()&&vectorMap!=null?" / visual alignment: "+vectorMap.routeAlignmentDiagnostic():" / raster alignment not measured")
+                +" / base map "+DriveTileServer.MAP_RELEASE;
+        s.fixAgeMs=currentLocation==null?-1:Math.max(0,System.currentTimeMillis()-currentLocation.getTime());
+        s.cameraMode = cameraModeName();
+        s.followingCar = followLocation;
+        s.highDetailTiles = false; // vector default; explicit raster fallback remains possible
+        s.cameraBearing = lastCameraBearing;
+        s.travelBearing = lastTravelBearing;
+        Intent share = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_SUBJECT, "DriveMate diagnostics")
+                .putExtra(Intent.EXTRA_TEXT, DiagnosticsReport.build(s));
+        startActivity(Intent.createChooser(share, "Share DriveMate diagnostics"));
+    }
 
-    
+    /** Settings → "Save where I parked": only saves a precise, stationary GPS fix. */
+    private void promptSaveParking() {
+        if (currentLocation == null || !ArrivalPolicy.canSaveParking(
+                currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.MAX_VALUE,
+                currentLocation.hasSpeed() ? currentLocation.getSpeed() : Float.MAX_VALUE,
+                currentLocation.getTime(), System.currentTimeMillis())) {
+            showError("Park safely and wait for precise stationary GPS before saving.");
+            return;
+        }
+        new AlertDialog.Builder(this).setTitle("Save parked-car location?")
+                .setMessage("Only the current GPS estimate is saved on this phone. "
+                        + "It can be cleared from Settings → Find my parked car.")
+                .setPositiveButton("Save", (d, w) -> saveParkedCarNow())
+                .setNegativeButton("Cancel", null).show();
+    }
 
-    
+    private void showParkedCar() {
+        GeoMath.Point saved = places.parkedCar();
+        if (saved == null) {
+            Toast.makeText(this, "No saved parking position", Toast.LENGTH_SHORT).show();
+            refreshHomePanel();
+            return;
+        }
+        // Leave the saved position visible rather than having the next live
+        // GPS fix immediately drag the map back to the driver's location.
+        followLocation = false;
+        updateFollowButton();
+        if(vectorMap!=null){vectorMap.setParkedCar(saved);vectorMap.setCamera(saved,17,0);}
+        new AlertDialog.Builder(this).setTitle("Parked car · saved on this phone")
+                .setMessage("Showing the GPS position you explicitly saved. "
+                        + "It may not be an exact parking bay. "
+                        + "DriveMate does not provide a walking route to your car.")
+                .setPositiveButton("Done", null)
+                .setNeutralButton("Clear saved position", (dialog, which) -> {
+                    places.clearParkedCar();
+                    if (vectorMap != null) vectorMap.setParkedCar(null);
+                    refreshHomePanel();
+                }).show();
+    }
 
-    GeoMath.Point gpsPoint(Location location) {
+    private GeoMath.Point gpsPoint(Location location) {
         return new GeoMath.Point(location.getLatitude(), location.getLongitude());
     }
 
     /** Connectivity is only advisory; an existing map/route is preserved. */
-    boolean hasNetwork() {
+    private boolean hasNetwork() {
         ConnectivityManager cm = (ConnectivityManager)
                 getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm == null) return true;
@@ -2207,7 +2912,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    void planRoute(boolean firstRoute) {
+    private void planRoute(boolean firstRoute) {
         if (routing || destination == null || currentLocation == null || (!ownRouting() && apiKey.isEmpty())) return;
         if (!localRouting() && !hasNetwork()) {
             setStatus("No internet · current route retained; traffic updates paused");
@@ -2223,17 +2928,10 @@ public final class MainActivity extends Activity implements LocationListener {
         final int plannedGeneration = ++requestGeneration;
         final GeoMath.Point start = gpsPoint(currentLocation);
         final GeoMath.Point end = destination.point;
-        final String keyForRequest = apiKey;
-        final String own = ownEndpoint();
-        final boolean local = localRouting();
-        setStatus(local ? "Calculating local route preview…" : own.isEmpty() ? (firstRoute ? "Planning traffic-aware route…" : "Updating route for traffic / GPS…") : "Planning DriveMate map route…");
+        setStatus("Calculating DriveMate native route preview…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = local?new LocalRoutingPack(this).preview(start,end):own.isEmpty()?TomTomApi.route(keyForRequest,start,end):DriveMateProvider.route(own,start,end);
-                if ("DriveMate".equals(calculated.provider)) {
-                    calculated.sharedGeometry = DriveMateProvider.sharedMap(own,calculated);
-                    if(calculated.sharedGeometry==null)calculated.sharedGeometry=DmUnifiedRegion.matchLive(this,calculated);
-                }
+                TomTomApi.Route calculated = new NativeRegionalRouter(this).preview(start,end);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
@@ -2316,7 +3014,7 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** Only accept a suggestion if still close to the GPS it was planned for. */
-    void acceptPendingRoute() {
+    private void acceptPendingRoute() {
         if (!active || pendingRoute == null || pendingRouteOrigin == null
                 || currentLocation == null) {
             clearPendingRoute();
@@ -2336,7 +3034,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setStatus("Chosen faster or updated route ready");
     }
 
-    void showPendingRoute(TomTomApi.Route candidate, GeoMath.Point origin,
+    private void showPendingRoute(TomTomApi.Route candidate, GeoMath.Point origin,
                                   int savingSeconds) {
         pendingRoute = candidate;
         pendingRouteOrigin = origin;
@@ -2353,7 +3051,7 @@ public final class MainActivity extends Activity implements LocationListener {
             rerouteSuggestionRow.setVisibility(View.VISIBLE);
     }
 
-    void clearPendingRoute() {
+    private void clearPendingRoute() {
         pendingRoute = null;
         pendingRouteOrigin = null;
         pendingRouteAtMs = 0;
@@ -2361,7 +3059,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (rerouteSuggestionRow != null) rerouteSuggestionRow.setVisibility(View.GONE);
     }
 
-    void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
+    private void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
         clearPendingRoute();
         route = calculated;
         lastConfirmedMetricsAt=-1; confirmedEta=confirmedMinutes=confirmedDistance="";
@@ -2401,37 +3099,11 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    void showRoute(TomTomApi.Route calculated, boolean preview) {
+    private void showRoute(TomTomApi.Route calculated, boolean preview) {
         clearJunctionHighlight();
-        if (routeLine != null) map.getOverlays().remove(routeLine);
-        routeLine = new Polyline();
-        // Preserve every supplied road vertex on the raster fallback too.
-        List<GeoMath.Point> displayPoints = calculated.points;
-        List<GeoPoint> geometry = new ArrayList<>(displayPoints.size());
-        for (GeoMath.Point point : displayPoints)
-            geometry.add(new GeoPoint(point.lat, point.lon));
-        routeLine.setPoints(geometry);
-        routeLine.getOutlinePaint().setColor(0xff007dbb);
-        routeLine.getOutlinePaint().setStrokeWidth(dp(RouteMapPolicy.rasterWidthDp(map.getZoomLevelDouble())));
-        routeLine.getOutlinePaint().setStrokeCap(Paint.Cap.ROUND);
-        routeLine.getOutlinePaint().setStrokeJoin(Paint.Join.ROUND);
-        map.getOverlays().add(routeLine);
-        // Keep the vehicle marker and destination pin above the route line.
-        if (destinationPin != null) {
-            map.getOverlays().remove(destinationPin);
-            map.getOverlays().add(destinationPin);
-        }
-        if (entrancePin != null) {
-            map.getOverlays().remove(entrancePin);
-            map.getOverlays().add(entrancePin);
-        }
-        if (userPin != null) {
-            map.getOverlays().remove(userPin);
-            map.getOverlays().add(userPin);
-        }
-        map.invalidate();
         if (vectorMap != null) {
-            vectorMap.setSharedRoute(calculated.sharedGeometry, calculated.points, calculated.provider);
+            vectorMap.setBuildingContext("DriveMate".equals(calculated.provider)?ownEndpoint():"",calculated.geometrySourceSha);
+            vectorMap.setSharedRoute(calculated.nativeScene, calculated.points, calculated.provider);
             vectorMap.setRouteEvents(calculated.speedSections,calculated.trafficSections,metricUnits,calculated.fetchedAtMs);
             if (preview) {
                 // Fit once the preview panel has laid out, so the whole route
@@ -2447,28 +3119,14 @@ public final class MainActivity extends Activity implements LocationListener {
                 });
             }
         }
-        if (preview && !showingVector()) {
-            map.setMapOrientation(0);
-            double north = -90, south = 90, east = -180, west = 180;
-            for (GeoMath.Point point : calculated.points) {
-                north = Math.max(north, point.lat);
-                south = Math.min(south, point.lat);
-                east = Math.max(east, point.lon);
-                west = Math.min(west, point.lon);
-            }
-            final BoundingBox box = new BoundingBox(north, east, south, west);
-            map.post(() -> map.zoomToBoundingBox(box, true, dp(80)));
-        }
     }
 
-    long lastConfirmedMetricsAt=-1;
-    String confirmedEta="",confirmedMinutes="",confirmedDistance="";
-    Button overviewButton;
-
-    void suspendPositionGuidance(String title,String reason) {
+    private void suspendPositionGuidance(String title,String reason) {
         boolean wasConfirmed=guidancePositionConfirmed;
         joiningRoute=false;
         guidancePositionConfirmed=false;nextInstruction="";
+        speedChangeAwareness.clearEntry();arrivalPolicy.reset();
+        showArrivalApproach(ArrivalPolicy.State.EN_ROUTE);
         setTripMetricLabels(false);
         dismissUpcoming();
         if(wasConfirmed&&speech!=null)speech.stop();
@@ -2498,16 +3156,20 @@ public final class MainActivity extends Activity implements LocationListener {
         if(upcomingSpeedText!=null)upcomingSpeedText.setVisibility(View.GONE);
         if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
         clearJunctionHighlight();stopSmoothLoop();smoothFollow=null;lastCameraUpdate=0;
+        // Place the unsnapped accepted fix immediately, never infer a road position.
+        if(!gpsLost&&displayGps!=null){
+            if(vectorMap!=null)vectorMap.setUnsnappedVehicle(displayGps,currentLocation!=null&&currentLocation.hasBearing()&&currentLocation.hasSpeed()&&currentLocation.getSpeed()>1.5f?currentLocation.getBearing():Double.NaN);
+        }
     }
 
-    void setTripMetricLabels(boolean planned){
+    private void setTripMetricLabels(boolean planned){
         if(tripMetricCaptions.size()>=3){
             tripMetricCaptions.get(0).setText(planned?"PLAN ETA":"ETA");
             tripMetricCaptions.get(1).setText(planned?"PLAN MIN":"MIN LEFT");
             tripMetricCaptions.get(2).setText(planned?"PLAN DIST":"DISTANCE LEFT");
         }
     }
-    void showJoiningRoute(Location fix,long now){
+    private void showJoiningRoute(Location fix,long now){
         suspendPositionGuidance("JOIN HIGHLIGHTED ROUTE","GPS ready · join the route using road signs");
         joiningRoute=true;setTripMetricLabels(true);
         String eta=new SimpleDateFormat("HH:mm",Locale.UK).format(new Date(System.currentTimeMillis()+route.timeSeconds*1000L));
@@ -2521,7 +3183,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
     }
 
-    void updateGuidance(Location fix) {
+    private void updateGuidance(Location fix) {
         if (!active || route == null || destination == null) return;
         GeoMath.Point current = gpsPoint(fix);
         long now = SystemClock.elapsedRealtime();
@@ -2570,7 +3232,9 @@ public final class MainActivity extends Activity implements LocationListener {
             suspendPositionGuidance("POSITION UNCERTAIN · CHECK ROAD SIGNS",reason);
             return;
         }
+        boolean justConfirmed=!guidancePositionConfirmed;
         guidancePositionConfirmed=true;confirmedSinceRouteInstall=true;joiningRoute=false;setTripMetricLabels(false);
+        if(justConfirmed)setStatus("Position confirmed · guidance active");
         if(repeatButton!=null)repeatButton.setEnabled(true);
         double along = projected.alongMetres;
         if(matched.reacquired){
@@ -2580,7 +3244,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         stabilizedAlong = along;
         if(vectorMap!=null){vectorMap.setConfirmedRouteProgress(along);if(showingVector()&&accuracy<=25)vectorMap.updateCurrentRoad(current);else vectorMap.clearCurrentRoad();}
-        if ("DriveMate".equals(route.provider)) { reviewController.requestComparison(); if(comparisonPermitted()) mapReview.observe(route,comparisonRoute,along); }
+        if ("DriveMate".equals(route.provider)) { requestComparison(); if(comparisonPermitted()) mapReview.observe(route,comparisonRoute,along); }
         topTurnArrow.setVisibility(View.VISIBLE);
         if (vectorMap != null && showingVector() && !autoFallback
                 && (lastRoutePrefetchAt < 0 || now-lastRoutePrefetchAt >= 90000)) {
@@ -2646,6 +3310,8 @@ public final class MainActivity extends Activity implements LocationListener {
             topTurnArrow.setVisibility(View.INVISIBLE);
             topNextTurnText.setVisibility(View.GONE);
             clearJunctionHighlight();
+            updateDrivingCamera(fix,projected,Math.max(along,projected.totalMetres));
+            announceEnteredSpeed(Double.POSITIVE_INFINITY,along);
             return;
         }
         previousInstructionIndex = next;
@@ -2684,8 +3350,16 @@ public final class MainActivity extends Activity implements LocationListener {
         topTurnArrow.setRouteTrace(currentRoundaboutTrace);
         boolean previewJunction=JunctionIntelligence.preview(junctionKind,untilTurn,speedNow);
         updateJunctionHighlight(next, previewJunction);
-        if(vectorMap!=null)vectorMap.setManeuverOffset(
-                RoadTestDisplayPolicy.showManeuver(glyph,untilTurn,speedNow)?step.routeOffsetMetres:Double.NaN);
+        double primary=step.routeOffsetMetres>=along&&RoadTestDisplayPolicy.showManeuver(glyph,untilTurn,speedNow)?step.routeOffsetMetres:Double.NaN;
+        double secondary=Double.NaN;
+        if(Double.isFinite(primary)&&next+1<route.instructions.size()){
+            TomTomApi.Instruction after=route.instructions.get(next+1);
+            double gap=after.routeOffsetMetres-primary;
+            if(gap>=20&&IntelligentGuidance.closeFollowing(gap,speedNow)
+                    &&RoadTestDisplayPolicy.showManeuver(JunctionIntelligence.glyph(after,JunctionIntelligence.classify(after.maneuver,after.junctionType)),after.routeOffsetMetres-along,speedNow))
+                secondary=after.routeOffsetMetres;
+        }
+        if(vectorMap!=null)vectorMap.setManeuverOffsets(primary,secondary);
         if(previewJunction&&!currentJunctionPath.isEmpty())junctionFramePoints=JunctionIntelligence.context(currentJunctionPath,junctionKind);
         boolean showPath=previewJunction&&JunctionIntelligence.complex(junctionKind)
                 && getResources().getConfiguration().screenHeightDp>=740
@@ -2757,19 +3431,19 @@ public final class MainActivity extends Activity implements LocationListener {
         double early = NavigationMatch.earlyDistance(speedNow);
         if (untilTurn <= immediate && spokenNowIndex != next) {
             spokenNowIndex = next;
-            if (DrivingVoicePolicy.turn(voiceMode, 2)) say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,true,"",followingVoice)+speedAtTurn);
+            if (DrivingVoicePolicy.turn(voiceMode, 2)) say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,true,"",followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
         } else if (untilTurn > immediate && untilTurn <= approach && spokenCloseIndex != next
                 && spokenNowIndex != next) {
             spokenCloseIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 1)) {
-                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,followingVoice)+speedAtTurn);
+                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
                 if(!currentLanePrompt.isEmpty()){spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;}
             }
         } else if (untilTurn > approach && untilTurn <= early && spokenDistanceIndex != next
                 && spokenCloseIndex != next && spokenNowIndex != next) {
             spokenDistanceIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 0)) {
-                say(nextInstruction);
+                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,untilTurn<=30,currentLanePrompt,"")+linkedSpeedSpeech(speedAtTurn,turnChange));
                 if(!currentLanePrompt.isEmpty()){spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;}
             }
         } else if (untilTurn>immediate && !currentLanePrompt.isEmpty()
@@ -2781,13 +3455,28 @@ public final class MainActivity extends Activity implements LocationListener {
             reassuranceIndex=next;
             say("Continue along the highlighted route for "+NavigationUnits.spokenDistance(untilTurn,metricUnits));
         }
+        announceEnteredSpeed(untilTurn,along);
+    }
+    private String linkedSpeedSpeech(String phrase,SpeedChangeAwareness.Change change){
+        return !phrase.isEmpty()&&speechReady&&speech!=null&&speedChangeAwareness.shouldAnnounce(change)?phrase:"";
+    }
+    private boolean speechAvailable(){
+        return speechReady&&speech!=null&&!speech.isSpeaking()&&(lastSpeechAt<0||SystemClock.elapsedRealtime()-lastSpeechAt>=1500);
+    }
+    private void announceEnteredSpeed(double nextTurn,double along){
+        SpeedChangeAwareness.Change change=speedChangeAwareness.pendingEntry();
+        if(change==null||!advanceSpeedVoice||voiceMode==DrivingVoicePolicy.SILENT||!guidancePositionConfirmed
+                ||gpsLost||nextTurn<=65||along-change.offset>100||!speechAvailable())return;
+        int shown=metricUnits?change.kmh:(int)Math.round(change.kmh/1.609344);
+        speedChangeAwareness.entryAnnounced();
+        speak("Mapped speed limit is now "+shown+(metricUnits?" kilometres per hour.":" miles per hour.")+" Check road signs.");
     }
 
     /**
      * Show only route-indexed data supplied by TomTom for the current route.
      * No road-class, lane or hazard guesses are ever made.
      */
-    void updateRoadIntelligence(Location fix, double along, double offRoute,
+    private void updateRoadIntelligence(Location fix, double along, double offRoute,
                                         float accuracy, double distanceToTurn) {
         if (!active || route == null) return;
         long age = System.currentTimeMillis() - route.fetchedAtMs;
@@ -2805,6 +3494,9 @@ public final class MainActivity extends Activity implements LocationListener {
         if(lanePromptText!=null){lanePromptText.setText(currentLanePrompt);lanePromptText.setVisibility(currentLanePrompt.isEmpty()?View.GONE:View.VISIBLE);}
         RouteIntelligence.SpeedSection limit = RouteIntelligence.speedAt(
                 route.speedSections, along, offRoute, accuracy, "DriveMate".equals(route.provider)?0:age);
+        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20)
+            speedChangeAwareness.observeEntry(route.speedSections,limit,along,SystemClock.elapsedRealtime());
+        else speedChangeAwareness.clearEntry();
         boolean speeding = limit != null && fix.hasSpeed()
                 && RouteIntelligence.overspeed(fix.getSpeed(), limit, speedToleranceMph);
         if (speedLimitText != null) {
@@ -2834,7 +3526,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         +(atTurn?" at the turn":" ahead · "+NavigationUnits.displayDistance(change.offset-along,metricUnits)));
                 upcomingSpeedText.setVisibility(View.VISIBLE);
                 // Defer to a close turn; do not mark as spoken until eligible.
-                if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech!=null && !speech.isSpeaking()
+                if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechAvailable()
                         && (!atTurn||voiceMode==DrivingVoicePolicy.ALERTS_ONLY)
                         && (distanceToTurn > 65 || (atTurn&&voiceMode==DrivingVoicePolicy.ALERTS_ONLY)) && speedChangeAwareness.shouldAnnounce(change)) {
                     speak("Mapped speed limit changes to " + shown
@@ -2853,12 +3545,12 @@ public final class MainActivity extends Activity implements LocationListener {
         }
 
         RouteRoadsideAwareness.Event roadside = confident && guidancePositionConfirmed && accuracy<=25 && offRoute<=20
-                && route.sharedGeometry!=null && age<=480000
-                ? RouteRoadsideAwareness.next(route.sharedGeometry.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
+                && route.nativeScene!=null && age<=480000
+                ? RouteRoadsideAwareness.next(route.nativeScene.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
                 : null;
         MappedEnforcement.Zone activeZone=null;
-        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20&&route.sharedGeometry!=null&&age<=480000){
-            for(MappedEnforcement.Zone z:route.sharedGeometry.averageZones)if(z.active(along)){
+        if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20&&route.nativeScene!=null&&age<=480000){
+            for(MappedEnforcement.Zone z:route.nativeScene.averageZones)if(z.active(along)){
                 if(activeZone==null||z.end<activeZone.end)activeZone=z;
             }
         }
@@ -2902,28 +3594,70 @@ public final class MainActivity extends Activity implements LocationListener {
      * TomTom-supplied lanes are shown (LaneSection.trusted()).
      */
     /** Show lanes about 200 m ahead in town, up to 600 m at motorway speed. */
-    static double laneLookAheadMetres(float speedMps) {
+    private static double laneLookAheadMetres(float speedMps) {
         double speed = Float.isFinite(speedMps) ? Math.max(0, speedMps) : 0;
         return Math.max(220, Math.min(850, 150 + speed * 22));
     }
 
-    boolean canInspectGuidance(){
+    private boolean canInspectGuidance(){
         if(!active||route==null||!guidancePositionConfirmed||gpsLost||currentLocation==null||stabilizedAlong<0)return false;
         Location fix=currentLocation;
         long age=System.currentTimeMillis()-fix.getTime();
         return age>=0&&age<5000&&fix.hasAccuracy()&&fix.getAccuracy()<=25&&fix.hasSpeed()&&fix.getSpeed()<0.5f;
     }
 
-    void dismissUpcoming(){
+    private void dismissUpcoming(){
         if(upcomingDialog!=null){upcomingDialog.dismiss();upcomingDialog=null;}
     }
 
-    
+    private void showUpcomingManoeuvres(){
+        if(!canInspectGuidance()){
+            Toast.makeText(this,"Stop safely with a fresh GPS fix to view turns",Toast.LENGTH_SHORT).show();return;
+        }
+        dismissUpcoming();
+        StringBuilder list=new StringBuilder();
+        for(int i=Math.max(0,previousInstructionIndex);i<route.instructions.size()&&i<previousInstructionIndex+8;i++){
+            TomTomApi.Instruction step=route.instructions.get(i);
+            String glyph=GuidanceLogic.symbol(step.maneuver,step.junctionType,step.turnAngleDegrees);
+            int exit="↻".equals(glyph)?JunctionFraming.reportedExit(step.exitNumber):0;
+            if(list.length()>0)list.append("\n\n");
+            list.append(NavigationUnits.displayDistance(Math.max(0,step.routeOffsetMetres-stabilizedAlong),metricUnits)).append(" · ").append(IntelligentGuidance.direction(step,glyph,exit));
+        }
+        upcomingDialog=new AlertDialog.Builder(this).setTitle("Upcoming manoeuvres").setMessage(list.length()==0?"No further instructions":list.toString()).setPositiveButton("Close",null).create();
+        upcomingDialog.show();
+    }
 
-    
+    private void showTrafficTimeline() {
+        if (!active || route == null || currentLocation == null) return;
+        if (System.currentTimeMillis() - route.fetchedAtMs > 480000) {
+            Toast.makeText(this, "Route traffic information is old; refresh the route",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        GeoMath.Progress progress = GeoMath.project(route.points, gpsPoint(currentLocation));
+        StringBuilder timeline = new StringBuilder();
+        int count = 0;
+        for (RouteIntelligence.TrafficSection item : route.trafficSections) {
+            if (item.end < progress.alongMetres) continue;
+            timeline.append(item.label()).append(" · ")
+                    .append(NavigationUnits.displayDistance(
+                            Math.max(0, item.start - progress.alongMetres), metricUnits))
+                    .append(" ahead");
+            if (item.delaySeconds > 0)
+                timeline.append(" · approx +")
+                        .append((int) Math.ceil(item.delaySeconds / 60.0)).append(" min");
+            timeline.append("\n\n");
+            if (++count >= 5) break;
+        }
+        if (count == 0) timeline.append("No route-positioned incidents reported.");
+        new AlertDialog.Builder(this).setTitle("Upcoming traffic · TomTom")
+                .setMessage(timeline.toString()
+                        + "\nTraffic conditions can change. Follow road signs.")
+                .setPositiveButton("Close", null).show();
+    }
 
     /** Frame the real route and nearby junction context; never draw a second path. */
-    void updateJunctionHighlight(int instructionIndex, boolean visible) {
+    private void updateJunctionHighlight(int instructionIndex, boolean visible) {
         if(!visible||route==null||route.points.size()<2){clearJunctionHighlight();return;}
         if(highlightedJunctionIndex==instructionIndex)return;
         TomTomApi.Instruction instruction=route.instructions.get(instructionIndex);
@@ -2931,14 +3665,14 @@ public final class MainActivity extends Activity implements LocationListener {
         junctionFramePoints=JunctionFraming.context(route.points,instruction.routeOffsetMetres,roundabout);
         highlightedJunctionIndex=instructionIndex;
     }
-    void clearJunctionHighlight(){
+    private void clearJunctionHighlight(){
         if(junctionPathView!=null)junctionPathView.setVisibility(View.GONE);
         junctionFramePoints=java.util.Collections.emptyList();highlightedJunctionIndex=-1;
         if(vectorMap!=null){vectorMap.clearJunctionFraming();vectorMap.setManeuverOffset(Double.NaN);}
     }
 
-    void stopNavigation(boolean arrived) {
-        roadContextController.clearLiveIncidents();
+    private void stopNavigation(boolean arrived) {
+        clearLiveIncidents();
         dismissUpcoming();
         boolean reviewAvailable=active&&!mapReview.snapshot().isEmpty();
         reviewGeneration++;comparisonBusy=false;comparisonRoute=null;
@@ -2968,30 +3702,18 @@ public final class MainActivity extends Activity implements LocationListener {
         guidancePositionConfirmed=false;
         clearPendingRoute();
         clearJunctionHighlight();
-        if (routeLine != null) {
-            map.getOverlays().remove(routeLine);
-            routeLine = null;
-        }
-        if (destinationPin != null) {
-            map.getOverlays().remove(destinationPin);
-            destinationPin = null;
-        }
-        if (entrancePin != null) {
-            map.getOverlays().remove(entrancePin);
-            entrancePin = null;
-        }
         if (vectorMap != null) vectorMap.setEntrance(null);
         if (arrivalHintText != null && arrivalHintText.getTag() instanceof View)
             ((View) arrivalHintText.getTag()).setVisibility(View.GONE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        map.setMapOrientation(0);
         if (vectorMap != null) {
+            vectorMap.setBuildingContext("","");
             vectorMap.setSharedRoute(null, null);
             vectorMap.setDestination(null);
         }
         lastCameraUpdate = 0;
         stopButton.setVisibility(View.GONE);
-        homePanelController.setHomeVisible(true);
+        setHomeVisible(true);
         startButton.setVisibility(View.GONE);
         saveButton.setVisibility(View.GONE);
         if (previewParkingButton != null) previewParkingButton.setVisibility(View.GONE);
@@ -3022,47 +3744,47 @@ public final class MainActivity extends Activity implements LocationListener {
             setStatus("Ready to navigate");
             if (speech != null) speech.stop();
         }
-        map.invalidate();
         if (reviewAvailable && !isFinishing()) {
             // Never open the review UI when the car is still moving or speed is unknown.
             if (currentLocation != null && currentLocation.hasSpeed() && currentLocation.getSpeed() < 0.5f
-                    && System.currentTimeMillis()-currentLocation.getTime()<10000) reviewController.showMapReview();
+                    && System.currentTimeMillis()-currentLocation.getTime()<10000) showMapReview();
             else setStatus("Journey ended · map review available in Settings when parked");
-        } else if (offerParkedCar && !isFinishing()) parkingController.offerSaveParkedCar();
+        } else if (offerParkedCar && !isFinishing()) offerSaveParkedCar();
     }
 
-    void setStatus(String message) {
+    private void setStatus(String message) {
         if (banner != null) banner.setText(message);
     }
 
-    void showError(String message) {
+    private void showError(String message) {
         String safe = message == null || message.trim().isEmpty()
                 ? "Unable to complete this request." : message;
         setStatus(safe);
         Toast.makeText(this, safe, Toast.LENGTH_LONG).show();
     }
 
-    void say(String message) {
+    private void say(String message) {
         if (voiceMode != DrivingVoicePolicy.SILENT
                 && voiceMode != DrivingVoicePolicy.ALERTS_ONLY)
             speak(message);
     }
 
-    void saySystemWarning(String message) {
+    private void saySystemWarning(String message) {
         if (DrivingVoicePolicy.systemWarning(voiceMode)) speak(message);
     }
 
     /** Future verified road feeds must use this gate, never a guessed warning. */
-    void sayVerifiedAlert(String message, boolean speedCategory) {
+    private void sayVerifiedAlert(String message, boolean speedCategory) {
         boolean allowed = speedCategory ? speedWarningEnabled : hazardWarningEnabled;
         if (DrivingVoicePolicy.verifiedAlert(voiceMode, allowed)) speak(message);
     }
 
-    void speak(String message) {
-        if (speechReady && speech != null && message != null
+    private void speak(String message) {
+        if (voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech != null && message != null
                 && !message.trim().isEmpty()) {
             Bundle params = new Bundle();
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, guidanceVolume);
+            lastSpeechAt=SystemClock.elapsedRealtime();
             speech.speak(message, TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
         }
     }
@@ -3107,7 +3829,6 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override public void onResume() {
         super.onResume();
         foreground = true;
-        if (map != null) map.onResume();
         if (vectorMap != null) vectorMap.onResume();
         applyTheme();
         startLocation();
@@ -3119,7 +3840,7 @@ public final class MainActivity extends Activity implements LocationListener {
     @Override public void onPause() {
         dismissUpcoming();
         foreground = false;
-        roadContextController.clearLiveIncidents();
+        clearLiveIncidents();
         stopSmoothLoop();
         gpsHandler.removeCallbacks(deadReckonTick);
         if (active) {
@@ -3135,7 +3856,6 @@ public final class MainActivity extends Activity implements LocationListener {
             }
             locationSubscribed = false;
         }
-        if (map != null) map.onPause();
         if (vectorMap != null) vectorMap.onPause();
         super.onPause();
     }
@@ -3154,8 +3874,6 @@ public final class MainActivity extends Activity implements LocationListener {
             speech.shutdown();
         }
         if (vectorMap != null) vectorMap.onDestroy();
-        if (driveTiles != null) driveTiles.close();
-        if (map != null) map.onDetach();
         super.onDestroy();
     }
 }

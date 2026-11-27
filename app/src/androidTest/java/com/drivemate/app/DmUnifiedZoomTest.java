@@ -14,58 +14,80 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.Assert.*;
 @RunWith(AndroidJUnit4.class)
 public class DmUnifiedZoomTest {
+    @Test public void nativeRegionalRouteAndSearchWithoutProvider()throws Exception{
+        Context app=InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
+        NativeRegionalRouter router=new NativeRegionalRouter(app);
+        DmUnifiedRegion region=new DmUnifiedRegion(app,true);
+        DmTileEngine.Route sample=region.sample(true);
+        TomTomApi.Route route=NativeRegionalRouter.convert(region,sample,sample.points.get(0),sample.points.get(sample.points.size()-1));
+        assertEquals(NativeRegionalRouter.PROVIDER,route.provider);
+        assertEquals(sample.ways.size(),route.nativeScene.checkedEdges);
+        assertTrue(route.instructions.size()>=1);
+        assertEquals("DESTINATION",route.instructions.get(route.instructions.size()-1).maneuver);
+        double previous=-1;
+        for(TomTomApi.Instruction step:route.instructions){assertTrue(step.routeOffsetMetres>previous);assertTrue(step.routeOffsetMetres<=route.lengthMetres+.01);previous=step.routeOffsetMetres;}
+        assertTrue(route.trafficSections.isEmpty());assertTrue(route.laneSections.isEmpty());
+        assertTrue(NavigationStartPolicy.previewOnly(route.provider));
+        assertFalse("Mapped street search must work offline",router.search("Yew Street",sample.points.get(0)).isEmpty());
+        // Recalculate a real graph route after the simulated driver advances.
+        GeoMath.Point advanced=sample.points.get(Math.max(1,sample.points.size()/3));
+        TomTomApi.Route rerouted=router.reroutePreview(advanced,sample.points.get(sample.points.size()-1));
+        assertEquals(NativeRegionalRouter.PROVIDER,rerouted.provider);
+        assertTrue(rerouted.nativeScene.checkedEdges>0);
+        assertTrue(GeoMath.distance(rerouted.points.get(0),advanced)<=75);
+        assertTrue(NavigationStartPolicy.previewOnly(rerouted.provider));
+        try{router.preview(new GeoMath.Point(51,-2),new GeoMath.Point(51.01,-2));fail("Outside coverage routed");}
+        catch(java.io.IOException expected){assertTrue(expected.getMessage().contains("No external fallback"));}
+    }
     @Test public void actualLiveVectorRendererUsesSharedRoadsAtDrivingZoom()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
-        final DmTileEngine.Route sample;final DmUnifiedGeometry geometry;
-        { DmUnifiedRegion region=new DmUnifiedRegion(app,true);sample=region.sample(true);
-          geometry=new DmUnifiedGeometry(region.features,sample.points,sample.ways); }
-        // No second preview loader; no graph object is needed once route geometry is verified.
+        DmUnifiedRegion region=new DmUnifiedRegion(app,true);DmTileEngine.Route sample=region.sample(true);
+        NativeMapScene geometry=region.nativeScene(sample);
+        assertEquals(sample.ways.size(),geometry.checkedEdges);
         GeoMath.Point center=GeoMath.pointAtDistance(sample.points,sample.metres*.4);
         assertTrue(RouteMapPolicy.insideStockport(center));
-        Intent intent=new Intent(app,DmUnifiedPreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("stockport",true).putExtra("live_renderer_test_host",true);
-        DmUnifiedPreviewActivity activity=(DmUnifiedPreviewActivity)ins.startActivitySync(intent);
-        final VectorDriveMap[] live=new VectorDriveMap[1];
-        try(DriveTileServer server=new DriveTileServer(app)){
-            ins.runOnMainSync(()->{
-                live[0]=new VectorDriveMap(activity,null,server,"",false,null);
-                activity.setContentView(live[0].view());live[0].onStart();live[0].onResume();
-                live[0].setSharedRoute(geometry,sample.points);live[0].setNavigationDetail(true);live[0].setCamera(center,17,0);
-            });
-            try{
-                for(double zoom:new double[]{17,19,21}){
-                    ins.runOnMainSync(()->live[0].setCamera(center,zoom,0));
-                    long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ok=new AtomicBoolean();
-                    while(SystemClock.elapsedRealtime()<deadline){ins.runOnMainSync(()->ok.set(live[0].sharedRouteRendered(zoom)));if(ok.get())break;SystemClock.sleep(1000);}
-                    assertTrue("Live route and shared roads missing at zoom "+zoom,ok.get());
-                    File dir=new File(app.getExternalFilesDir(null),"unified-zoom");assertTrue(dir.isDirectory()||dir.mkdirs());
-                    Bitmap image=ins.getUiAutomation().takeScreenshot();assertNotNull(image);
-                    try(FileOutputStream out=new FileOutputStream(new File(dir,"live-zoom-"+(int)zoom+".png"))){assertTrue(image.compress(Bitmap.CompressFormat.PNG,100,out));}finally{image.recycle();}
-                }
-            }finally{ins.runOnMainSync(()->{if(live[0]!=null){live[0].onPause();live[0].onStop();live[0].onDestroy();}});}
-        }finally{ins.runOnMainSync(activity::finish);}
+        MainActivity a=(MainActivity)ins.startActivitySync(new Intent(app,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try{
+            java.lang.reflect.Field field=MainActivity.class.getDeclaredField("vectorMap");field.setAccessible(true);
+            NativeMapController live=(NativeMapController)field.get(a);assertNotNull(live);assertTrue(live.view() instanceof NativeMapView);
+            ins.runOnMainSync(()->live.setSharedRoute(geometry,sample.points,NativeRegionalRouter.PROVIDER));
+            for(double zoom:new double[]{17,19,21}){
+                ins.runOnMainSync(()->live.setCamera(center,zoom,0));
+                waitForPaint(ins,(NativeMapView)live.view(),zoom);
+                capture(ins,app,a,"live-zoom-"+(int)zoom+".png");
+            }
+        }finally{ins.runOnMainSync(a::finish);}
     }
     @Test public void actualStockportGpuRoadsAndRouteAtEveryZoom()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
-        Intent intent=new Intent(app,DmUnifiedPreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("stockport",true);
-        DmUnifiedPreviewActivity a=(DmUnifiedPreviewActivity)ins.startActivitySync(intent);
-        File dir=new File(app.getExternalFilesDir(null),"unified-zoom");assertTrue(dir.isDirectory()||dir.mkdirs());
+        NativeMapPreviewActivity a=(NativeMapPreviewActivity)ins.startActivitySync(new Intent(app,NativeMapPreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try{
-            for(boolean night:new boolean[]{false,true}){
-              if(night)ins.runOnMainSync(()->a.setNight(true));
-              for(double zoom:new double[]{14.0,17.0,19.0,21.0}){
-                long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ok=new AtomicBoolean(),positioned=new AtomicBoolean();
-                while(SystemClock.elapsedRealtime()<deadline){
-                    ins.runOnMainSync(()->{if(a.readyForZoom()){if(!positioned.getAndSet(true))a.position(zoom);else if(a.rendered(zoom))ok.set(true);}});
-                    if(ok.get())break;SystemClock.sleep(1000);
-                }
-                assertTrue("No actual rendered roads and route at zoom "+zoom,ok.get());
-                Bitmap b=ins.getUiAutomation().takeScreenshot();assertNotNull(b);
-                try(FileOutputStream out=new FileOutputStream(new File(dir,(night?"night-":"day-")+"zoom-"+(int)zoom+".png"))){assertTrue(b.compress(Bitmap.CompressFormat.PNG,100,out));}finally{b.recycle();}
-                android.util.Log.i("UnifiedZoom","PASS Stockport "+(night?"night":"day")+" zoom "+zoom+" rendered roads and verified shared route");
+            long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ready=new AtomicBoolean();
+            while(SystemClock.elapsedRealtime()<deadline){ins.runOnMainSync(()->ready.set(a.scene!=null&&a.scene.checkedEdges>0));if(ready.get())break;SystemClock.sleep(500);}
+            assertTrue("Exact source scene failed to load",ready.get());
+            for(boolean night:new boolean[]{false,true})for(double zoom:new double[]{14,17,19,21}){
+                ins.runOnMainSync(()->a.position(zoom,night,zoom>=17));
+                waitForPaint(ins,a.map,zoom);capture(ins,app,a,(night?"night-":"day-")+"zoom-"+(int)zoom+".png");
+                android.util.Log.i("UnifiedZoom","PASS native Stockport "+(night?"night":"day")+" zoom "+zoom+" roads and verified route");
             }
-              }
         }finally{ins.runOnMainSync(a::finish);}
+    }
+    private static void waitForPaint(Instrumentation ins,NativeMapView map,double zoom)throws Exception{
+        long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean ok=new AtomicBoolean();
+        java.util.concurrent.atomic.AtomicLong before=new java.util.concurrent.atomic.AtomicLong();
+        ins.runOnMainSync(()->{before.set(map.frameCount());map.invalidate();});
+        while(SystemClock.elapsedRealtime()<deadline){
+            ins.runOnMainSync(()->ok.set(map.frameCount()>before.get()&&Math.abs(map.zoom()-zoom)<.01&&map.roadsDrawn()>0&&map.routeDrawn()>0));
+            if(ok.get())break;SystemClock.sleep(500);
+        }
+        assertTrue("No actual native rendered roads and route at zoom "+zoom,ok.get());
+    }
+    private static void capture(Instrumentation ins,Context app,android.app.Activity activity,String name)throws Exception{
+        File dir=new File(app.getExternalFilesDir(null),"unified-zoom");assertTrue(dir.isDirectory()||dir.mkdirs());
+        Bitmap shot=NativeScreenshot.capture(ins,activity);assertNotNull(shot);
+        try(FileOutputStream out=new FileOutputStream(new File(dir,name))){assertTrue(shot.compress(Bitmap.CompressFormat.PNG,100,out));}finally{shot.recycle();}
     }
 }

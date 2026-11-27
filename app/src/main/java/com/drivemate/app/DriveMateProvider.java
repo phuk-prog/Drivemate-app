@@ -58,60 +58,6 @@ public final class DriveMateProvider {
         }catch(Exception ignored){/* No explicit aligned limit: unknown. */}
         return route;
     }
-    static final class RoadContext {
-        final List<JSONArray> ways;final double[] bounds;final long fetchedAt;final DmUnifiedGeometry map;
-        RoadContext(List<JSONArray> ways,double[] bounds,DmUnifiedGeometry map){this.ways=ways;this.bounds=bounds;this.map=map;fetchedAt=System.currentTimeMillis();}
-        boolean freshAt(GeoMath.Point p){
-            long age=System.currentTimeMillis()-fetchedAt;
-            return age>=0&&age<=120000&&p!=null&&p.lon>bounds[0]+.0007&&p.lon<bounds[2]-.0007
-                &&p.lat>bounds[1]+.0005&&p.lat<bounds[3]-.0005;
-        }
-    }
-    /** Only the owner-configured HTTPS host, with matching national graph/data identity. */
-    static RoadContext roadContext(String endpoint,GeoMath.Point p)throws Exception{
-        if(!valid(endpoint)||!endpoint.endsWith("/route")||p==null)throw new IOException("No trusted road context host");
-        String root=endpoint.substring(0,endpoint.length()-6);
-        JSONObject graph=json(root+"/v1/graph-source",null),meta=json(root+"/v1/meta",null);
-        String source=graph.optString("source_sha256");
-        if(!source.matches("[a-f0-9]{64}")||!source.equals(meta.optString("source_sha256"))||!"uk".equals(meta.optString("scope")))throw new IOException("Road context source mismatch");
-        double[] bounds={p.lon-.004,p.lat-.003,p.lon+.004,p.lat+.003};
-        if(bounds[0]<-9||bounds[2]>3||bounds[1]<49||bounds[3]>61)throw new IOException("Outside UK map bounds");
-        String bbox=String.format(Locale.US,"%.8f,%.8f,%.8f,%.8f",bounds[0],bounds[1],bounds[2],bounds[3]);
-        JSONObject response=json(root+"/v2/roads?bbox="+bbox+"&source="+source,null);
-        if(!"drivemate-map-v2".equals(response.optString("format"))||response.optInt("coordinate_scale")!=10000000
-                ||!source.equals(response.optString("source_sha256")))throw new IOException("Road context identity mismatch");
-        JSONArray echoed=response.getJSONArray("bounds");if(echoed.length()!=4)throw new IOException("Missing bounds");
-        for(int i=0;i<4;i++)if(Math.abs(echoed.getDouble(i)-bounds[i])>1e-7)throw new IOException("Different bounds");
-        JSONArray raw=response.getJSONArray("features");if(raw.length()>6000)throw new IOException("Road context too large");
-        ArrayList<JSONArray> ways=new ArrayList<>();int vertices=0;Set<Long> ids=new HashSet<>();
-        for(int i=0;i<raw.length();i++){JSONArray f=raw.getJSONArray(i);
-            if(f.length()!=4||!ids.add(f.getLong(0))||f.getJSONArray(2).length()!=f.getJSONArray(3).length())throw new IOException("Invalid context geometry");
-            vertices+=f.getJSONArray(2).length();if(vertices>100000)throw new IOException("Too many vertices");ways.add(f);
-        }
-        if(!source.equals(json(root+"/v1/graph-source",null).optString("source_sha256")))throw new IOException("Road context source changed");
-        DmUnifiedGeometry geometry=DmUnifiedGeometry.browse(ways,bounds);
-        JSONArray mapped=response.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
-        return new RoadContext(Collections.unmodifiableList(ways),bounds,geometry);
-    }
-    /** Optional V2 geometry from the configured trusted routing host; never alters route or instructions. */
-    static DmUnifiedGeometry sharedMap(String endpoint,TomTomApi.Route route){
-        if(!valid(endpoint)||!endpoint.endsWith("/route")||route.geometryWays.isEmpty()||!route.geometrySourceSha.matches("[a-f0-9]{64}"))return null;
-        double[] b=RouteMapPolicy.corridorBounds(route.points);if(b==null)return null;
-        try{
-            String bbox=String.format(Locale.US,"%.8f,%.8f,%.8f,%.8f",b[0],b[1],b[2],b[3]);
-            JSONObject result=json(endpoint.substring(0,endpoint.length()-6)+"/v2/roads?bbox="+bbox+"&source="+route.geometrySourceSha,null);
-            if(!"drivemate-map-v2".equals(result.optString("format"))||result.optInt("coordinate_scale")!=10000000||!route.geometrySourceSha.equals(result.optString("source_sha256")))return null;
-            JSONArray bounds=result.getJSONArray("bounds");if(bounds.length()!=4)return null;
-            for(int i=0;i<4;i++)if(Math.abs(bounds.getDouble(i)-b[i])>1e-7)return null;
-            JSONArray input=result.getJSONArray("features");if(input.length()>6000)return null;
-            List<JSONArray> features=new ArrayList<>();int vertices=0;
-            for(int i=0;i<input.length();i++){JSONArray feature=input.getJSONArray(i);vertices+=feature.getJSONArray(2).length();if(vertices>100000)return null;features.add(feature);}
-            DmUnifiedGeometry geometry=new DmUnifiedGeometry(features,route.points,route.geometryWays,b);
-            JSONArray mapped=result.optJSONArray("points");if(mapped!=null)geometry.setMappedPoints(mapped);
-            JSONArray enforcement=result.optJSONArray("enforcement");if(enforcement!=null)geometry.setEnforcement(enforcement);
-            return geometry;
-        }catch(Exception failure){return null;}
-    }
     /** Require identical encoded vertices and uninterrupted way identity for every segment. */
     static List<Long> exactTraceWays(JSONObject trace, List<GeoMath.Point> route)throws Exception {
         List<GeoMath.Point> shape=decode(trace.getString("shape"));
@@ -181,19 +127,7 @@ public final class DriveMateProvider {
         RouteIntelligence.LaneSection s=new RouteIntelligence.LaneSection(Math.max(0,along-100),along+2,lanes);return s.trusted()?s:null;
     }
     /** Only explicit symmetric numeric limits, no directional/conditional/variable guesses. */
-    static int explicitLimit(JSONObject tags){
-        if(tags==null)return 0;
-        Iterator<String> keys=tags.keys();
-        while(keys.hasNext()){
-            String k=keys.next();
-            if(k.startsWith("maxspeed:") && !k.equals("maxspeed:type") && !k.equals("maxspeed:source"))return 0;
-        }
-        String raw=tags.optString("maxspeed","").trim().toLowerCase(Locale.UK);
-        if(!raw.matches("[0-9]{1,3}(?:\\s*(?:mph|km/h|kmh))?"))return 0;
-        try{boolean mph=raw.endsWith("mph");int v=Integer.parseInt(raw.replaceAll("[^0-9]",""));
-            int kmh=mph?(int)Math.round(v*1.609344):v;return kmh>=5&&kmh<=140?kmh:0;
-        }catch(NumberFormatException e){return 0;}
-    }
+    static int explicitLimit(JSONObject tags){return MappedSpeedLimits.explicitLimit(tags);}
     static List<RouteIntelligence.SpeedSection> verifiedSpeedSections(JSONObject trace,List<GeoMath.Point> route,Map<Long,JSONObject> tags)throws Exception{
         List<RouteIntelligence.SpeedSection> result=new ArrayList<>();List<GeoMath.Point> matched=decode(trace.getString("shape"));
         if(matched.size()!=route.size())return result;for(int i=0;i<route.size();i++)if(GeoMath.distance(route.get(i),matched.get(i))>1.5)return result;

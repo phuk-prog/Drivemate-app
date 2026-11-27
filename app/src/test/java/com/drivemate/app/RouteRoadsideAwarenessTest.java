@@ -12,6 +12,12 @@ public class RouteRoadsideAwarenessTest {
         assertEquals("",RouteRoadsideAwareness.label("traffic_signals","","forward",false));
         assertEquals("",RouteRoadsideAwareness.label("crossing","","",true));
     }
+    @Test public void specificCrossingRequiresExplicitNonConflictingType(){
+        assertEquals("Mapped pelican crossing",RouteRoadsideAwareness.label("crossing","","",false,"pelican","traffic_signals","yes"));
+        assertEquals("Mapped crossing",RouteRoadsideAwareness.label("crossing","","",false,"puffin","pelican","yes"));
+        assertEquals("Mapped signal-controlled crossing",RouteRoadsideAwareness.label("crossing","","",false,"","traffic_signals","yes"));
+        assertEquals("",RouteRoadsideAwareness.label("crossing","","forward",false,"zebra","","no"));
+    }
     @Test public void nearestWithinHorizonAndOncePerRoute(){
         RouteRoadsideAwareness.Event a=new RouteRoadsideAwareness.Event(1,100,"Mapped crossing"),b=new RouteRoadsideAwareness.Event(2,250,"Mapped traffic lights");
         assertSame(a,RouteRoadsideAwareness.next(Arrays.asList(b,a),50,10));

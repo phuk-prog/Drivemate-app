@@ -5,8 +5,9 @@ import java.util.*;
 import org.json.*;
 /** Packaged, bounded regional proof. No live GPS or network. */
 final class DmUnifiedRegion {
-    final DmTileEngine engine;final List<JSONArray> features; final String parentSource;
+    final DmTileEngine engine;final String parentSource;private final boolean stockport;final double[] regionBounds;
     DmUnifiedRegion(Context app,boolean stockport)throws Exception{
+        this.stockport=stockport;regionBounds=stockport?RouteMapPolicy.stockportBounds():null;
         String folder=stockport?"dmtiles-stockport/":"dmtiles/";
         byte[] raw=DmTileEngine.read(app.getAssets().open(folder+"manifest.json"),2_000_000);
         String hash=new String(DmTileEngine.read(app.getAssets().open(folder+"manifest.sha256"),128),java.nio.charset.StandardCharsets.UTF_8).trim();
@@ -14,16 +15,72 @@ final class DmUnifiedRegion {
         if(!"way-node-segments-v1".equals(m.optString("geometry_contract")))throw new IOException("Shared geometry unavailable");
         parentSource=m.optString("parent_source_sha256","");
         engine=new DmTileEngine(raw,hash,n->app.getAssets().open(folder+n+".bin"));
-        engine.retainJourney(engine.keys());features=engine.features(engine.keys());
+        // Route search loads its own bounded cells; do not pin the entire regional pack.
     }
-    /** Only enable the regional live renderer if every actual route vertex and ordered way matches the same pinned OSM snapshot. */
-    static DmUnifiedGeometry matchLive(Context context, TomTomApi.Route route) {
-        if(route.geometrySourceSha.isEmpty() || route.geometryWays.isEmpty() || !RouteMapPolicy.insideStockport(route.points))return null;
-        try {
-            DmUnifiedRegion region=new DmUnifiedRegion(context,true);
-            if(!route.geometrySourceSha.equals(region.parentSource))return null;
-            return new DmUnifiedGeometry(region.features,route.points,route.geometryWays);
-        }catch(Exception failure){return null;}
+    DmUnifiedRegion(byte[] manifest,String sha,DmTileEngine.Source source,double[] bounds)throws Exception{
+        stockport=false;regionBounds=bounds.clone();JSONObject m=new JSONObject(new String(manifest,java.nio.charset.StandardCharsets.UTF_8));
+        parentSource=m.getString("parent_source_sha256");engine=new DmTileEngine(manifest,sha,source);
+    }
+    boolean covers(GeoMath.Point p){return regionBounds!=null&&RouteMapPolicy.insideBounds(p,regionBounds);}
+    static double[] displayBounds(List<GeoMath.Point> points,boolean stockport)throws IOException{
+        return displayBounds(points,stockport,1);
+    }
+    static double[] displayBounds(List<GeoMath.Point> points,boolean stockport,double margin)throws IOException{
+        if(points==null||points.size()<2||!Double.isFinite(margin)||margin<=0||margin>1)throw new IOException("No regional route or invalid margin");
+        double w=180,s=90,e=-180,n=-90;
+        for(GeoMath.Point p:points){
+            if(!Double.isFinite(p.lat)||!Double.isFinite(p.lon))throw new IOException("Invalid route");
+            w=Math.min(w,p.lon);e=Math.max(e,p.lon);s=Math.min(s,p.lat);n=Math.max(n,p.lat);
+        }
+        w-=.012*margin;s-=.008*margin;e+=.012*margin;n+=.008*margin;
+        if(stockport){double[] b=RouteMapPolicy.stockportBounds();w=Math.max(w,b[0]);s=Math.max(s,b[1]);e=Math.min(e,b[2]);n=Math.min(n,b[3]);}
+        if(e<=w||n<=s||e-w>.055||n-s>.035)throw new IOException("Route exceeds bounded regional display");
+        return new double[]{w,s,e,n};
+    }
+    private static final double[] MARGINS={1,.65,.4,.2};
+    private static final class DisplayContext {
+        final double[] bounds;final List<JSONArray> features;
+        DisplayContext(double[] b,List<JSONArray> f){bounds=b;features=f;}
+    }
+    private DisplayContext context(List<GeoMath.Point> points,List<Long> ways)throws Exception{
+        Set<Long> required=new HashSet<>(ways);
+        Exception last=null;
+        // A dense neighbourhood must not make the complete preview unavailable.
+        // Reduce only optional context, never the route or its original way IDs.
+        for(double margin:MARGINS){
+            double[] bounds;
+            try{bounds=displayBounds(points,stockport,margin);
+                if(regionBounds!=null){bounds[0]=Math.max(bounds[0],regionBounds[0]);bounds[1]=Math.max(bounds[1],regionBounds[1]);bounds[2]=Math.min(bounds[2],regionBounds[2]);bounds[3]=Math.min(bounds[3],regionBounds[3]);if(bounds[2]<=bounds[0]||bounds[3]<=bounds[1])throw new IOException("Outside regional context");}
+            }catch(IOException tooWide){last=tooWide;continue;}
+            try{
+                List<JSONArray> rows=engine.boundedFeatures(engine.keys(),bounds,required,false,16000,160000);
+                android.util.Log.i("UnifiedRegion","Bounded regional context: "+rows.size()+" features, margin "+margin);
+                return new DisplayContext(bounds,rows);
+            }catch(DmTileEngine.CoverageException dense){
+                last=dense;
+                android.util.Log.w("UnifiedRegion","Regional context unavailable at margin "+margin+": "+dense.getMessage());
+            }
+        }
+        // Route correctness is independent of the display context budget.
+        // Preserve every original required way, plus a small local viewport if it fits.
+        double[] local=localBounds(points.get(0),regionBounds);
+        try{
+            return new DisplayContext(local,engine.boundedFeatures(engine.keys(),local,required,false,16000,160000));
+        }catch(DmTileEngine.CoverageException dense){
+            // No claim of area coverage: only route ways are present.
+            double[] origin={points.get(0).lon,points.get(0).lat,points.get(0).lon,points.get(0).lat};
+            return new DisplayContext(origin,engine.boundedFeatures(engine.keys(),null,required,false,16000,160000));
+        }
+    }
+    static double[] localBounds(GeoMath.Point p,double[] limit){
+        double[] b={p.lon-.004,p.lat-.003,p.lon+.004,p.lat+.003};
+        if(limit!=null){b[0]=Math.max(b[0],limit[0]);b[1]=Math.max(b[1],limit[1]);b[2]=Math.min(b[2],limit[2]);b[3]=Math.min(b[3],limit[3]);}
+        return b;
+    }
+    /** Raw source geometry for the original DriveMate rendering library. */
+    NativeMapScene nativeScene(DmTileEngine.Route route)throws Exception{
+        DisplayContext c=context(route.points,route.ways);
+        return NativeMapScene.fromRegional(c.features,route,c.bounds).withIntelligence(engine.routeIntelligence(route));
     }
     DmTileEngine.Route sample(boolean stockport)throws Exception{
         double[][] choices=stockport?new double[][]{{53.405,-2.165,53.410,-2.171},{53.400,-2.154,53.405,-2.165},{53.410,-2.171,53.400,-2.154}}:new double[][]{{51.209,-2.647,51.207,-2.641}};
