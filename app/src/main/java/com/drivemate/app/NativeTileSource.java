@@ -10,6 +10,8 @@ final class NativeTileSource implements AutoCloseable {
     private final Context app;
     private volatile DriveTileServer uk;
     private volatile PmTilesReader world;
+    private volatile PackTiles packs;
+    private volatile int packGeneration=-1;
     private AssetFileDescriptor worldAsset;
     private FileInputStream worldStream;
     private final LinkedHashMap<String,List<NativeMapScene.Shape>> cache=new LinkedHashMap<>(16,.75f,true);
@@ -46,8 +48,19 @@ final class NativeTileSource implements AutoCloseable {
             }
         });
     }
+    /** Full-detail packs the user downloaded; reopened when one is installed or removed. */
+    private synchronized PackTiles installedPacks(){
+        int g=MapPacks.GENERATION.get();
+        if(packs==null||packGeneration!=g){
+            if(packs!=null)packs.close();
+            PackTiles t=new PackTiles();
+            for(java.io.File f:new MapPacks(app).installedFiles())try{t.add(f);}catch(IOException ignored){}
+            packs=t;packGeneration=g;synchronized(cache){cache.clear();cachedVertices=0;}
+        }
+        return packs;
+    }
     private byte[] raw(int z,int x,int y)throws IOException{
-        if(z>6)return ukServer().nativeTile(z,x,y);
+        if(z>6){byte[] local=installedPacks().tile(z,x,y);if(local!=null)return local;return ukServer().nativeTile(z,x,y);}
         if(world==null)openWorld();
         return world.tile(z,x,y);
     }
@@ -87,5 +100,5 @@ final class NativeTileSource implements AutoCloseable {
         shapes.sort(Comparator.comparingInt(f->f.bridge?100+f.kind:f.kind));
         return NativeMapScene.tiles(shapes,new double[]{NativeMapProjection.lon(a/(double)n),NativeMapProjection.lat((d+1.0)/n),NativeMapProjection.lon((b+1.0)/n),NativeMapProjection.lat(c/(double)n)});
     }
-    public void close(){synchronized(cache){cache.clear();}if(uk!=null)uk.close();try{if(worldStream!=null)worldStream.close();if(worldAsset!=null)worldAsset.close();}catch(IOException ignored){}}
+    public void close(){synchronized(cache){cache.clear();}if(uk!=null)uk.close();if(packs!=null)packs.close();try{if(worldStream!=null)worldStream.close();if(worldAsset!=null)worldAsset.close();}catch(IOException ignored){}}
 }

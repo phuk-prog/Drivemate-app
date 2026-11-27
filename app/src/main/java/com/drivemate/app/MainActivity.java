@@ -1508,7 +1508,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Offline visual map · download full UK",
                 "DriveMate original stack · Wells pilot",
                 "Free driving · "+(freeDriving?"On":"Off"),
-                "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off")
+                "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off"),
+                "Map areas · fast offline detail"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1644,6 +1645,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 30: toggleFreeDriving(); break;
                         case 31: advanceSpeedVoice=!advanceSpeedVoice;
                             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("advance_speed_voice",advanceSpeedVoice).apply(); break;
+                        case 32: showMapAreas(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1677,6 +1679,48 @@ public final class MainActivity extends Activity implements LocationListener {
                     }).setNegativeButton("Cancel",null).show();
             }).setNegativeButton("Close",null).show();
         }catch(Exception e){showError("Regional catalog invalid: "+e.getMessage());}
+    }
+    /** Free map areas: pick a region to download full road detail onto the phone (resumable, verified). */
+    private void showMapAreas(){
+        if(downloadingLocalPack){showError("Wait for the current download to finish.");return;}
+        setStatus("Loading map areas…");
+        packWorker.execute(()->{
+            final MapPacks store=new MapPacks(this);
+            final MapPackCatalog catalog;
+            try{catalog=store.catalog();}catch(Exception e){runOnUiThread(()->{if(!isFinishing())showError("Map areas are not available right now. "+e.getMessage());});return;}
+            final List<MapPackCatalog.Pack> offered=new ArrayList<>();
+            for(MapPackCatalog.Pack p:catalog.packs)if(!p.bundled)offered.add(p);
+            final String[] labels=new String[offered.size()];
+            for(int i=0;i<labels.length;i++){
+                MapPackCatalog.Pack p=offered.get(i);
+                String state=!store.installed(p.id)?"Download":MapPackCatalog.needsUpdate(p,store.installedVersion(p.id))?"Update":"Installed";
+                labels[i]=p.name+" · "+(p.bytes/1_000_000L)+" MB · "+state;
+            }
+            runOnUiThread(()->{
+                if(isFinishing())return;
+                setStatus("Map areas ready");
+                new AlertDialog.Builder(this).setTitle("Map areas")
+                    .setItems(labels,(d,which)->{
+                        final MapPackCatalog.Pack p=offered.get(which);
+                        if(store.installed(p.id)&&!MapPackCatalog.needsUpdate(p,store.installedVersion(p.id))){
+                            new AlertDialog.Builder(this).setTitle(p.name).setMessage("Installed. Delete it to free "+(p.bytes/1_000_000L)+" MB?")
+                                .setPositiveButton("Delete",(x,y)->{store.remove(p.id);setStatus(p.name+" removed");})
+                                .setNegativeButton("Keep",null).show();
+                            return;
+                        }
+                        if(downloadingLocalPack)return;
+                        downloadingLocalPack=true;
+                        packWorker.execute(()->{try{
+                            final long[] last={0};
+                            store.install(p,(done,total)->{long now=SystemClock.elapsedRealtime();
+                                if(now-last[0]>1000){last[0]=now;final int pct=(int)(done*100/Math.max(1,total));
+                                    runOnUiThread(()->{if(!isFinishing())setStatus("Downloading "+p.name+" · "+pct+"%");});}
+                                return !isFinishing();});
+                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus(p.name+" installed · map detail is now offline");});
+                        }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage()==null?"Download failed":err.getMessage());});}});
+                    }).setNegativeButton("Close",null).show();
+            });
+        });
     }
     private void showOfflineDisplay(){
         if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
