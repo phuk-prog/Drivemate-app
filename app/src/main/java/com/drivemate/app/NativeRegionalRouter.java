@@ -57,10 +57,14 @@ final class NativeRegionalRouter {
             throw new IOException("Route endpoints too far from verified road nodes");
         Map<Long,JSONObject> tags=region.engine.routeTags(path);
         int[] choices=region.engine.legalChoices(path);
-        List<TomTomApi.Instruction> instructions=NativeManeuvers.steps(path.points,path.ways,tags,choices);
+        // Exit counts and forks need extra map lookups. If they fail the route still gets plain wording.
+        JunctionDetail[] details=null;
+        try{details=region.engine.junctionDetails(path);}catch(Exception noDetail){details=null;}
+        List<TomTomApi.Instruction> instructions=NativeManeuvers.steps(path.points,path.ways,tags,choices,details);
+        List<RouteIntelligence.LaneSection> lanes=NativeManeuvers.lanes(path.points,path.ways,tags,instructions);
         List<RouteIntelligence.SpeedSection> limits=NativeManeuvers.limits(path.points,path.ways,tags);
         TomTomApi.Route route=new TomTomApi.Route(path.points,instructions,GeoMath.length(path.points),
-                Math.max(1,(int)Math.ceil(path.seconds)),0,Collections.emptyList(),limits,Collections.emptyList(),PROVIDER);
+                Math.max(1,(int)Math.ceil(path.seconds)),0,lanes,limits,Collections.emptyList(),PROVIDER);
         route.geometrySourceSha=region.parentSource;route.geometryWays=path.ways;
         route.nativeScene=region.nativeScene(path);
         return route;
