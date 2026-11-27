@@ -2069,10 +2069,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if (onlineCount > 0) candidates.addAll(onlineSuggestions);
         candidates.addAll(places.favorites());
         candidates.addAll(places.recent());
-        int position = -1;
+        int candidateIndex = -1;
         for (TomTomApi.Destination candidate : candidates) {
-            position++;
-            if (!text.isEmpty() && position >= onlineCount
+            candidateIndex++;
+            if (!text.isEmpty() && candidateIndex >= onlineCount
                     && !candidate.toString().toLowerCase(Locale.UK).contains(text)) continue;
             boolean duplicate = false;
             for (TomTomApi.Destination prior : suggestionMatches) {
