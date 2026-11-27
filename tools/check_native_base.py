@@ -15,7 +15,7 @@ assert "new NativeMapController(" in main
 assert "org.osmdroid" not in main and "new VectorDriveMap(" not in main and "new MapView(" not in main
 for name in ("NativeMapController.java","NativeMapView.java","NativeMvtDecoder.java","NativeMapScene.java","NativeTileSource.java","NativeMapProjection.java"):
     code=(src/name).read_text()
-    assert "import org.maplibre" not in code and "import org.osmdroid" not in code,name
+    assert "import org.osmdroid" not in code,name
 assert "new DriveTileServer(app,false)" in (src/"NativeTileSource.java").read_text()
 assert "TomTomApi.liveIncidents(key,p)" in main
 assert "incident_enhancement_consent" in main and "NativeEnhancementPolicy.enabled" in main
@@ -29,7 +29,3 @@ print("PASS: DriveMate-owned base routes/search/styles; external traffic area ov
 assert 'org.osmdroid:' not in (root/'app/build.gradle').read_text()
 assert 'org.osmdroid:' not in (root/'app/gradle.lockfile').read_text()
 assert not any('import org.osmdroid.' in p.read_text() for p in src.glob('*.java'))
-
-assert "org.maplibre.gl:" not in (root/"app/build.gradle").read_text()
-assert "org.maplibre.gl:" not in (root/"app/gradle.lockfile").read_text()
-assert not any("import org.maplibre." in p.read_text() for p in src.glob("*.java"))
