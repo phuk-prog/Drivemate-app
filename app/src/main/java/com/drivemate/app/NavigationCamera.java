@@ -77,13 +77,13 @@ public final class NavigationCamera {
         double viewHeight = Math.max(220, screenHeightPx - headerHeightPx - panelHeightPx);
 
         // Like mainstream navigation apps, the cruising view is set by speed:
-        // about 110 m of road ahead at walking pace, growing with speed (about
-        // 200 m at 30 mph, 370 m at 70 mph). A distant next turn no longer
-        // zooms the map out to fit the whole approach.
-        double cruise = clamp(180 + speed * 16.0, 180, 950);
+        // about 130 m of road ahead at walking pace, growing with speed (about
+        // 235 m at 30 mph, 385 m at 70 mph). A distant next turn never zooms
+        // the map out to fit the whole approach.
+        double cruise = cruiseHorizon(speed);
         double horizon = cruise;
-        // At walking pace, show a useful urban approach without fitting a distant journey.
-        if(junctionAhead>cruise&&junctionAhead<=480) horizon=Math.min(520,junctionAhead+65);
+        // Slightly widen only to bring a turn that is just out of view onto the screen.
+        if(junctionAhead>cruise&&junctionAhead<=CLOSE_JUNCTION_METRES) horizon=junctionAhead+65;
         if (junctionAhead <= cruise) {
             // Approaching the manoeuvre: zoom in so the turn and a short stretch
             // of road beyond it fill the view, keeping more at higher speed.
@@ -99,8 +99,10 @@ public final class NavigationCamera {
 
         // Stronger forward perspective on long approaches; ease toward a
         // clearer overhead junction diagram as the manoeuvre gets close.
-        double tilt = clamp(38 + junctionAhead * 0.042
-                + Math.min(7, speed * 0.20), 38, 54);
+        // Moderate tilt: a steep perspective shows mostly empty horizon when zoomed out.
+        double tilt = clamp(32 + Math.min(10, speed * 0.30), 32, MAX_TILT);
+        // Ease toward overhead over the last 150 m so the junction reads like a plan.
+        if (junctionAhead < 150) tilt -= 8 * (1 - junctionAhead / 150.0);
         if (detailApproach) {
             // More overhead than the default 3D view, especially for exits.
             double blend = 1 - junctionAhead / 420.0;
@@ -119,12 +121,13 @@ public final class NavigationCamera {
         // Keep the car in the lower usable viewport and the turn higher up.
         // Include overlay displacement but never look so far past a nearby
         // turn that it disappears underneath the bottom navigation controls.
-        double lead = clamp(effectiveHorizon * 0.48,
-                Math.min(35, horizon * 0.30), horizon * 0.60);
-        double visibleCenterY = headerHeightPx + viewHeight * 0.5;
-        double screenCenterY = screenHeightPx * 0.5;
-        double centerAlong = progress + lead
-                + (visibleCenterY - screenCenterY) * metresPerPixel;
+        // The renderer draws the camera centre at its anchor (62% down when tilted, 50% flat).
+        // Place the centre so the car lands at CAR_SCREEN_FRACTION of the usable map: above the
+        // bottom panel and the speed cluster (included in panelHeightPx), never under them.
+        double anchorY = screenHeightPx * (tilt > 0 ? NativeMapProjection.TILTED_ANCHOR : 0.5);
+        double carY = headerHeightPx + viewHeight * CAR_SCREEN_FRACTION;
+        double groundPerPixel = metresPerPixel / Math.max(0.5, Math.cos(Math.toRadians(tilt)));
+        double centerAlong = progress + Math.max(0, carY - anchorY) * groundPerPixel;
         centerAlong = Math.min(centerAlong,
                 nextJunctionOffsetMetres + Math.max(detailApproach ? 34 : 25,
                         horizon * (detailApproach ? 0.17 : 0.13)));
@@ -162,6 +165,18 @@ public final class NavigationCamera {
     public static double toMapLibreZoom(double zoom, double density) {
         double d = density > 0 && Double.isFinite(density) ? density : 1;
         return zoom - 1 - Math.log(d) / Math.log(2);
+    }
+
+    /** Junctions closer than this may widen the cruise view slightly to stay on screen. */
+    static final double CLOSE_JUNCTION_METRES = 250;
+    static final double MAX_TILT = 42;
+    /** Where the vehicle sits, as a fraction of the usable map height from its top. */
+    static final double CAR_SCREEN_FRACTION = 0.80;
+
+    /** Metres of road ahead shown while cruising at this speed (m/s). */
+    static double cruiseHorizon(double speedMetresPerSecond) {
+        double v = Double.isFinite(speedMetresPerSecond) ? Math.max(0, speedMetresPerSecond) : 0;
+        return clamp(120 + v * 8.5, 130, 600);
     }
 
     static double clamp(double value, double min, double max) {

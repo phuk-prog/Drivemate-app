@@ -114,7 +114,6 @@ public final class JunctionManeuverView extends View {
         paint.setColor(night ? Color.rgb(191, 226, 239) : Color.rgb(35, 76, 94));
         paint.setTextSize(dp(9f));
         paint.setTextAlign(Paint.Align.LEFT);
-        canvas.drawText("CALCULATED PATH", dp(9), dp(12), paint);
         if (roundabout && exitNumber > 0) {
             paint.setTextAlign(Paint.Align.RIGHT);
             canvas.drawText("EXIT " + exitNumber, w - dp(8), dp(12), paint);

@@ -27,7 +27,11 @@ public class DmUnifiedZoomTest {
         assertEquals("DESTINATION",route.instructions.get(route.instructions.size()-1).maneuver);
         double previous=-1;
         for(TomTomApi.Instruction step:route.instructions){assertTrue(step.routeOffsetMetres>previous);assertTrue(step.routeOffsetMetres<=route.lengthMetres+.01);previous=step.routeOffsetMetres;}
-        assertTrue(route.trafficSections.isEmpty());assertTrue(route.laneSections.isEmpty());
+        assertTrue(route.trafficSections.isEmpty());
+        // Lanes come only from mapped turn:lanes tags; a turn every lane serves is now shown (all lit).
+        for(RouteIntelligence.LaneSection lanes:route.laneSections){
+            assertTrue(lanes.trusted());assertTrue(lanes.start>=0);assertTrue(lanes.end<=route.lengthMetres+.01);
+        }
         assertFalse(NavigationStartPolicy.previewOnly(route.provider));
         assertFalse("Mapped street search must work offline",router.search("Yew Street",sample.points.get(0)).isEmpty());
         // Recalculate a real graph route after the simulated driver advances.

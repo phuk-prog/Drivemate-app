@@ -10,11 +10,19 @@ final class IntelligentGuidance {
     private IntelligentGuidance() {}
     private static String clean(String s) { return s == null ? "" : s.trim(); }
 
+    /** A 1st exit within a few metres of joining: the driver must already be in the left lane. */
+    static boolean immediateExit(TomTomApi.Instruction step, int exit) {
+        return exit == 1 && clean(step.message).toLowerCase(Locale.UK).contains("straight away");
+    }
+
     static String action(TomTomApi.Instruction step, String glyph, int exit) {
         String message = clean(step.message);
         String road = clean(step.street);
         if ("ROUNDABOUT_EXIT".equals(step.maneuver) && exit<=0) return message.isEmpty()?"Exit roundabout":message;
-        if ("↻".equals(glyph)) return exit > 0 ? "Take " + GuidanceLogic.ordinal(exit) + " exit" : roundaboutAction(step);
+        if ("↻".equals(glyph)) {
+            if (immediateExit(step, exit)) return "Keep left · 1st exit straight away";
+            return exit > 0 ? "Take " + GuidanceLogic.ordinal(exit) + " exit" : roundaboutAction(step);
+        }
         String highway=highwayExit(step);
         if(!highway.isEmpty()) {
             if("MOTORWAY_EXIT_LEFT".equals(step.maneuver))return "Take left exit "+highway;
@@ -43,6 +51,7 @@ final class IntelligentGuidance {
             return clean(step.message).isEmpty() ? "Follow the highlighted route" : clean(step.message);
         }
         String road = clean(step.street);
+        if (immediateExit(step, exit)) return "At the roundabout, keep left and take the 1st exit straight away" + (road.isEmpty() ? "" : " onto " + road);
         if (exit > 0) return "At the roundabout, take the " + GuidanceLogic.ordinal(exit) + " exit" + (road.isEmpty() ? "" : " onto " + road);
         String m=roundaboutAction(step);
         if(!road.isEmpty()&&m.startsWith("Take"))return "At the roundabout, "+m.toLowerCase(Locale.UK)+" onto "+road;
@@ -114,7 +123,8 @@ final class IntelligentGuidance {
         int exit = "↻".equals(glyph) ? JunctionFraming.reportedExit(step.exitNumber) : 0;
         String action=action(step,glyph,exit);
         String road=roadLine(action,step);
-        return "Then " + glyph + "  " + action + " · " + NavigationUnits.displayDistance(gap,metric)+(road.isEmpty()?"":" · "+road);
+        // Waze-style: just the arrow and where it goes; the main card already carries distances.
+        return "Then " + glyph + "  " + (road.isEmpty() ? action : road);
     }
 
     static String voice(String direction, double distance, boolean metric, boolean immediate,

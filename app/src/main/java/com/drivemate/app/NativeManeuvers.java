@@ -51,10 +51,19 @@ final class NativeManeuvers {
             boolean entering=!roundabout(in)&&roundabout(out),leaving=roundabout(in)&&!roundabout(out);
             String target=road(out);double turn=angle(p.get(i-1),p.get(i),p.get(i+1));
             String code="",message="",junction="REGULAR";int exit=0;double shown=turn;
+            JSONObject refWay=out;
             if(entering){
-                code="ROUNDABOUT";message="Follow the highlighted route at the roundabout";junction="ROUNDABOUT";target="";
+                code="ROUNDABOUT";message="Follow the highlighted route at the roundabout";junction="ROUNDABOUT";target="";refWay=null;
                 RoundaboutExits.Result r=RoundaboutExits.count(ways,tags,details,i);
-                if(r.exit>0){exit=r.exit;target=road(tags.get(ways.get(r.exitWayIndex)));message="At the roundabout, take the "+GuidanceLogic.ordinal(exit)+" exit";}
+                // The exit number must agree with the overall turn (a 1st exit is never a right turn).
+                double overall=r.exit>0?overallTurn(p,d,i,r.exitWayIndex):Double.NaN;
+                if(r.exit>0&&!RoundaboutExits.plausible(r.exit,overall))r=new RoundaboutExits.Result(0,-1);
+                // A roundabout split by an untagged stretch would be counted twice: no number then.
+                if(r.exit>0&&rejoinsRoundabout(ways,tags,d,r.exitWayIndex))r=new RoundaboutExits.Result(0,-1);
+                if(r.exit>0){exit=r.exit;refWay=tags.get(ways.get(r.exitWayIndex));target=road(refWay);
+                    boolean immediate=d[r.exitWayIndex]-d[i]<=IMMEDIATE_EXIT_METRES;
+                    message=immediate&&exit==1?"At the roundabout, keep left and take the 1st exit straight away"
+                            :"At the roundabout, take the "+GuidanceLogic.ordinal(exit)+" exit";}
             }
             else if(leaving){code="ROUNDABOUT_EXIT";message="Exit the roundabout";junction="ROUNDABOUT";}
             else if(roundabout(in)&&roundabout(out))continue;
@@ -73,13 +82,53 @@ final class NativeManeuvers {
                 else continue;
             }
             if(!target.isEmpty())message+=" onto "+target;
-            result.add(new TomTomApi.Instruction(d[i],message,code,junction,exit,shown,target,"","",ref(out),"LEFT"));
+            // The road number belongs to the road being joined, never to the roundabout itself.
+            result.add(new TomTomApi.Instruction(d[i],message,code,junction,exit,shown,target,"","",refWay==null?"":ref(refWay),"LEFT"));
         }
-        result.add(new TomTomApi.Instruction(d[d.length-1],"End of mapped route; check destination access","DESTINATION","REGULAR",0,0,"",""));
+        result.add(new TomTomApi.Instruction(d[d.length-1],"Arrive at your destination","DESTINATION","REGULAR",0,0,"",""));
         return Collections.unmodifiableList(result);
+    }
+    /** An exit this close after joining is effectively an immediate left. */
+    static final double IMMEDIATE_EXIT_METRES=30;
+    /** Overall turn from the approach before the roundabout to the road after the exit (positive right). */
+    static double overallTurn(List<GeoMath.Point> p,double[] d,int enter,int exitNode){
+        if(exitNode<=enter||exitNode>=p.size())return Double.NaN;
+        double total=d[d.length-1];
+        GeoMath.Point before=GeoMath.pointAtDistance(p,Math.max(0,d[enter]-20)),at=p.get(enter);
+        GeoMath.Point leave=p.get(exitNode),after=GeoMath.pointAtDistance(p,Math.min(total,d[exitNode]+20));
+        if(GeoMath.distance(before,at)<3||GeoMath.distance(leave,after)<3)return Double.NaN;
+        return (GeoMath.bearingDegrees(leave,after)-GeoMath.bearingDegrees(before,at)+540)%360-180;
+    }
+    /** True when the route is back on a roundabout within 60 m of leaving it (a fragmented roundabout). */
+    static boolean rejoinsRoundabout(List<Long> ways,Map<Long,JSONObject> tags,double[] d,int exitNode){
+        for(int j=exitNode;j<ways.size()&&d[j]-d[exitNode]<=60;j++)if(roundabout(tags.get(ways.get(j))))return true;
+        return false;
     }
     /** Lane sections from way lane tags, only where the tags are present and consistent. */
     static List<RouteIntelligence.LaneSection> lanes(List<GeoMath.Point> p,List<Long> ways,Map<Long,JSONObject> tags,List<TomTomApi.Instruction> steps){
+        return lanes(p,ways,tags,steps,null);
+    }
+    /**
+     * Whether the route runs along each way's drawing direction, from the scene's way geometry
+     * (index-aligned with segments; null entries = unknown).
+     */
+    static Boolean[] directions(List<GeoMath.Point> p,List<Long> ways,NativeMapScene scene){
+        Boolean[] out=new Boolean[ways.size()];if(scene==null)return out;
+        Map<Long,NativeMapScene.Shape> byId=new HashMap<>();
+        for(NativeMapScene.Shape s:scene.shapes)if(!s.area)byId.put(s.id,s);
+        for(int i=0;i<ways.size()&&i+1<p.size();i++){
+            NativeMapScene.Shape s=byId.get(ways.get(i));if(s==null)continue;
+            int a=vertex(s,p.get(i)),b=vertex(s,p.get(i+1));
+            if(a>=0&&b>=0&&a!=b)out[i]=b>a;
+        }
+        return out;
+    }
+    private static int vertex(NativeMapScene.Shape s,GeoMath.Point q){
+        double x=NativeMapProjection.x(q.lon),y=NativeMapProjection.y(q.lat);int best=-1;double bestD=1e-12;
+        for(int k=0;k+1<s.xy.length;k+=2){double dx=s.xy[k]-x,dy=s.xy[k+1]-y,dd=dx*dx+dy*dy;if(dd<bestD){bestD=dd;best=k/2;}}
+        return best;
+    }
+    static List<RouteIntelligence.LaneSection> lanes(List<GeoMath.Point> p,List<Long> ways,Map<Long,JSONObject> tags,List<TomTomApi.Instruction> steps,Boolean[] forward){
         List<RouteIntelligence.LaneSection> out=new ArrayList<>();
         double[] d=offsets(p);
         for(TomTomApi.Instruction step:steps){
@@ -89,7 +138,9 @@ final class NativeManeuvers {
             if(node<1)continue;
             JSONObject wayTags=tags.get(ways.get(node-1));
             double start=Math.max(0,step.routeOffsetMetres-LANE_SECTION_METRES);
-            RouteIntelligence.LaneSection section=LaneTags.section(wayTags,step.maneuver,step.turnAngleDegrees,start,step.routeOffsetMetres);
+            // Without direction data (legacy callers) the way's own direction is assumed, as before.
+            Boolean dir=forward==null?Boolean.TRUE:node-1<forward.length?forward[node-1]:null;
+            RouteIntelligence.LaneSection section=LaneTags.section(wayTags,dir,step.maneuver,step.turnAngleDegrees,start,step.routeOffsetMetres);
             if(section!=null)out.add(section);
         }
         return Collections.unmodifiableList(out);

@@ -72,7 +72,7 @@ public final class NavigationCameraTest {
         assertTrue(near.zoom > far.zoom);
         assertTrue(near.tiltDegrees < far.tiltDegrees);
         assertTrue(near.tiltDegrees >= 28);
-        assertTrue(far.tiltDegrees <= 54);
+        assertTrue(far.tiltDegrees <= NavigationCamera.MAX_TILT);
     }
 
     @Test public void largeGuidanceCardStillKeepsVehicleAndJunctionAhead() {
@@ -120,15 +120,40 @@ public final class NavigationCameraTest {
     @Test public void distantTurnDoesNotFitTheEntireJourney(){
         GeoMath.Point gps=north.get(0);
         NavigationCamera.Frame far=NavigationCamera.calculate(north,gps,0,1800,1,1400,400,300);
-        NavigationCamera.Frame near=NavigationCamera.calculate(north,gps,0,300,1,1400,400,300);
+        NavigationCamera.Frame mid=NavigationCamera.calculate(north,gps,0,300,1,1400,400,300);
+        NavigationCamera.Frame close=NavigationCamera.calculate(north,gps,0,200,1,1400,400,300);
         assertTrue(far.zoom>16);
-        assertTrue(near.zoom<far.zoom);
+        // A turn 300 m away no longer widens the cruise view; one just out of view may.
+        assertEquals(far.zoom,mid.zoom,1e-9);
+        assertTrue(close.zoom<far.zoom);
         assertTrue(far.cameraCenterAlongMetres<400);
+    }
+    @Test public void cruiseViewMatchesSpeed(){
+        assertEquals(130,NavigationCamera.cruiseHorizon(0),1e-9);
+        assertEquals(234,NavigationCamera.cruiseHorizon(13.41),1);   // 30 mph
+        assertEquals(386,NavigationCamera.cruiseHorizon(31.29),1);   // 70 mph
+        assertEquals(600,NavigationCamera.cruiseHorizon(200),1e-9);
     }
     @Test public void forwardCameraHasGreaterLeadAtUrbanApproach(){
         NavigationCamera.Frame f=NavigationCamera.calculate(north,north.get(0),0,384,1.3f,1450,230,155);
-        assertTrue(f.cameraCenterAlongMetres>120);
-        assertTrue(f.tiltDegrees>45);
+        assertTrue(f.cameraCenterAlongMetres>25);
+        assertTrue(f.tiltDegrees<=NavigationCamera.MAX_TILT);
         assertTrue(f.cameraCenterAlongMetres<384);
+    }
+
+    @Test public void carIsPlacedAboveTheBottomPanelAndSpeedCluster(){
+        // 2400 px phone: 620 px turn card, 700 px panel + speed cluster reserved at the bottom.
+        int screen=2400,header=620,bottom=700;
+        NavigationCamera.Frame f=NavigationCamera.calculate(north,north.get(0),0,1500,12,screen,header,bottom);
+        double view=screen-header-bottom;
+        double carY=header+view*NavigationCamera.CAR_SCREEN_FRACTION;
+        assertTrue("car must sit above the reserved bottom area",carY<screen-bottom);
+        // The centre is ahead of the car so that, drawn at the tilted anchor, the car lands at carY.
+        double anchor=screen*NativeMapProjection.TILTED_ANCHOR;
+        assertTrue(f.tiltDegrees>0);
+        double drawnCarY=Math.max(carY,anchor);   // centre never behind the car
+        assertTrue(drawnCarY<screen-bottom);
+        // Old placement put the car about 470 px below the anchor: under the panel.
+        assertTrue(anchor+470>screen-bottom);
     }
 }

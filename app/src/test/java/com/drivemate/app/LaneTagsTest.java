@@ -51,8 +51,43 @@ public class LaneTagsTest {
         assertNotNull(LaneTags.section(w, "TURN_LEFT", -90, 0, 300));
     }
 
-    @Test public void noSectionWhenEveryLaneServesTheTurn() throws Exception {
-        assertNull(LaneTags.section(way("left|left", 2), "TURN_LEFT", -90, 0, 300));
+    @Test public void everyLaneServingTheTurnIsShownAllLit() throws Exception {
+        RouteIntelligence.LaneSection s = LaneTags.section(way("right|right", 2), "TURN_RIGHT", 90, 0, 300);
+        assertNotNull(s);
+        assertTrue(s.lanes.get(0).recommended && s.lanes.get(1).recommended);
+        // Voice stays quiet: "use any lane" is not worth saying.
+        assertEquals("", IntelligentGuidance.lanePhrase(s));
+    }
+
+    @Test public void backwardTravelUsesBackwardTags() throws Exception {
+        JSONObject w = new JSONObject().put("highway", "primary").put("lanes", 4)
+                .put("turn:lanes:forward", "left|through").put("turn:lanes:backward", "through|right");
+        RouteIntelligence.LaneSection back = LaneTags.section(w, Boolean.FALSE, "TURN_RIGHT", 90, 0, 300);
+        assertNotNull(back);
+        assertTrue(back.lanes.get(1).recommended);
+        assertFalse(back.lanes.get(0).recommended);
+        // Direction unknown on a two-way road: never guess.
+        assertNull(LaneTags.section(w, null, "TURN_RIGHT", 90, 0, 300));
+    }
+
+    @Test public void forwardTagsWithoutForwardCountAreNotRejectedByTheTotal() throws Exception {
+        JSONObject w = new JSONObject().put("highway", "primary").put("lanes", 4)
+                .put("turn:lanes:forward", "left|through");
+        assertNotNull(LaneTags.section(w, Boolean.TRUE, "TURN_LEFT", -90, 0, 300));
+    }
+
+    @Test public void onewayUsesPlainTagsEitherWay() throws Exception {
+        JSONObject w = way("left|through", 2).put("oneway", "yes");
+        assertNotNull(LaneTags.section(w, null, "TURN_LEFT", -90, 0, 300));
+    }
+
+    @Test public void bearRightPrefersMarkedRightLaneOverStraight() throws Exception {
+        RouteIntelligence.LaneSection s = LaneTags.section(way("through|through|right", 3).put("oneway", "yes"),
+                "BEAR_RIGHT", 40, 0, 300);
+        assertNotNull(s);
+        assertFalse(s.lanes.get(0).recommended);
+        assertFalse(s.lanes.get(1).recommended);
+        assertTrue(s.lanes.get(2).recommended);
     }
 
     @Test public void noSectionWhenNoLaneServesTheTurn() throws Exception {

@@ -64,12 +64,14 @@ final class NativeRegionalRouter {
         JunctionDetail[] details=null;
         try{details=region.engine.junctionDetails(path);}catch(Exception noDetail){details=null;}
         List<TomTomApi.Instruction> instructions=NativeManeuvers.steps(path.points,path.ways,tags,choices,details);
-        List<RouteIntelligence.LaneSection> lanes=NativeManeuvers.lanes(path.points,path.ways,tags,instructions);
+        NativeMapScene scene=region.nativeScene(path);
+        List<RouteIntelligence.LaneSection> lanes=NativeManeuvers.lanes(path.points,path.ways,tags,instructions,
+                NativeManeuvers.directions(path.points,path.ways,scene));
         List<RouteIntelligence.SpeedSection> limits=NativeManeuvers.limits(path.points,path.ways,tags);
         TomTomApi.Route route=new TomTomApi.Route(path.points,instructions,GeoMath.length(path.points),
                 Math.max(1,(int)Math.ceil(path.seconds)),0,lanes,limits,Collections.emptyList(),PROVIDER);
         route.geometrySourceSha=region.parentSource;route.geometryWays=path.ways;
-        route.nativeScene=region.nativeScene(path);
+        route.nativeScene=scene;
         return route;
     }
     static final class RoadContext {

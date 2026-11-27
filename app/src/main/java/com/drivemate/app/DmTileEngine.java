@@ -280,6 +280,8 @@ public final class DmTileEngine {
         class Alt{final long way;final double bearing;Alt(long w,double b){way=w;bearing=b;}}
         List<List<Alt>> alts=new ArrayList<>();Set<Long> wanted=new HashSet<>();Set<String> cells=new TreeSet<>(route.cells);
         double[] routeBearing=new double[n];
+        // An exit whose road could not be loaded is unknown, never silently skipped (it would undercount).
+        boolean[] unknownAt=new boolean[n];
         try{
             for(int i=0;i<n;i++)alts.add(new ArrayList<>());
             for(int i=1;i<n-1;i++){
@@ -292,8 +294,8 @@ public final class DmTileEngine {
                     JSONArray e=node.edges.getJSONArray(j);long dst=e.getLong(1),way=e.getLong(3);
                     if(e.getLong(0)==route.edgeIds.get(i))continue;
                     if(!LocalRoutingPilot.allowed(state.prev,dst,way,restrictions))continue;
-                    String cell=e.getString(2);if(!catalog.has(cell))continue;
-                    Node far=load(cell).nodes.get(dst);if(far==null)continue;
+                    String cell=e.getString(2);if(!catalog.has(cell)){unknownAt[i]=true;continue;}
+                    Node far=load(cell).nodes.get(dst);if(far==null){unknownAt[i]=true;continue;}
                     alts.get(i).add(new Alt(way,GeoMath.bearingDegrees(node.point,far.point)));wanted.add(way);cells.add(cell);
                 }
             }
@@ -312,7 +314,7 @@ public final class DmTileEngine {
                 }
             }
             for(int i=1;i<n-1;i++){
-                int countable=0;boolean unknown=false,forkL=false,forkR=false;
+                int countable=0;boolean unknown=unknownAt[i],forkL=false,forkR=false;
                 for(Alt a:alts.get(i)){
                     String cls=classes.get(a.way);
                     if(cls==null||cls.isEmpty()){unknown=true;continue;}

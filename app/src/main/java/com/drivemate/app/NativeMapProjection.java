@@ -3,6 +3,8 @@ package com.drivemate.app;
 /** DriveMate original Web Mercator camera. Coordinates are normalized world units. */
 final class NativeMapProjection {
     static final double MAX_LAT=85.05112878;
+    /** Screen height fraction where a tilted camera's centre is drawn (NavigationCamera relies on it). */
+    static final float TILTED_ANCHOR=.62f;
     private NativeMapProjection(){}
     static double x(double lon){return (lon+180)/360;}
     static double y(double lat){
@@ -19,7 +21,7 @@ final class NativeMapProjection {
             double radians=Math.toRadians(Math.max(0,Math.min(55,tilt)));
             pitch=Math.cos(radians);tiltSin=Math.sin(radians);
             focal=Math.max(1,Math.max(width,height)*1.25);
-            anchorX=width*.5f;anchorY=height*(tilt>0?.62f:.5f);
+            anchorX=width*.5f;anchorY=height*(tilt>0?TILTED_ANCHOR:.5f);
         }
         double depth(double x,double y){return 1-((-(x-cx)*scale*sin+(y-cy)*scale*cos)*tiltSin/focal);}
         boolean segment(double x0,double y0,double x1,double y1,float[] a,float[] b){
