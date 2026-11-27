@@ -370,6 +370,28 @@ public final class MainActivity extends Activity implements LocationListener {
     private FixQualityPolicy.Sample lastAcceptedFix;
     /** Whether the current location registration uses the navigating rate. */
     private boolean subscribedForNavigation;
+    private boolean placesWarmed;
+    /** Pre-fetch map tiles around Home and Work once per session, so the map is already there when needed. */
+    private void warmSavedPlaces() {
+        if (vectorMap == null || places == null) return;
+        TomTomApi.Destination h = places.home(), w = places.work();
+        if (h != null) vectorMap.warmArea(h.point);
+        if (w != null) vectorMap.warmArea(w.point);
+    }
+    /** Start was tapped before a fresh GPS fix existed: start as soon as one arrives. */
+    private boolean startWhenFix;
+    private final Runnable startWaitTimeout = () -> {
+        if (startWhenFix) {
+            startWhenFix = false;
+            showError("No fresh GPS position after 20 seconds. Check Precise Location is on and try again with a clear view of the sky.");
+        }
+    };
+    /**
+     * Full-rate location updates are needed while navigating, while a route is on screen, and while
+     * Start is waiting for a fix. The lighter idle rate asks for a new fix only after 5 m of
+     * movement, so a stationary driver on the route preview got no fixes and Start refused.
+     */
+    private boolean wantFastLocation() { return active || route != null || startWhenFix; }
     private boolean resubscribing;
     private boolean fusedActive;
     /** Latest camera angles, kept only for the shareable diagnostics report. */
@@ -2191,7 +2213,7 @@ public final class MainActivity extends Activity implements LocationListener {
             // Fastest rate while navigating, lighter on the home screen and route
             // preview (see LocationRatePolicy). resubscribeLocationForMode()
             // switches between the two when guidance starts or ends.
-            boolean navigating = active;
+            boolean navigating = wantFastLocation();
             long interval = LocationRatePolicy.gpsIntervalMs(navigating);
             float minDistance = LocationRatePolicy.minDistanceMetres(navigating);
             boolean fused = false;
@@ -2244,7 +2266,7 @@ public final class MainActivity extends Activity implements LocationListener {
      */
     private void resubscribeLocationForMode() {
         if (locationManager == null || !locationSubscribed
-                || subscribedForNavigation == active) return;
+                || subscribedForNavigation == wantFastLocation()) return;
         try {
             locationManager.removeUpdates(this);
             locationManager.unregisterGnssStatusCallback(gnssCallback);
@@ -2306,6 +2328,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
+        if (!placesWarmed) { placesWarmed = true; warmSavedPlaces(); }
+        if (startWhenFix && !active && route != null) {
+            startWhenFix = false;
+            gpsHandler.removeCallbacks(startWaitTimeout);
+            startNavigation();
+        }
         if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
         // The faster-route chip must disappear on its own as soon as the
         // offered geometry starts too far behind the moving car or goes stale.
@@ -2757,9 +2785,17 @@ public final class MainActivity extends Activity implements LocationListener {
         if (route == null || destination == null) return;
         if (NavigationStartPolicy.previewOnly(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
         if (currentLocation == null || !NavigationStartPolicy.freshFix(currentLocation.getLatitude(), currentLocation.getLongitude(), currentLocation.getTime(), System.currentTimeMillis(), currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.NaN)) {
-            showError("Waiting for a fresh GPS position before starting.");
+            // Do not just refuse: ask for full-rate fixes and start as soon as a fresh one arrives.
+            if (!startWhenFix) {
+                startWhenFix = true;
+                setStatus("Getting a GPS fix · navigation starts as soon as it arrives");
+                resubscribeLocationForMode();
+                gpsHandler.postDelayed(startWaitTimeout, 20000);
+            }
             return;
         }
+        startWhenFix = false;
+        gpsHandler.removeCallbacks(startWaitTimeout);
         active = true;
         arrivalPolicy.reset();
         if (previewParkingButton != null) previewParkingButton.setVisibility(View.GONE);
