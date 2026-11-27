@@ -3,7 +3,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/** Original bounded Mapbox Vector Tile v2 wire decoder for DriveMate Shortbread data.
+/** Original bounded Mapbox Vector Tile v2 wire decoder for DriveMate Shortbread data and OpenMapTiles-schema CDN tiles.
  * No protobuf or map SDK. Display only: tile geometry is never routing evidence. */
 final class NativeMvtDecoder {
     private static final int MAX_BYTES=16*1024*1024,MAX_FEATURES=20000,MAX_VERTICES=160000;
@@ -31,21 +31,25 @@ final class NativeMvtDecoder {
     }
     private static void layer(Wire w,int z,int tx,int ty,List<NativeMapScene.Shape> out,int[] budget)throws IOException{
         String name="";int extent=4096,version=1;List<String> keys=new ArrayList<>(),values=new ArrayList<>();List<Wire> features=new ArrayList<>();
-        while(w.more()){int k=w.count();switch(k){case 10:name=w.string();break;case 18:if(++budget[0]>MAX_FEATURES)throw new IOException("Tile feature limit");features.add(w.sub());break;case 26:keys.add(w.string());break;case 34:values.add(value(w.sub()));break;case 40:extent=w.count();break;case 120:version=w.count();break;default:w.skip(k&7);}if(keys.size()>10000||values.size()>20000)throw new IOException("Tile dictionary limit");}
+        while(w.more()){int k=w.count();switch(k){case 10:name=w.string();break;case 18:features.add(w.sub());break;case 26:keys.add(w.string());break;case 34:values.add(value(w.sub()));break;case 40:extent=w.count();break;case 120:version=w.count();break;default:w.skip(k&7);}if(keys.size()>10000||values.size()>20000)throw new IOException("Tile dictionary limit");}
         if(extent<1||extent>65536||version<1||version>2)throw new IOException("Unsupported tile layer");
-        if(!Arrays.asList("streets","buildings","land","water_polygons","water_lines","railways","place_labels","street_labels","street_labels_points","earth","water","roads").contains(name))return;
+        if(!Arrays.asList("streets","buildings","land","water_polygons","water_lines","railways","place_labels","street_labels","street_labels_points","earth","water","roads",
+                "transportation","transportation_name","building","landcover","park","waterway","place").contains(name))return;
+        budget[0]+=features.size();if(budget[0]>MAX_FEATURES)throw new IOException("Tile feature limit");
         for(Wire f:features){
             F row=new F();while(f.more()){int k=f.count();switch(k){case 8:row.id=f.v();break;case 18:row.tags=f.sub();break;case 24:row.type=f.count();break;case 34:row.geometry=f.sub();break;default:f.skip(k&7);}}
             if(row.geometry==null||row.type<1||row.type>3)continue;
             Map<String,String> tags=new HashMap<>();if(row.tags!=null)while(row.tags.more()){int a=row.tags.count(),b=row.tags.count();if(a>=keys.size()||b>=values.size())throw new IOException("Bad tile tags");tags.put(keys.get(a),values.get(b));}
-            String kind=tags.getOrDefault("kind",""),label=tags.getOrDefault("name",tags.getOrDefault("ref",""));if(label.length()>120)label="";
+            String kind=tags.getOrDefault("kind",tags.getOrDefault("class","")),label=tags.getOrDefault("name",tags.getOrDefault("ref",""));if(label.length()>120)label="";
+            if(name.startsWith("transportation")&&(kind.equals("ferry")||kind.equals("aerialway")||kind.equals("gondola")))continue;
+            if(name.equals("transportation_name")&&label.isEmpty())continue;
             int type=-1;
-            if((name.equals("streets")||name.equals("roads"))&&row.type==2){type=Arrays.asList("rail","light_rail","tram","subway","narrow_gauge","funicular","monorail","disused").contains(kind)?NativeMapScene.RAIL:kind.startsWith("motorway")||kind.startsWith("trunk")?NativeMapScene.MOTORWAY:kind.startsWith("primary")||kind.startsWith("secondary")||kind.startsWith("tertiary")?NativeMapScene.MAIN:Arrays.asList("footway","path","cycleway","steps","pedestrian","bridleway").contains(kind)?NativeMapScene.PATH:NativeMapScene.LOCAL;}
-            else if(name.equals("buildings")&&row.type==3)type=NativeMapScene.BUILDING;
-            else if((name.equals("land")||name.equals("earth"))&&row.type==3)type=NativeMapScene.LAND;
-            else if((name.startsWith("water_")||name.equals("water"))&&row.type>=2)type=NativeMapScene.WATER;
+            if((name.equals("streets")||name.equals("roads")||name.startsWith("transportation"))&&row.type==2){type=Arrays.asList("transit","rail","light_rail","tram","subway","narrow_gauge","funicular","monorail","disused").contains(kind)?NativeMapScene.RAIL:kind.startsWith("motorway")||kind.startsWith("trunk")?NativeMapScene.MOTORWAY:kind.startsWith("primary")||kind.startsWith("secondary")||kind.startsWith("tertiary")?NativeMapScene.MAIN:Arrays.asList("footway","path","cycleway","steps","track","pedestrian","bridleway").contains(kind)?NativeMapScene.PATH:NativeMapScene.LOCAL;}
+            else if((name.equals("buildings")||name.equals("building"))&&row.type==3)type=NativeMapScene.BUILDING;
+            else if((name.equals("land")||name.equals("earth")||name.equals("landcover")||name.equals("park"))&&row.type==3)type=NativeMapScene.LAND;
+            else if((name.startsWith("water_")||name.equals("water")||name.equals("waterway"))&&row.type>=2)type=NativeMapScene.WATER;
             else if(name.equals("railways")&&row.type==2)type=NativeMapScene.RAIL;
-            else if(name.equals("place_labels")&&row.type==1&&!label.isEmpty())type=NativeMapScene.LABEL;
+            else if((name.equals("place_labels")||name.equals("place"))&&row.type==1&&!label.isEmpty())type=NativeMapScene.LABEL;
             if(type<0)continue;
             List<Double> coords=new ArrayList<>();List<Integer> parts=new ArrayList<>();long x=0,y=0;int start=-1;boolean closed=false;
             Wire g=row.geometry;
@@ -65,9 +69,11 @@ final class NativeMvtDecoder {
             }
             if(coords.isEmpty()||row.type==3&&!closed)continue;
             double[] xy=new double[coords.size()];for(int i=0;i<xy.length;i++)xy[i]=coords.get(i);
+            if(name.equals("landcover")){double lx=1e9,hx=-1e9,ly=1e9,hy=-1e9;for(int i=0;i+1<xy.length;i+=2){lx=Math.min(lx,xy[i]);hx=Math.max(hx,xy[i]);ly=Math.min(ly,xy[i+1]);hy=Math.max(hy,xy[i+1]);}
+                if(Math.max(hx-lx,hy-ly)*(1L<<z)<0.025)continue;} // tiny OpenMapTiles patches add cost, not information
             int[] offsets=new int[parts.size()];for(int i=0;i<offsets.length;i++)offsets[i]=parts.get(i);
-            double height=type==NativeMapScene.BUILDING?MapDetailPolicy.heightMetres(tags.get("height"),tags.get("building:levels")):0;
-            out.add(new NativeMapScene.Shape(row.id,type,xy,label,"true".equals(tags.get("bridge")),"true".equals(tags.get("tunnel")),row.type==3,height,offsets));
+            double height=type==NativeMapScene.BUILDING?MapDetailPolicy.heightMetres(tags.getOrDefault("height",tags.get("render_height")),tags.get("building:levels")):0;
+            out.add(new NativeMapScene.Shape(row.id,type,xy,label,"true".equals(tags.get("bridge"))||"bridge".equals(tags.get("brunnel")),"true".equals(tags.get("tunnel"))||"tunnel".equals(tags.get("brunnel")),row.type==3,height,offsets));
         }
     }
 }

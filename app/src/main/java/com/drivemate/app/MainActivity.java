@@ -1738,7 +1738,14 @@ public final class MainActivity extends Activity implements LocationListener {
     private boolean comparisonPermitted(){return false;}
     private void configureIndependent(){showOfflineRouting();}
     private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
+        List<TomTomApi.Destination> online=OnlineFirst.search(onlineKey(),query,near,hasNetwork());
+        if(online!=null)return online;
         return new NativeRegionalRouter(this).search(query,near);
+    }
+    /** The saved TomTom key, only when the owner has consented to online search and routing. */
+    private String onlineKey(){
+        boolean consent=getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("incident_enhancement_consent",false);
+        return NativeEnhancementPolicy.enabled(consent,incidentEnhancementKey)?incidentEnhancementKey:"";
     }
     private void requestComparison(){/* Native-only: no external comparison requests. */}
     private void showMapReview(){
@@ -2131,10 +2138,10 @@ public final class MainActivity extends Activity implements LocationListener {
         if(active||routing){showError("Stop safely before changing optional traffic settings.");return;}
         EditText input=new EditText(this);input.setSingleLine(true);
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        input.setHint("Optional traffic API key");input.setText(incidentEnhancementKey);
-        new AlertDialog.Builder(this).setTitle("Optional TomTom area traffic reports")
-            .setMessage("Off by default. Enable only if your key and licence allow incident data on DriveMate maps. When enabled, a nearby geographic bounding box is sent to TomTom over HTTPS. Reports are labelled area markers, never route instructions, road closures, speed limits or ETA changes. DriveMate routing and base map do not depend on this service.")
-            .setView(input).setPositiveButton("Enable area reports",(d,w)->{
+        input.setHint("TomTom API key");input.setText(incidentEnhancementKey);
+        new AlertDialog.Builder(this).setTitle("TomTom online search, routing and traffic")
+            .setMessage("Off by default. With your TomTom key and consent, DriveMate searches places and calculates routes with live traffic through TomTom while online, and shows nearby traffic reports. What you search for, your route start and end, and a nearby area box are sent to TomTom over HTTPS. Offline, or if TomTom fails, DriveMate uses its own map data and router.")
+            .setView(input).setPositiveButton("Enable",(d,w)->{
                 String key=input.getText().toString().trim();
                 if(!NativeEnhancementPolicy.enabled(true,key)){showError("Enter a valid optional traffic key.");return;}
                 clearLiveIncidents();incidentEnhancementKey=key;trafficEnabled=true;
@@ -2698,7 +2705,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 runOnUiThread(() -> {
                     if (searchId != requestGeneration || isFinishing()) return;
                     if (found.isEmpty()) {
-                        showError("No matching destinations. Try a fuller address.");
+                        showError("No matching destinations. Try a fuller address."+(OnlineFirst.lastProblem.isEmpty()?"":" (Online search: "+OnlineFirst.lastProblem+")"));
                         return;
                     }
                     String[] labels = new String[found.size()];
@@ -3140,10 +3147,12 @@ public final class MainActivity extends Activity implements LocationListener {
                 && (!currentLocation.hasBearingAccuracy() || currentLocation.getBearingAccuracyDegrees() <= 30)
                 ? currentLocation.getBearing() : Double.NaN;
         final GeoMath.Point end = destination.point;
-        setStatus("Calculating DriveMate native route preview…");
+        setStatus("Calculating route…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = new NativeRegionalRouter(this).preview(start,end,startBearing);
+                TomTomApi.Route online = OnlineFirst.route(onlineKey(),start,end,hasNetwork());
+                final TomTomApi.Route calculated = online != null ? online
+                        : new NativeRegionalRouter(this).preview(start,end,startBearing);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
