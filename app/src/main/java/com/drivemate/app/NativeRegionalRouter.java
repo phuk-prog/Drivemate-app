@@ -52,8 +52,11 @@ final class NativeRegionalRouter {
     TomTomApi.Route reroutePreview(GeoMath.Point from,GeoMath.Point destination)throws Exception{return preview(from,destination);}
     static TomTomApi.Route convert(DmUnifiedRegion region,DmTileEngine.Route path,GeoMath.Point from,GeoMath.Point to)throws Exception{
         if(path.points.size()>=2)STATS.recordSnap(GeoMath.distance(from,path.points.get(0)),GeoMath.distance(to,path.points.get(path.points.size()-1)));
-        if(path.points.size()<2||GeoMath.distance(from,path.points.get(0))>75
-                ||GeoMath.distance(to,path.points.get(path.points.size()-1))>100)
+        // The engine snaps to junctions up to 350 m away, so allow the route to start up to 250 m from
+        // the GPS fix (the join-the-route logic handles that) and end up to 350 m from the destination
+        // (the last instruction says "check destination access").
+        if(path.points.size()<2||GeoMath.distance(from,path.points.get(0))>250
+                ||GeoMath.distance(to,path.points.get(path.points.size()-1))>350)
             throw new IOException("Route endpoints too far from verified road nodes");
         Map<Long,JSONObject> tags=region.engine.routeTags(path);
         int[] choices=region.engine.legalChoices(path);
