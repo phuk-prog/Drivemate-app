@@ -358,6 +358,10 @@ public final class MainActivity extends Activity implements LocationListener {
     private long lastNetworkWarning;
     private boolean networkLost;
     private long lastRerouteAttempt;
+    /** Consecutive failed reroutes while navigating; slows retries. Reset when a route installs. */
+    private int rerouteFailures;
+    /** "Recalculating" has been spoken for this off-route episode. */
+    private boolean rerouteAnnounced;
 
     private LocationManager locationManager;
     private Location currentLocation;
@@ -2939,6 +2943,7 @@ public final class MainActivity extends Activity implements LocationListener {
         s.positionBridges = locationPipeline.bridgeSummary();
         s.mockFixes = locationPipeline.mockFixes();
         s.estimatedPosition = showingEstimate;
+        s.routingStats = NativeRegionalRouter.STATS.summary();
         s.headingFusion = headingFusion.fusedHeading(System.currentTimeMillis());
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
         s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
@@ -3031,73 +3036,88 @@ public final class MainActivity extends Activity implements LocationListener {
         routing = true;
         lastRouteRequest = SystemClock.elapsedRealtime();
         final int plannedGeneration = ++requestGeneration;
-        final GeoMath.Point start = gpsPoint(currentLocation);
+        // Plan from the steadier smoothed position when it agrees with the raw fix, and
+        // from the travel direction so the route starts at a junction ahead of the car.
+        final GeoMath.Point start = RerouteStart.choose(gpsPoint(currentLocation), displayGps);
+        final double startBearing = currentLocation.hasBearing() && currentLocation.hasSpeed()
+                && currentLocation.getSpeed() >= 3f
+                && (!currentLocation.hasBearingAccuracy() || currentLocation.getBearingAccuracyDegrees() <= 30)
+                ? currentLocation.getBearing() : Double.NaN;
         final GeoMath.Point end = destination.point;
         setStatus("Calculating DriveMate native route preview…");
         network.execute(() -> {
             try {
-                TomTomApi.Route calculated = new NativeRegionalRouter(this).preview(start,end);
+                TomTomApi.Route calculated = new NativeRegionalRouter(this).preview(start,end,startBearing);
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration || isFinishing()) return;
                     routing = false;
                     // Route updates start from the *current* GPS. Compare only
                     // after confirming the old route is still being followed.
+                    // The decisions live in RouteUpdatePolicy so they are unit tested.
+                    GeoMath.Progress old = null;
+                    boolean confirmedOffRoute = false;
                     if (!firstRoute && active && route != null) {
-                        if (currentLocation == null || !currentLocation.hasAccuracy()
-                                || currentLocation.getAccuracy() > 55
-                                || System.currentTimeMillis() - currentLocation.getTime() > LocationThresholds.GPS_LOST_AFTER_MS) {
-                            setStatus("Uncertain GPS · current route retained");
-                            return;
-                        }
-                        // A route calculated from a GPS point that the driver
-                        // has already left is unsafe to install automatically.
-                        if (GeoMath.distance(gpsPoint(currentLocation), start) > 110) {
-                            setStatus("GPS moved during route update · old route retained");
-                            return;
-                        }
-                        GeoMath.Progress old = GeoMath.project(route.points, start);
+                        old = GeoMath.project(route.points, start);
                         // Same rule as the reroute trigger, so a reroute is not
                         // thrown away as "GPS alignment" noise.
-                        boolean confirmedOffRoute = ReroutePolicy.offRoute(
-                                old.offRouteMetres, currentLocation.getAccuracy());
-                        if (!confirmedOffRoute && old.offRouteMetres > 30) {
-                            setStatus("Checking GPS alignment · previous route retained");
-                            return;
-                        }
-                        if (!confirmedOffRoute) {
-                            boolean different = RouteIntelligence.genuinelyDifferent(
-                                    route.points, old.alongMetres, calculated.points);
-                            double remaining = Math.max(0, route.lengthMetres
-                                    - old.alongMetres);
-                            int oldSeconds = (int) Math.round(
-                                    route.timeSeconds * remaining
-                                            / Math.max(1, route.lengthMetres));
-                            boolean oldFresh = System.currentTimeMillis()
-                                    - route.fetchedAtMs <= 480000;
-                            int saving = oldFresh ? RouteIntelligence.meaningfulSaving(
-                                    oldSeconds, calculated.timeSeconds, different) : 0;
-                            if (different) {
-                                if (saving > 0) {
-                                    if (rerouteMode == 1) {
-                                        showPendingRoute(calculated, start, saving);
-                                        setStatus("Faster route available · choose Switch or Keep");
-                                        return;
-                                    }
-                                    // Automatic mode uses only a *verified*
-                                    // improvement over a recent reference ETA.
-                                } else if (!oldFresh && rerouteMode == 1) {
-                                    // When the old ETA is stale, an alternative
-                                    // is a choice, not an automatically faster
-                                    // route. Never silently switch on that basis.
-                                    showPendingRoute(calculated, start, 0);
-                                    setStatus("Updated route · time saving unverified");
-                                    return;
-                                } else {
-                                    setStatus("Current route retained · no verified time saving");
-                                    return;
-                                }
+                        confirmedOffRoute = currentLocation != null && currentLocation.hasAccuracy()
+                                && ReroutePolicy.offRoute(old.offRouteMetres, currentLocation.getAccuracy());
+                    }
+                    RouteUpdatePolicy.Gate gate = RouteUpdatePolicy.gate(firstRoute, active, route != null,
+                            currentLocation != null && currentLocation.hasAccuracy(),
+                            currentLocation == null ? 0f : currentLocation.getAccuracy(),
+                            currentLocation == null ? Long.MAX_VALUE
+                                    : System.currentTimeMillis() - currentLocation.getTime(),
+                            currentLocation == null ? Double.MAX_VALUE
+                                    : GeoMath.distance(gpsPoint(currentLocation), start),
+                            confirmedOffRoute, old == null ? 0 : old.offRouteMetres);
+                    if (gate == RouteUpdatePolicy.Gate.RETAIN_UNCERTAIN_GPS) {
+                        setStatus("Uncertain GPS · current route retained");
+                        return;
+                    } else if (gate == RouteUpdatePolicy.Gate.RETAIN_GPS_MOVED) {
+                        // A route calculated from a GPS point that the driver
+                        // has already left is unsafe to install automatically.
+                        setStatus("GPS moved during route update · old route retained");
+                        return;
+                    } else if (gate == RouteUpdatePolicy.Gate.RETAIN_ALIGNMENT) {
+                        setStatus("Checking GPS alignment · previous route retained");
+                        return;
+                    } else if (gate == RouteUpdatePolicy.Gate.COMPARE && old != null) {
+                        boolean different = RouteIntelligence.genuinelyDifferent(
+                                route.points, old.alongMetres, calculated.points);
+                        double remaining = Math.max(0, route.lengthMetres - old.alongMetres);
+                        int oldSeconds = (int) Math.round(
+                                route.timeSeconds * remaining / Math.max(1, route.lengthMetres));
+                        boolean oldFresh = System.currentTimeMillis() - route.fetchedAtMs <= 480000;
+                        int saving = oldFresh ? RouteIntelligence.meaningfulSaving(
+                                oldSeconds, calculated.timeSeconds, different) : 0;
+                        double nextManoeuvre = -1;
+                        for (TomTomApi.Instruction step : route.instructions) {
+                            if (step.routeOffsetMetres > old.alongMetres) {
+                                nextManoeuvre = step.routeOffsetMetres - old.alongMetres;
+                                break;
                             }
                         }
+                        RouteUpdatePolicy.Compare verdict = RouteUpdatePolicy.compare(
+                                different, saving, oldFresh, rerouteMode, nextManoeuvre);
+                        if (verdict == RouteUpdatePolicy.Compare.OFFER_FASTER) {
+                            showPendingRoute(calculated, start, saving);
+                            setStatus("Faster route available · choose Switch or Keep");
+                            return;
+                        } else if (verdict == RouteUpdatePolicy.Compare.OFFER_UNVERIFIED) {
+                            // When the old ETA is stale, an alternative is a choice, not an
+                            // automatically faster route. Never silently switch on that basis.
+                            showPendingRoute(calculated, start, 0);
+                            setStatus("Updated route · time saving unverified");
+                            return;
+                        } else if (verdict == RouteUpdatePolicy.Compare.RETAIN_NEAR_MANOEUVRE) {
+                            setStatus("Faster route ignored · next turn is close");
+                            return;
+                        } else if (verdict == RouteUpdatePolicy.Compare.RETAIN_NO_SAVING) {
+                            setStatus("Current route retained · no verified time saving");
+                            return;
+                        }
+                        // INSTALL: automatic mode with a verified improvement, or not genuinely different.
                     }
                     installCalculatedRoute(calculated, firstRoute);
                 });
@@ -3105,8 +3125,14 @@ public final class MainActivity extends Activity implements LocationListener {
                 runOnUiThread(() -> {
                     if (plannedGeneration != requestGeneration) return;
                     routing = false;
+                    boolean coverage = error instanceof DmTileEngine.CoverageException
+                            || String.valueOf(error.getMessage()).contains("regional coverage");
                     if (route != null) {
-                        setStatus("Update failed · following last known route");
+                        if (active) rerouteFailures++;
+                        long retrySeconds = ReroutePolicy.retryGapMs(active ? rerouteFailures : 0) / 1000;
+                        setStatus("Update failed · following last known route"
+                                + (active ? " · retrying in " + retrySeconds + " s" : "")
+                                + (coverage ? " · outside installed regions: download a regional pack" : ""));
                         Toast.makeText(this, "Route update unavailable: " + error.getMessage(),
                                 Toast.LENGTH_LONG).show();
                     } else {
@@ -3139,6 +3165,13 @@ public final class MainActivity extends Activity implements LocationListener {
         setStatus("Chosen faster or updated route ready");
     }
 
+    /** Direction of the route at this distance along it, or NaN when there is no route. */
+    private double routeBearingAt(double along) {
+        if (route == null || route.points.size() < 2) return Double.NaN;
+        return GeoMath.bearingDegrees(GeoMath.pointAtDistance(route.points, Math.max(0, along - 5)),
+                GeoMath.pointAtDistance(route.points, along + 5));
+    }
+
     private void showPendingRoute(TomTomApi.Route candidate, GeoMath.Point origin,
                                   int savingSeconds) {
         pendingRoute = candidate;
@@ -3166,6 +3199,11 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
         clearPendingRoute();
+        rerouteFailures = 0;
+        if (rerouteAnnounced && active) {
+            rerouteAnnounced = false;
+            say("New route found.");
+        }
         route = calculated;
         configureRouteBridge(route);
         lastConfirmedMetricsAt=-1; confirmedEta=confirmedMinutes=confirmedDistance="";
@@ -3314,19 +3352,25 @@ public final class MainActivity extends Activity implements LocationListener {
             offRouteSince=0;
         } else if (ReroutePolicy.offRoute(projected.offRouteMetres, accuracy)) {
             if (offRouteSince == 0) offRouteSince = now;
-            if (ReroutePolicy.confirmed(offRouteSince, now, speedNow)
-                    && ReroutePolicy.mayRequest(now, lastRerouteAttempt, lastRouteRequest)
+            boolean wrongWay = ReroutePolicy.wrongWay(routeBearingAt(projected.alongMetres),
+                    fix.hasBearing() ? fix.getBearing() : Double.NaN, speedNow);
+            if (ReroutePolicy.confirmed(offRouteSince, now, speedNow, wrongWay)
+                    && ReroutePolicy.mayRequest(now, lastRerouteAttempt, lastRouteRequest, rerouteFailures)
                     && !routing) {
                 offRouteSince = 0;
                 lastRerouteAttempt = now;
                 setStatus("Off route · recalculating safely…");
                 suspendPositionGuidance("OFF ROUTE · CHECK ROAD SIGNS","Recalculating your route");
-                say("Recalculating your route.");
+                if (!rerouteAnnounced) {
+                    rerouteAnnounced = true;
+                    say("Recalculating your route.");
+                }
                 planRoute(false);
                 return;
             }
         } else {
             offRouteSince = 0;
+            rerouteAnnounced = false;
         }
 
         if (!matched.confident || System.currentTimeMillis() - fix.getTime() > 10000) {

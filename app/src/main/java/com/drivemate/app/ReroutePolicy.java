@@ -31,8 +31,36 @@ public final class ReroutePolicy {
 
     /** Off route long enough to reroute: 4 s when moving, 8 s when slow or stopped. */
     public static boolean confirmed(long offSinceMs, long nowMs, float speedMps) {
-        long need = Float.isFinite(speedMps) && speedMps >= 3f ? 4_000L : 8_000L;
+        return confirmed(offSinceMs, nowMs, speedMps, false);
+    }
+
+    /** Driving the opposite way along the route is clear sooner: 2 s. */
+    public static final long WRONG_WAY_CONFIRM_MS = 2_000L;
+    public static final double WRONG_WAY_DEGREES = 135;
+
+    public static boolean confirmed(long offSinceMs, long nowMs, float speedMps, boolean wrongWay) {
+        boolean moving = Float.isFinite(speedMps) && speedMps >= 3f;
+        long need = wrongWay && moving ? WRONG_WAY_CONFIRM_MS : moving ? 4_000L : 8_000L;
         return offSinceMs > 0 && nowMs - offSinceMs >= need;
+    }
+
+    /** Travelling against the route direction at speed (e.g. after turning round). Needs a real bearing. */
+    public static boolean wrongWay(double routeBearing, double travelBearing, float speedMps) {
+        if (!Double.isFinite(routeBearing) || !Double.isFinite(travelBearing)
+                || !Float.isFinite(speedMps) || speedMps < 3f) return false;
+        double d = Math.abs(((travelBearing - routeBearing) % 360 + 540) % 360 - 180);
+        return d >= WRONG_WAY_DEGREES;
+    }
+
+    /** Retry gap after repeated failures: 20 s, then 40, 80, capped at 120 s. */
+    public static long retryGapMs(int failures) {
+        if (failures <= 0) return MIN_ATTEMPT_GAP_MS;
+        return Math.min(120_000L, MIN_ATTEMPT_GAP_MS << Math.min(failures, 3));
+    }
+
+    public static boolean mayRequest(long nowMs, long lastAttemptMs, long lastRequestMs, int failures) {
+        return nowMs - lastAttemptMs >= retryGapMs(failures)
+                && nowMs - lastRequestMs >= MIN_REQUEST_GAP_MS;
     }
 
     /** Rate limit so a bad signal can't hammer the routing API. */

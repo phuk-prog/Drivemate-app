@@ -10,13 +10,38 @@ final class NativeRegionalRouter {
     static final String PROVIDER="DriveMate local preview";
     private final Context app;
     NativeRegionalRouter(Context context){app=context.getApplicationContext();}
-    TomTomApi.Route preview(GeoMath.Point from,GeoMath.Point to)throws Exception{
+    /** Counters for the diagnostics report: searches, failures, snap distances, alternatives. */
+    static final RoutingStats STATS=new RoutingStats();
+    TomTomApi.Route preview(GeoMath.Point from,GeoMath.Point to)throws Exception{return preview(from,to,Double.NaN);}
+    /** @param travelBearing car heading so the route starts at a junction ahead of the car, or NaN when unknown */
+    TomTomApi.Route preview(GeoMath.Point from,GeoMath.Point to,double travelBearing)throws Exception{
+        STATS.recordRequest();
+        try{return plan(from,to,travelBearing,null);}
+        catch(Exception failure){
+            String m=String.valueOf(failure.getMessage());
+            STATS.recordFailure(failure instanceof DmTileEngine.CoverageException?"coverage":m.startsWith("No connected route")?"no-route":failure instanceof IOException?"io":"error");
+            throw failure;
+        }
+    }
+    /** A second route over different roads, or an IOException when none is distinct and fast enough. */
+    TomTomApi.Route alternative(GeoMath.Point from,GeoMath.Point to,double travelBearing,TomTomApi.Route primary)throws Exception{
+        if(primary==null||primary.geometryWays.isEmpty())throw new IOException("No primary route to differ from");
+        TomTomApi.Route alt;
+        try{alt=plan(from,to,travelBearing,new HashSet<>(primary.geometryWays));}
+        catch(IOException none){STATS.recordAlternative(false);throw none;}
+        boolean ok=AlternativeRoutes.accept(primary.points,primary.timeSeconds,alt.points,alt.timeSeconds);
+        STATS.recordAlternative(ok);
+        if(!ok)throw new IOException("No distinct alternative route");
+        return alt;
+    }
+    private TomTomApi.Route plan(GeoMath.Point from,GeoMath.Point to,double travelBearing,Set<Long> penalisedWays)throws Exception{
         List<DmUnifiedRegion> candidates=new NativeRegionPacks(app).candidates(from,to);
         Exception last=null;
         for(DmUnifiedRegion region:candidates){
             try{
-                DmTileEngine.Route path=region.engine.route(from,to);
+                DmTileEngine.Route path=region.engine.route(from,to,null,travelBearing,penalisedWays);
                 for(GeoMath.Point p:path.points)if(!region.covers(p))throw new DmTileEngine.CoverageException("Route crosses unverified regional boundary");
+                STATS.recordSuccess(path.expansions,path.ms);
                 return convert(region,path,from,to);
             }catch(DmTileEngine.CoverageException noPath){last=noPath;}
         }
@@ -26,6 +51,7 @@ final class NativeRegionalRouter {
      * Never returns an old path as a successful replacement on missing coverage. */
     TomTomApi.Route reroutePreview(GeoMath.Point from,GeoMath.Point destination)throws Exception{return preview(from,destination);}
     static TomTomApi.Route convert(DmUnifiedRegion region,DmTileEngine.Route path,GeoMath.Point from,GeoMath.Point to)throws Exception{
+        if(path.points.size()>=2)STATS.recordSnap(GeoMath.distance(from,path.points.get(0)),GeoMath.distance(to,path.points.get(path.points.size()-1)));
         if(path.points.size()<2||GeoMath.distance(from,path.points.get(0))>75
                 ||GeoMath.distance(to,path.points.get(path.points.size()-1))>100)
             throw new IOException("Route endpoints too far from verified road nodes");
