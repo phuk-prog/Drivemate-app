@@ -88,6 +88,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private static final long ROUTE_REFRESH_MS = 300_000L;
 
     private final ExecutorService network = Executors.newSingleThreadExecutor();
+    /** Live search suggestions run apart from routing so typing is never queued behind a route calculation. */
+    private final ExecutorService suggestWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService packWorker = Executors.newSingleThreadExecutor();
     private final ExecutorService incidentWorker=Executors.newSingleThreadExecutor();
     private long lastIncidentRequest;
@@ -714,6 +716,7 @@ public final class MainActivity extends Activity implements LocationListener {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence value, int start, int before, int count) {
                 refreshSearchSuggestions();
+                requestTypeahead(value.toString());
             }
             @Override public void afterTextChanged(Editable value) { }
         });
@@ -1680,6 +1683,48 @@ public final class MainActivity extends Activity implements LocationListener {
             }).setNegativeButton("Close",null).show();
         }catch(Exception e){showError("Regional catalog invalid: "+e.getMessage());}
     }
+    /** Downloads and installs one map area on the pack worker, with throttled progress in the status line. */
+    private void installPack(final MapPacks store, final MapPackCatalog.Pack p){
+        if(downloadingLocalPack)return;
+        downloadingLocalPack=true;
+        packWorker.execute(()->{try{
+            final long[] last={0};
+            store.install(p,(done,total)->{long now=SystemClock.elapsedRealtime();
+                if(now-last[0]>1000){last[0]=now;final int pct=(int)(done*100/Math.max(1,total));
+                    runOnUiThread(()->{if(!isFinishing())setStatus("Downloading "+p.name+" · "+pct+"%");});}
+                return !isFinishing();});
+            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus(p.name+" installed · map detail is now offline and fast");});
+        }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage()==null?"Download failed":err.getMessage());});}});
+    }
+
+    private boolean packOfferChecked;
+    /** Once per area: offer the map area around the first GPS fix, because local tiles are far faster than any network. */
+    private void maybeOfferRegionPack(final GeoMath.Point here){
+        if(packOfferChecked||here==null||active||route!=null||downloadingLocalPack||!hasNetwork())return;
+        packOfferChecked=true;
+        final MapPacks store=new MapPacks(this);
+        if(!store.installedFiles().isEmpty())return;
+        packWorker.execute(()->{
+            final MapPackCatalog catalog;
+            try{catalog=store.catalog();}catch(Exception e){return;}
+            List<MapPackCatalog.Pack> near=catalog.forPoint(here.lat,here.lon);
+            if(near.isEmpty())return;
+            final MapPackCatalog.Pack p=near.get(0);
+            final SharedPreferences prefs=getSharedPreferences(PREFS,MODE_PRIVATE);
+            if(prefs.getBoolean("pack_offer_declined_"+p.id,false))return;
+            final boolean metered=((ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE)).isActiveNetworkMetered();
+            runOnUiThread(()->{
+                if(isFinishing()||active||route!=null)return;
+                new AlertDialog.Builder(this).setTitle("Faster maps: download "+p.name+"?")
+                    .setMessage("Download the full-detail map for "+p.name+" ("+(p.bytes/1_000_000L)+" MB) so the map draws instantly and works offline."
+                        +(metered?" You are on mobile data, so Wi-Fi is better.":" You are on Wi-Fi."))
+                    .setPositiveButton("Download",(d,w)->installPack(store,p))
+                    .setNegativeButton("Not now",(d,w)->prefs.edit().putBoolean("pack_offer_declined_"+p.id,true).apply())
+                    .show();
+            });
+        });
+    }
+
     /** Free map areas: pick a region to download full road detail onto the phone (resumable, verified). */
     private void showMapAreas(){
         if(downloadingLocalPack){showError("Wait for the current download to finish.");return;}
@@ -1708,16 +1753,7 @@ public final class MainActivity extends Activity implements LocationListener {
                                 .setNegativeButton("Keep",null).show();
                             return;
                         }
-                        if(downloadingLocalPack)return;
-                        downloadingLocalPack=true;
-                        packWorker.execute(()->{try{
-                            final long[] last={0};
-                            store.install(p,(done,total)->{long now=SystemClock.elapsedRealtime();
-                                if(now-last[0]>1000){last[0]=now;final int pct=(int)(done*100/Math.max(1,total));
-                                    runOnUiThread(()->{if(!isFinishing())setStatus("Downloading "+p.name+" · "+pct+"%");});}
-                                return !isFinishing();});
-                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus(p.name+" installed · map detail is now offline");});
-                        }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage()==null?"Download failed":err.getMessage());});}});
+                        installPack(store,p);
                     }).setNegativeButton("Close",null).show();
             });
         });
@@ -1740,12 +1776,35 @@ public final class MainActivity extends Activity implements LocationListener {
     private List<TomTomApi.Destination> providerSearch(String query,GeoMath.Point near)throws Exception{
         List<TomTomApi.Destination> online=OnlineFirst.search(onlineKey(),query,near,hasNetwork());
         if(online!=null)return online;
-        return new NativeRegionalRouter(this).search(query,near);
+        // Offline: names and places from installed map areas, then the Stockport address/postcode index.
+        List<TomTomApi.Destination> named=packSearch(query,near,new int[]{2,5,9});
+        List<TomTomApi.Destination> addresses;
+        try{addresses=new NativeRegionalRouter(this).search(query,near);}catch(Exception e){addresses=new ArrayList<>();if(named.isEmpty())throw e;}
+        // Anything with a digit is more likely an address or postcode, so that index goes first.
+        boolean addressLike=query.matches(".*[0-9].*");
+        List<TomTomApi.Destination> merged=new ArrayList<>(addressLike?addresses:named);
+        for(TomTomApi.Destination d:(addressLike?named:addresses)){
+            boolean duplicate=false;
+            for(TomTomApi.Destination m:merged)if(GeoMath.distance(m.point,d.point)<30){duplicate=true;break;}
+            if(!duplicate)merged.add(d);
+        }
+        return merged.size()>8?new ArrayList<>(merged.subList(0,8)):merged;
+    }
+    /** Offline name search (places, streets, towns, stops) over the installed map areas. */
+    private List<TomTomApi.Destination> packSearch(String query,GeoMath.Point near,int[] rings){
+        MapPacks store=new MapPacks(this);
+        List<java.io.File> files=store.installedFiles();
+        if(near==null||files.isEmpty())return new ArrayList<>();
+        PackTiles tiles=new PackTiles();
+        try{
+            for(java.io.File f:files)try{tiles.add(f);}catch(java.io.IOException ignored){}
+            return PackSearch.search(tiles,query,near,rings);
+        }finally{tiles.close();}
     }
     /** The saved TomTom key, only when the owner has consented to online search and routing. */
     private String onlineKey(){
-        boolean consent=getSharedPreferences(PREFS,MODE_PRIVATE).getBoolean("incident_enhancement_consent",false);
-        return NativeEnhancementPolicy.enabled(consent,incidentEnhancementKey)?incidentEnhancementKey:"";
+        // A saved key is the owner's opt-in: "Disable" in the key dialog removes it.
+        return NativeEnhancementPolicy.enabled(true,incidentEnhancementKey)?incidentEnhancementKey:"";
     }
     private void requestComparison(){/* Native-only: no external comparison requests. */}
     private void showMapReview(){
@@ -1990,15 +2049,54 @@ public final class MainActivity extends Activity implements LocationListener {
                 }).setNegativeButton("Cancel", null).show();
     }
 
+    private final List<TomTomApi.Destination> onlineSuggestions = new ArrayList<>();
+    private String onlineFor = "";
+    private final Handler typeaheadHandler = new Handler(Looper.getMainLooper());
+    private int typeaheadSeq;
+    private boolean keyTipShown;
+
+    /** Debounced live suggestions from TomTom while the destination is typed. */
+    private void requestTypeahead(String raw) {
+        typeaheadHandler.removeCallbacksAndMessages(null);
+        final String key = onlineKey();
+        final String typed = raw.trim().toLowerCase(Locale.UK);
+        if (typed.length() < 3) return;
+        final boolean online = !key.isEmpty() && hasNetwork();
+        if (key.isEmpty() && !keyTipShown) { keyTipShown = true; setStatus("Tip: add your TomTom key in Settings for faster search and live-traffic routes."); }
+        final int seq = ++typeaheadSeq;
+        final GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
+        typeaheadHandler.postDelayed(() -> suggestWorker.execute(() -> {
+            List<TomTomApi.Destination> result = online ? OnlineFirst.suggest(key, typed, near) : null;
+            // TomTom unavailable or silent: suggest from the installed map areas instead.
+            if (result == null) { List<TomTomApi.Destination> local = packSearch(typed, near, new int[]{2, 4}); if (!local.isEmpty()) result = local; }
+            if (result == null) return;
+            final List<TomTomApi.Destination> found = result;
+            runOnUiThread(() -> {
+                if (isFinishing() || seq != typeaheadSeq || destinationInput == null) return;
+                if (!destinationInput.getText().toString().trim().toLowerCase(Locale.UK).equals(typed)) return;
+                onlineSuggestions.clear();
+                onlineSuggestions.addAll(found);
+                onlineFor = typed;
+                refreshSearchSuggestions();
+                if (destinationInput.hasFocus()) destinationInput.showDropDown();
+            });
+        }), 280);
+    }
+
     private void refreshSearchSuggestions() {
         if (destinationInput == null || places == null) return;
         String text = destinationInput.getText().toString().trim().toLowerCase(Locale.UK);
         suggestionMatches.clear();
         List<String> labels = new ArrayList<>();
-        List<TomTomApi.Destination> candidates = new ArrayList<>(places.favorites());
+        List<TomTomApi.Destination> candidates = new ArrayList<>();
+        final int onlineCount = text.equals(onlineFor) ? onlineSuggestions.size() : 0;
+        if (onlineCount > 0) candidates.addAll(onlineSuggestions);
+        candidates.addAll(places.favorites());
         candidates.addAll(places.recent());
+        int candidateIndex = -1;
         for (TomTomApi.Destination candidate : candidates) {
-            if (!text.isEmpty()
+            candidateIndex++;
+            if (!text.isEmpty() && candidateIndex >= onlineCount
                     && !candidate.toString().toLowerCase(Locale.UK).contains(text)) continue;
             boolean duplicate = false;
             for (TomTomApi.Destination prior : suggestionMatches) {
@@ -2380,6 +2478,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
         if (!placesWarmed) { placesWarmed = true; warmSavedPlaces(); }
+        maybeOfferRegionPack(gpsPoint(fix));
         if (startWhenFix && !active && route != null) {
             startWhenFix = false;
             gpsHandler.removeCallbacks(startWaitTimeout);
@@ -2829,7 +2928,10 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setContentDescription("Cancel route preview");
         stopButton.setVisibility(View.VISIBLE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setStatus(NavigationStartPolicy.previewOnly(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready");
+        setStatus(NavigationStartPolicy.previewOnly(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready"
+                + ("TomTom".equals(calculated.provider) ? " · TomTom live traffic"
+                : onlineKey().isEmpty() ? " · offline route (add TomTom key in Settings)"
+                : OnlineFirst.lastProblem.isEmpty() ? " · offline route" : " · offline route (online: " + OnlineFirst.lastProblem + ")"));
     }
 
     private void startNavigation() {

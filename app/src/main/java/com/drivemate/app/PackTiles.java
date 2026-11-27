@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Serves tiles from installed full-detail packs. tile() returns null when no pack covers the tile. */
-public final class PackTiles implements java.io.Closeable {
+public final class PackTiles implements java.io.Closeable, PackSearch.Tiles {
     private static final class Open {
         final PmTilesReader reader; final RandomAccessFile file;
         Open(PmTilesReader r, RandomAccessFile f) { reader = r; file = f; }

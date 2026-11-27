@@ -37,4 +37,15 @@ final class OnlineFirst {
             return null;
         }
     }
+
+    /** Live suggestions for a partly typed query; null on any failure. */
+    static List<TomTomApi.Destination> suggest(String key, String query, GeoMath.Point near) {
+        if (!usable(key)) return null;
+        try {
+            List<TomTomApi.Destination> found = TomTomApi.search(key, query, near, true, 6);
+            return found == null || found.isEmpty() ? null : found;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }
