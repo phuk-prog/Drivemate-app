@@ -110,8 +110,8 @@ public final class MainActivity extends Activity implements LocationListener {
                     clearLiveIncidents();
                     if(active)suspendPositionGuidance("GPS LOST · WAIT FOR SIGNAL","Waiting for a fresh position");
                     else if(freeDriving)clearFreeRoadContext();
-                    if (speedText != null) speedText.setText("GPS —");
-                    if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
+                    if (speedCluster != null) { speedCluster.setNoSpeed(); speedCluster.setLevel(SpeedClusterPolicy.Level.NORMAL); speedLevel.reset(); }
+                    if (speedCluster != null) speedCluster.setLimit(-1);
                     if (upcomingSpeedText != null) upcomingSpeedText.setVisibility(View.GONE);
                     if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
                     if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
@@ -302,8 +302,13 @@ public final class MainActivity extends Activity implements LocationListener {
     private TextView gpsAccuracyText;
     private TextView distanceText;
     private TextView etaText;
-    private TextView speedText;
-    private TextView speedLimitText;
+    private SpeedClusterView speedCluster;
+    /** Street-name pill under the car, as in Waze; empty name hides it. */
+    private TextView currentRoadPill;
+    private FrameLayout.LayoutParams currentRoadPos;
+    private CurrentRoad currentRoad = CurrentRoad.EMPTY;
+    private TomTomApi.Route currentRoadRoute;
+    private final SpeedClusterPolicy speedLevel = new SpeedClusterPolicy();
     private LaneGuidanceView laneGuidanceText;
     private NavigationMatch navigationMatch;
     private final MapReview mapReview = new MapReview();
@@ -794,7 +799,7 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.addView(details, detailsPos);
         // ETA, journey duration and distance belong at the bottom while driving,
         // leaving the road and the next manoeuvre unobstructed above.
-        navigationPanel.addView(tripMetricsRow, new LinearLayout.LayoutParams(-1, dp(57)));
+        navigationPanel.addView(tripMetricsRow, new LinearLayout.LayoutParams(-1, -2));
         tripMetricsRow.setVisibility(View.GONE);
         rerouteSuggestionRow = new LinearLayout(this);
         rerouteSuggestionRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -964,34 +969,27 @@ public final class MainActivity extends Activity implements LocationListener {
         // Current speed in a dark circle, with the posted limit as a UK-style
         // red roundel on its top-right edge. The roundel only appears when the
         // mapped limit is known; there is no "Limit —" placeholder.
-        FrameLayout speedCluster = new FrameLayout(this);
-        LinearLayout speedBadge = new LinearLayout(this);
-        speedBadge.setOrientation(LinearLayout.VERTICAL);
-        speedBadge.setGravity(Gravity.CENTER);
-        GradientDrawable speedBackground = rounded(DARK, 100);
-        speedBackground.setStroke(dp(3), CYAN);
-        speedBadge.setBackground(speedBackground);
-        speedBadge.setElevation(dp(6));
-        speedText = text(metricUnits ? "0 km/h" : "0 mph", 17, Color.WHITE, true);
-        speedText.setGravity(Gravity.CENTER);
-        speedBadge.addView(speedText);
-        speedCluster.addView(speedBadge,
-                new FrameLayout.LayoutParams(dp(84), dp(84), Gravity.BOTTOM | Gravity.LEFT));
-        speedLimitText = text("", 16, Color.BLACK, true);
-        speedLimitText.setGravity(Gravity.CENTER);
-        GradientDrawable roundel = new GradientDrawable();
-        roundel.setShape(GradientDrawable.OVAL);
-        roundel.setColor(Color.WHITE);
-        roundel.setStroke(dp(4), Color.rgb(214, 40, 40));
-        speedLimitText.setBackground(roundel);
-        speedLimitText.setElevation(dp(7));
-        speedLimitText.setVisibility(View.GONE);
-        speedCluster.addView(speedLimitText,
-                new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.TOP | Gravity.RIGHT));
-        speedBadgePos = new FrameLayout.LayoutParams(dp(112), dp(104), Gravity.BOTTOM | Gravity.LEFT);
+        // Layout A: one fixed cluster, bottom-left, 12 dp above the bottom panel.
+        speedCluster = new SpeedClusterView(this);
+        speedCluster.setSpeed(0, metricUnits);
+        speedCluster.setElevation(dp(6));
+        speedBadgePos = new FrameLayout.LayoutParams(dp(SpeedClusterView.WIDTH_DP), dp(SpeedClusterView.HEIGHT_DP), Gravity.BOTTOM | Gravity.LEFT);
         speedBadgePos.leftMargin = dp(12);
         frame.addView(speedCluster, speedBadgePos);
         speedBadgeView = speedCluster;
+        currentRoadPill = text("", 17, Color.WHITE, true);
+        currentRoadPill.setGravity(Gravity.CENTER);
+        currentRoadPill.setSingleLine(true);
+        currentRoadPill.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        currentRoadPill.setBackground(rounded(Color.rgb(8, 18, 28), 24));
+        currentRoadPill.setPadding(dp(18), dp(8), dp(18), dp(8));
+        currentRoadPill.setElevation(dp(6));
+        currentRoadPill.setVisibility(View.GONE);
+        currentRoadPos = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        // Clear of the speed cluster (left) and the recentre button (right).
+        currentRoadPos.leftMargin = dp(116);
+        currentRoadPos.rightMargin = dp(84);
+        frame.addView(currentRoadPill, currentRoadPos);
 
         followButton = chip("◎");
         followButton.setContentDescription("Centre map on my GPS position");
@@ -1038,6 +1036,10 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.addOnLayoutChangeListener((view, l3, t3, r3, b3, ol3, ot3, or3, ob3) -> {
             if (homeMode || speedBadgePos == null || gpsButtonPos == null) return;
             int above = (b3 - t3) + dp(19);
+            if (currentRoadPos != null && currentRoadPos.bottomMargin != above) {
+                currentRoadPos.bottomMargin = above;
+                if (currentRoadPill != null) currentRoadPill.requestLayout();
+            }
             if (speedBadgePos.bottomMargin != above || gpsButtonPos.bottomMargin != above) {
                 speedBadgePos.bottomMargin = above;
                 gpsButtonPos.bottomMargin = above;
@@ -1080,13 +1082,33 @@ public final class MainActivity extends Activity implements LocationListener {
         container.setOrientation(LinearLayout.VERTICAL);
         container.setElevation(dp(7));
 
+        // Waze-style trip summary: one big arrival time, minutes · distance small underneath.
         LinearLayout metrics = new LinearLayout(this);
-        metrics.setGravity(Gravity.CENTER_VERTICAL);
-        metrics.setPadding(dp(7), dp(5), dp(7), dp(5));
+        metrics.setOrientation(LinearLayout.VERTICAL);
+        metrics.setGravity(Gravity.CENTER);
+        metrics.setPadding(dp(7), dp(3), dp(7), dp(3));
         metrics.setBackground(rounded(DARK, 14));
-        tripEtaValue = addDrivingMetric(metrics, "ETA");
-        tripMinutesValue = addDrivingMetric(metrics, "MIN LEFT");
-        tripDistanceValue = addDrivingMetric(metrics, "DISTANCE LEFT");
+        TextView etaCaption = text("ETA", 10, Color.rgb(189, 220, 230), true);
+        etaCaption.setGravity(Gravity.CENTER);
+        etaCaption.setVisibility(View.GONE);   // shown only for PLAN / LAST values
+        metrics.addView(etaCaption);
+        tripMetricCaptions.add(etaCaption);
+        tripEtaValue = text("—", 26, Color.WHITE, true);
+        tripEtaValue.setGravity(Gravity.CENTER);
+        tripEtaValue.setSingleLine(true);
+        metrics.addView(tripEtaValue);
+        LinearLayout small = new LinearLayout(this);
+        small.setGravity(Gravity.CENTER);
+        tripMinutesValue = text("—", 15, Color.WHITE, false);
+        small.addView(tripMinutesValue);
+        TextView dot = text("  •  ", 15, Color.rgb(140, 160, 175), false);
+        small.addView(dot);
+        tripDistanceValue = text("—", 15, Color.WHITE, false);
+        small.addView(tripDistanceValue);
+        metrics.addView(small);
+        // Captions for minutes and distance are not shown; kept so labels can still be set.
+        tripMetricCaptions.add(text("MIN LEFT", 10, Color.WHITE, true));
+        tripMetricCaptions.add(text("DISTANCE LEFT", 10, Color.WHITE, true));
         tripMetricsRow = metrics;
 
         LinearLayout turnCard = new LinearLayout(this);
@@ -1103,6 +1125,8 @@ public final class MainActivity extends Activity implements LocationListener {
         topTurnTitle.setLetterSpacing(0.08f);
         topTurnTitle.setSingleLine(true);
         topTurnTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        // Shown only for status (GPS lost etc.); a manoeuvre needs no category label.
+        topTurnTitle.setVisibility(View.GONE);
         turnCard.addView(topTurnTitle);
 
         LinearLayout content = new LinearLayout(this);
@@ -1197,6 +1221,9 @@ public final class MainActivity extends Activity implements LocationListener {
         arrivalHintText.setMaxLines(2);
         arrivalRow.addView(arrivalHintText, new LinearLayout.LayoutParams(0, -2, 1));
         findParkingButton = chip("🅿 Parking");
+        // Full colour like Waze's: it should never look disabled.
+        findParkingButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(CYAN));
+        findParkingButton.setTextColor(DARK);
         findParkingButton.setContentDescription("Find verified parking near destination while stopped");
         findParkingButton.setOnClickListener(v -> findNearbyParking());
         arrivalRow.addView(findParkingButton, new LinearLayout.LayoutParams(dp(98), dp(38)));
@@ -1205,24 +1232,6 @@ public final class MainActivity extends Activity implements LocationListener {
         container.addView(arrivalRow, new LinearLayout.LayoutParams(-1, dp(48)));
         arrivalHintText.setTag(arrivalRow);
         return container;
-    }
-
-    private TextView addDrivingMetric(LinearLayout row, String label) {
-        LinearLayout cell = new LinearLayout(this);
-        cell.setOrientation(LinearLayout.VERTICAL);
-        cell.setGravity(Gravity.CENTER);
-        TextView caption = text(label, 10, Color.rgb(189, 220, 230), true);
-        caption.setGravity(Gravity.CENTER);
-        cell.addView(caption);
-        tripMetricCaptions.add(caption);
-        TextView number = text("—", 21, Color.WHITE, true);
-        number.setGravity(Gravity.CENTER);
-        number.setSingleLine(true);
-        number.setAutoSizeTextTypeUniformWithConfiguration(
-                13, 21, 1, android.util.TypedValue.COMPLEX_UNIT_SP);
-        cell.addView(number);
-        row.addView(cell, new LinearLayout.LayoutParams(0, -1, 1));
-        return number;
     }
 
     private GradientDrawable drivingCard(int radius){
@@ -1270,7 +1279,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (laneGuidanceText != null) laneGuidanceText.setVisibility(View.GONE);
             if (trafficNoticeText != null) trafficNoticeText.setVisibility(View.GONE);
             if (rerouteSuggestionRow != null) rerouteSuggestionRow.setVisibility(View.GONE);
-            if (speedLimitText != null) speedLimitText.setVisibility(View.GONE);
+            if (speedCluster != null) speedCluster.setLimit(-1);
         }
         if (searchBar != null)
             searchBar.setVisibility(navigating ? View.GONE : View.VISIBLE);
@@ -1329,6 +1338,8 @@ public final class MainActivity extends Activity implements LocationListener {
             speedBadgeView.setVisibility(keyboardOpen || (!active&&!freeDriving) || (show&&!freeDriving)
                     ? View.GONE : View.VISIBLE);
         }
+        if (currentRoadPill != null && (keyboardOpen || !active || show))
+            currentRoadPill.setVisibility(View.GONE);
         if (followButton != null) {
             followButton.setVisibility(keyboardOpen ? View.GONE : View.VISIBLE);
             updateFollowButton();
@@ -1533,8 +1544,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("metric_units", metricUnits).apply();
                             if (currentLocation != null) {
-                                speedText.setText(NavigationUnits.displaySpeed(
-                                        currentLocation.getSpeed(), metricUnits));
+                                speedCluster.setSpeed(currentLocation.getSpeed(), metricUnits);
                                 if (active) updateGuidance(currentLocation);
                             }
                             if (route != null && !active) showPreview(route);
@@ -1988,6 +1998,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 && (vectorMap == null || vectorMap.nightMode() == night)) return;
         nightDisplay = night;
         themeApplied = true;
+        if (speedCluster != null) speedCluster.setNight(night);
         boolean vectorStyleChanging = vectorMap != null && vectorMap.nightMode() != night;
         if (vectorStyleChanging) {
             // Keep the validated raster map visible while the next MapLibre
@@ -2515,7 +2526,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         float filteredSpeed = fix.hasSpeed() && fix.getSpeed() >= 0.9f
                 ? fix.getSpeed() : 0f;
-        speedText.setText(NavigationUnits.displaySpeed(filteredSpeed, metricUnits));
+        speedCluster.setSpeed(filteredSpeed, metricUnits);
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
             setStatus((freeDriving?"Free driving · road limits not verified · GPS ±":"GPS ready · accuracy ±") + Math.round(fix.getAccuracy()) + " m"
                     + satelliteSuffix());
@@ -2600,7 +2611,7 @@ public final class MainActivity extends Activity implements LocationListener {
         freeContextGeneration++;freeContextBusy=false;freeContextRequestedAt=0;freeRoadContext=null;
         freeRoadMatch.reset();freeLastLimit=-1;freeLastLimitAt=0;freeAdvanceNode=-1;freeContextEndpoint="";
         if(vectorMap!=null)vectorMap.setBrowseGeometry(null);
-        if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
+        if(speedCluster!=null)speedCluster.setLimit(-1);
     }
     private void updateFreeRoadIntelligence(Location fix){
         GeoMath.Point point=gpsPoint(fix);
@@ -2635,13 +2646,12 @@ public final class MainActivity extends Activity implements LocationListener {
             catch(Exception ignored){freeRoadMatch.reset();}
         }else freeRoadMatch.reset();
         if(match==null){
-            speedLimitText.setVisibility(View.GONE);speedText.setTextColor(Color.WHITE);
+            speedCluster.setLimit(-1);speedCluster.setLevel(SpeedClusterPolicy.Level.NORMAL);speedLevel.reset();
             if(now-freeLastLimitAt>10000)freeLastLimit=-1;
             return;
         }
         int shown=metricUnits?match.kmh:(int)Math.round(match.kmh/1.609344);
-        speedLimitText.setText(String.valueOf(shown));speedLimitText.setVisibility(View.VISIBLE);
-        speedLimitText.setContentDescription("Mapped speed limit "+shown+(metricUnits?" km/h":" mph")+". Check road signs.");
+        speedCluster.setLimit(shown);
         String status="Free driving · mapped limit "+shown+(metricUnits?" km/h":" mph")+(match.name.isEmpty()?"":" · "+match.name);
         FreeDriveRoadMatch.Upcoming next=null;
         try{next=FreeDriveRoadMatch.upcoming(freeRoadContext.ways,match,point,fix.getSpeed(),freeRoadContext.bounds);}catch(Exception ignored){}
@@ -2656,7 +2666,7 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         setStatus(status);
         boolean speeding=fix.getSpeed()*2.2369362921>match.kmh/1.609344+speedToleranceMph;
-        speedText.setTextColor(speeding?Color.rgb(255,197,85):Color.WHITE);
+        speedCluster.setLevel(speedLevel.update(SpeedClusterPolicy.classify(fix.getSpeed()*(metricUnits?3.6:2.2369362921),shown,SpeedClusterPolicy.tolerance(speedToleranceMph,metricUnits)),SystemClock.elapsedRealtime()));
         if(speeding&&speedWarningEnabled&&speechReady&&speech!=null&&!speech.isSpeaking()
             &&(lastSpeedWarningAt==0||now-lastSpeedWarningAt>120000)){
             lastSpeedWarningAt=now;sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",true);
@@ -2737,6 +2747,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? topMapOverlay.getHeight() + dp(5) : dp(140);
         int bottomPanelHeight = navigationPanel.getHeight() > 0
                 ? navigationPanel.getHeight() + dp(18) : dp(95);
+        // The speed cluster floats above the panel: the vehicle must never sit under it.
+        if (speedBadgeView != null && speedBadgeView.getVisibility() == View.VISIBLE)
+            bottomPanelHeight += dp(SpeedClusterView.HEIGHT_DP) + dp(10);
         double along = stabilizedAlong < 0 ? progress.alongMetres : stabilizedAlong;
         float velocity = fix.hasSpeed() ? fix.getSpeed() : 0f;
         NavigationCamera.Frame target = NavigationCamera.calculate(
@@ -2746,26 +2759,17 @@ public final class MainActivity extends Activity implements LocationListener {
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
-        double remaining=Math.max(0,GeoMath.length(route.points)-along);
-        boolean shortTrip=RoadTestDisplayPolicy.wideApproach(remaining,nextJunctionOffsetMetres-along)
-                && highlightedJunctionIndex<0 && (!closeZoom||nextJunctionOffsetMetres-along>420);
+        // No whole-trip zoom-out: the speed-based view and junction framing decide the zoom.
         List<GeoMath.Point> cameraContext=junctionFramePoints;
-        if(shortTrip){
-            cameraContext=new ArrayList<>();
-            for(int i=0;i<=8;i++)cameraContext.add(GeoMath.pointAtDistance(route.points,along+remaining*i/8.0));
-            double centerAlong=along+remaining*.40;
-            GeoMath.Point center=GeoMath.pointAtDistance(route.points,centerAlong);
-            target=new NavigationCamera.Frame(center,target.zoom,target.roadBearingDegrees,target.junctionMetres,centerAlong,Math.min(38,target.tiltDegrees));
-        }
         if (vectorMap != null && showingVector()) {
             double distance = nextJunctionOffsetMetres-along;
             GeoMath.Point junction = distance >= 0 && distance <= Math.max(480,velocity*8+100)
                     ? GeoMath.pointAtDistance(route.points,nextJunctionOffsetMetres) : null;
             vectorMap.setFollowViewport(headerHeight,bottomPanelHeight,junction,
-                    shortTrip?cameraContext:distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
+                    distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
         }
         boolean frameJunction=!junctionFramePoints.isEmpty()&&target.junctionMetres<=260;
-        double fittedZoom=(frameJunction||shortTrip)?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,vectorMap.view().getWidth(),vectorMap.view().getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
+        double fittedZoom=frameJunction?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,vectorMap.view().getWidth(),vectorMap.view().getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
         target = new NavigationCamera.Frame(target.center, fittedZoom,
                 target.roadBearingDegrees, target.junctionMetres,
                 target.cameraCenterAlongMetres,
@@ -2915,7 +2919,7 @@ public final class MainActivity extends Activity implements LocationListener {
         distanceText.setText("Distance: " + NavigationUnits.displayDistance(
                 calculated.lengthMetres, metricUnits));
         journeyTimeText.setText("Drive: " + NavigationUnits.duration(calculated.timeSeconds));
-        etaText.setText("ETA: " + new SimpleDateFormat("HH:mm", Locale.UK)
+        etaText.setText("ETA: " + clockFormat()
                 .format(new Date(System.currentTimeMillis()
                         + calculated.timeSeconds * 1000L)));
         startButton.setVisibility(NavigationStartPolicy.previewOnly(calculated.provider)?View.GONE:View.VISIBLE);
@@ -2960,7 +2964,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setHomeVisible(false);
         followLocation = true;
         updateFollowButton();
-        topTurnTitle.setText("NEXT TURN");
+        topTurnTitle.setVisibility(View.GONE);
         maneuverIcon.setVisibility(View.VISIBLE);
         nextTurnText.setVisibility(View.GONE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -3051,7 +3055,7 @@ public final class MainActivity extends Activity implements LocationListener {
         updateFollowButton();
         destinationInput.setText(selected.title, false);
         destinationInput.dismissDropDown();
-        if(vectorMap!=null)vectorMap.setDestination(selected.point);
+        if(vectorMap!=null){vectorMap.setDestination(selected.point);vectorMap.setDestinationLabel(selected.title);}
         planRoute(true);
     }
 
@@ -3074,25 +3078,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 : ArrivalPolicy.sideLabel(
                         route.instructions.get(route.instructions.size() - 1).maneuver);
         boolean nearby = state == ArrivalPolicy.State.NEARBY;
-        String label = side != null
-                ? side + (nearby ? " · slow down" : " · follow final road")
-                : nearby ? "Destination nearby · slow down and check access"
-                        : "Destination ahead · follow final road";
-        if (destination.mainEntrance != null)
-            label += "\nMap-listed entrance marked · verify access";
-        else
-            label += side != null ? "\nEntrance not verified · check access"
-                    : "\nEntrance and correct road side not verified";
+        // One calm line, as in Waze; access caveats live in the route summary, not here.
+        String place = destination.title == null || destination.title.trim().isEmpty()
+                ? "your destination" : destination.title.trim();
+        String label = "Arriving at " + place + (side != null ? " · " + side.replace("Destination ", "") : "");
         arrivalHintText.setText(label);
         panel.setVisibility(View.VISIBLE);
-        // The parking lookup is offered only when the driver is stationary.
-        boolean parked = currentLocation != null && currentLocation.hasSpeed()
-                && currentLocation.getSpeed() <= 1.2f
-                && System.currentTimeMillis() - currentLocation.getTime() <= 7000;
-        findParkingButton.setEnabled(parked);
+        findParkingButton.setEnabled(true);
         // Parking search belongs to the very end of the journey.
         findParkingButton.setVisibility(nearby ? View.VISIBLE : View.GONE);
-        findParkingButton.setAlpha(parked ? 1f : 0.45f);
+        findParkingButton.setAlpha(1f);
     }
 
     /** Parking information is requested only on demand and never guessed. */
@@ -3483,7 +3478,8 @@ public final class MainActivity extends Activity implements LocationListener {
         if(wasConfirmed&&speech!=null)speech.stop();
         if(vectorMap!=null)vectorMap.clearCurrentRoad();
         if(repeatButton!=null)repeatButton.setEnabled(false);
-        if(topTurnTitle!=null)topTurnTitle.setText(title);
+        if(topTurnTitle!=null){topTurnTitle.setText(title);topTurnTitle.setVisibility(View.VISIBLE);}
+        if(currentRoadPill!=null)currentRoadPill.setVisibility(View.GONE);
         if(topInstructionText!=null)topInstructionText.setText(reason);
         if(topRoadText!=null)topRoadText.setVisibility(View.GONE);
         if(lanePromptText!=null)lanePromptText.setVisibility(View.GONE);
@@ -3492,6 +3488,7 @@ public final class MainActivity extends Activity implements LocationListener {
         boolean recent=RoadTestDisplayPolicy.retainMetrics(lastConfirmedMetricsAt,SystemClock.elapsedRealtime());
         if(recent&&tripMetricCaptions.size()>=3){
             tripMetricCaptions.get(0).setText("LAST ETA");
+            tripMetricCaptions.get(0).setVisibility(View.VISIBLE);
             tripMetricCaptions.get(1).setText("LAST MIN");
             tripMetricCaptions.get(2).setText("LAST DIST");
         }
@@ -3502,7 +3499,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(topDistanceText!=null)topDistanceText.setVisibility(View.GONE);
         if(topNextTurnText!=null)topNextTurnText.setVisibility(View.GONE);
         if(laneGuidanceText!=null)laneGuidanceText.setVisibility(View.GONE);
-        if(speedLimitText!=null)speedLimitText.setVisibility(View.GONE);
+        if(speedCluster!=null)speedCluster.setLimit(-1);
         if(trafficNoticeText!=null)trafficNoticeText.setVisibility(View.GONE);
         if(upcomingSpeedText!=null)upcomingSpeedText.setVisibility(View.GONE);
         if(upcomingRoadsideText!=null)upcomingRoadsideText.setVisibility(View.GONE);
@@ -3516,6 +3513,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void setTripMetricLabels(boolean planned){
         if(tripMetricCaptions.size()>=3){
             tripMetricCaptions.get(0).setText(planned?"PLAN ETA":"ETA");
+            tripMetricCaptions.get(0).setVisibility(planned?View.VISIBLE:View.GONE);
             tripMetricCaptions.get(1).setText(planned?"PLAN MIN":"MIN LEFT");
             tripMetricCaptions.get(2).setText(planned?"PLAN DIST":"DISTANCE LEFT");
         }
@@ -3523,7 +3521,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void showJoiningRoute(Location fix,long now){
         suspendPositionGuidance("JOIN HIGHLIGHTED ROUTE","GPS ready · join the route using road signs");
         joiningRoute=true;setTripMetricLabels(true);
-        String eta=new SimpleDateFormat("HH:mm",Locale.UK).format(new Date(System.currentTimeMillis()+route.timeSeconds*1000L));
+        String eta=clockFormat().format(new Date(System.currentTimeMillis()+route.timeSeconds*1000L));
         tripEtaValue.setText(eta);tripEtaValue.setContentDescription("Planned ETA after joining road "+eta);
         tripMinutesValue.setText(TripHeaderFormat.minutesLeft(route.timeSeconds));
         tripMinutesValue.setContentDescription("Planned driving time after joining route");
@@ -3636,7 +3634,7 @@ public final class MainActivity extends Activity implements LocationListener {
         distanceText.setText("Left: " + NavigationUnits.displayDistance(leftMetres, metricUnits));
         long seconds = GuidanceLogic.remainingSeconds(leftMetres, route.lengthMetres,
                 route.timeSeconds, observedSpeed);
-        String etaClock = new SimpleDateFormat("HH:mm", Locale.UK)
+        String etaClock = clockFormat()
                 .format(new Date(System.currentTimeMillis() + seconds * 1000L));
         journeyTimeText.setText("Time: " + NavigationUnits.duration(seconds));
         etaText.setText("ETA: " + etaClock);
@@ -3730,20 +3728,21 @@ public final class MainActivity extends Activity implements LocationListener {
         String sign=step.signpost==null?"":step.signpost.trim();
         verifiedJunctionRoad.setText("SIGNS · "+sign);
         verifiedJunctionRoad.setVisibility(!sign.isEmpty() && untilTurn<=DrivingDisplayPolicy.signpostHorizon(speedNow)?View.VISIBLE:View.GONE);
-        topTurnTitle.setText(junctionKind.title);
+        topTurnTitle.setVisibility(View.GONE);
+        updateCurrentRoadPill(along, next > 0 ? route.instructions.get(next - 1).street : "");
         int iconSide = dp(getResources().getConfiguration().screenWidthDp<360 ? 60 : 68);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
             android.view.ViewGroup.LayoutParams iconParams = topTurnArrow.getLayoutParams();
             iconParams.width = iconSide; iconParams.height = iconSide;
             topTurnArrow.setLayoutParams(iconParams);
         }
-        instructionText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits)+" · "+direction);
+        instructionText.setText(NavigationUnits.turnDistance(untilTurn, metricUnits)+" · "+direction);
         boolean compactCard=DisplayScreenPolicy.compact(getResources().getConfiguration().screenHeightDp,getResources().getConfiguration().fontScale);
         topDistanceText.setTextSize(compactCard?30:38);
         topInstructionText.setTextSize(compactCard?19:23);
         topRoadText.setTextSize(compactCard?16:18);
         topRoadText.setMaxLines(compactCard?1:2);
-        topDistanceText.setText(NavigationUnits.displayDistance(untilTurn, metricUnits));
+        topDistanceText.setText(NavigationUnits.turnDistance(untilTurn, metricUnits));
         topDistanceText.setVisibility(View.VISIBLE);
         topInstructionText.setText(DrivingRoadLabel.highlight(action));
         topRoadText.setText(DrivingRoadLabel.highlight(road));
@@ -3759,7 +3758,9 @@ public final class MainActivity extends Activity implements LocationListener {
             String afterGlyph=JunctionIntelligence.glyph(after,JunctionIntelligence.classify(after.maneuver,after.junctionType));
             int afterExit="↻".equals(afterGlyph)?JunctionFraming.reportedExit(after.exitNumber):0;
             String followingTurn=IntelligentGuidance.thenLine(after,gap,metricUnits);
-            boolean showThen=JunctionIntelligence.showFollowing(untilTurn,gap,speedNow,
+            // "Exit the roundabout" after the roundabout card repeats what the card already says.
+            boolean repeatsRoundabout=roundabout&&"ROUNDABOUT_EXIT".equals(after.maneuver);
+            boolean showThen=!repeatsRoundabout&&JunctionIntelligence.showFollowing(untilTurn,gap,speedNow,
                     getResources().getConfiguration().screenHeightDp,
                     laneGuidanceText.getVisibility()==View.VISIBLE||verifiedJunctionRoad.getVisibility()==View.VISIBLE);
             if(showThen&&junctionPathView!=null)junctionPathView.setVisibility(View.GONE);
@@ -3814,6 +3815,18 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         announceEnteredSpeed(untilTurn,along);
     }
+    private void updateCurrentRoadPill(double along, String lastStreet) {
+        if (currentRoadPill == null) return;
+        if (route != currentRoadRoute) {
+            currentRoadRoute = route;
+            currentRoad = route == null ? CurrentRoad.EMPTY
+                    : CurrentRoad.of(route.points, route.geometryWays, route.nativeScene);
+        }
+        String name = active && !gpsLost ? CurrentRoad.label(currentRoad.at(along), lastStreet) : "";
+        if (!name.contentEquals(currentRoadPill.getText())) currentRoadPill.setText(name);
+        currentRoadPill.setContentDescription(name.isEmpty() ? null : "Current road " + name);
+        currentRoadPill.setVisibility(name.isEmpty() ? View.GONE : View.VISIBLE);
+    }
     private String linkedSpeedSpeech(String phrase,SpeedChangeAwareness.Change change){
         return !phrase.isEmpty()&&speechReady&&speech!=null&&speedChangeAwareness.shouldAnnounce(change)?phrase:"";
     }
@@ -3856,24 +3869,29 @@ public final class MainActivity extends Activity implements LocationListener {
         else speedChangeAwareness.clearEntry();
         boolean speeding = limit != null && fix.hasSpeed()
                 && RouteIntelligence.overspeed(fix.getSpeed(), limit, speedToleranceMph);
-        if (speedLimitText != null) {
-            if (limit == null) {
-                // No placeholder: an empty "Limit —" looks like a fault.
-                speedLimitText.setVisibility(View.GONE);
-            } else {
-                int shown = metricUnits ? limit.kmh
-                        : (int) Math.round(limit.kmh / 1.609344);
-                String label = shown + (metricUnits ? " km/h" : " mph");
-                speedLimitText.setText(String.valueOf(shown));
-                speedLimitText.setContentDescription("Mapped speed limit " + label
-                        + ". Road signs take precedence.");
-                speedLimitText.setVisibility(View.VISIBLE);
-            }
+        int shownLimit = limit == null ? -1 : metricUnits ? limit.kmh
+                : (int) Math.round(limit.kmh / 1.609344);
+        if (speedCluster != null) {
+            // No placeholder: an unknown limit hides the roundel rather than guessing.
+            speedCluster.setLimit(shownLimit);
+            speedCluster.setLevel(speedLevel.update(SpeedClusterPolicy.classify(
+                    fix.hasSpeed() ? fix.getSpeed() * (metricUnits ? 3.6 : 2.2369362921) : Double.NaN,
+                    shownLimit, SpeedClusterPolicy.tolerance(speedToleranceMph, metricUnits)),
+                    SystemClock.elapsedRealtime()));
         }
         SpeedChangeAwareness.Change change = confident && !gpsLost && guidancePositionConfirmed
                 ? SpeedChangeAwareness.next(route.speedSections, limit, along, fix.hasSpeed()?fix.getSpeed():0)
                 : null;
+        if (speedCluster != null) {
+            // The next limit shows as a small roundel beside the current one, within ~200 yd.
+            double changeAhead = change == null ? Double.NaN : change.offset - along;
+            if (change == null || !(changeAhead >= 0 && changeAhead <= 185)) speedCluster.setUpcoming(-1, "");
+            else speedCluster.setUpcoming(metricUnits ? change.kmh : (int) Math.round(change.kmh / 1.609344),
+                    NavigationUnits.turnDistance(changeAhead, metricUnits));
+        }
         if (upcomingSpeedText != null) {
+            // The text banner is replaced by the cluster's second roundel; voice is unchanged.
+            upcomingSpeedText.setVisibility(View.GONE);
             if (change == null) upcomingSpeedText.setVisibility(View.GONE);
             else {
                 int shown = metricUnits ? change.kmh : (int)Math.round(change.kmh / 1.609344);
@@ -3881,7 +3899,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 String changeLabel=change.kmh<limit.kmh?"Limit reduces to ":"Limit increases to ";
                 upcomingSpeedText.setText(changeLabel+shown+(metricUnits?" km/h":" mph")
                         +(atTurn?" at the turn":" ahead · "+NavigationUnits.displayDistance(change.offset-along,metricUnits)));
-                upcomingSpeedText.setVisibility(View.VISIBLE);
                 // Defer to a close turn; do not mark as spoken until eligible.
                 if (advanceSpeedVoice && voiceMode!=DrivingVoicePolicy.SILENT && speechAvailable()
                         && (!atTurn||voiceMode==DrivingVoicePolicy.ALERTS_ONLY)
@@ -3892,7 +3909,6 @@ public final class MainActivity extends Activity implements LocationListener {
                 }
             }
         }
-        speedText.setTextColor(speeding ? Color.rgb(255, 197, 85) : Color.WHITE);
         long now = SystemClock.elapsedRealtime();
         if (speeding && speedWarningEnabled && (speech==null||!speech.isSpeaking()) && distanceToTurn > 300
                 && (lastSpeedWarningAt == 0 || now - lastSpeedWarningAt > 120000)) {
@@ -3905,6 +3921,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 && route.nativeScene!=null && age<=480000
                 ? RouteRoadsideAwareness.next(route.nativeScene.routeRoadside,along,fix.hasSpeed()?fix.getSpeed():0)
                 : null;
+        // Hazards beyond the next manoeuvre wait until it is done: one thing at a time.
+        if(roadside!=null&&Double.isFinite(distanceToTurn)&&roadside.offset-along>distanceToTurn+5)roadside=null;
         MappedEnforcement.Zone activeZone=null;
         if(confident&&guidancePositionConfirmed&&accuracy<=25&&offRoute<=20&&route.nativeScene!=null&&age<=480000){
             for(MappedEnforcement.Zone z:route.nativeScene.averageZones)if(z.active(along)){
@@ -3913,9 +3931,9 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         if(upcomingRoadsideText!=null){
             upcomingRoadsideText.setVisibility(roadside==null&&activeZone==null?View.GONE:View.VISIBLE);
-            if(activeZone!=null)upcomingRoadsideText.setText("Mapped average-speed zone · "+NavigationUnits.displayDistance(activeZone.end-along,metricUnits)+" remaining");
+            if(activeZone!=null)upcomingRoadsideText.setText("Average-speed zone · "+NavigationUnits.displayDistance(activeZone.end-along,metricUnits)+" remaining");
             if(roadside!=null){
-                if(activeZone==null)upcomingRoadsideText.setText(roadside.label+" ahead · "+NavigationUnits.displayDistance(roadside.offset-along,metricUnits));
+                if(activeZone==null)upcomingRoadsideText.setText(RoadTestDisplayPolicy.plainLabel(roadside.label)+" ahead · "+NavigationUnits.turnDistance(roadside.offset-along,metricUnits));
                 if(hazardWarningEnabled&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()
                         && distanceToTurn>100 && fix.hasSpeed()&&fix.getSpeed()>1.5f && roadsideAwareness.announce(roadside))
                     sayVerifiedAlert(roadside.label+" ahead in "+NavigationUnits.spokenDistance(roadside.offset-along,metricUnits)+". Check road conditions.",false);
@@ -4049,6 +4067,8 @@ public final class MainActivity extends Activity implements LocationListener {
         arrivalPolicy.reset();
         route = null;
         routeBridge.setRoute(null);
+        if (currentRoadPill != null) currentRoadPill.setVisibility(View.GONE);
+        if (speedCluster != null) { speedCluster.setUpcoming(-1, ""); speedCluster.setLevel(SpeedClusterPolicy.Level.NORMAL); speedLevel.reset(); }
         lastConfirmedMetricsAt=-1; confirmedEta=confirmedMinutes=confirmedDistance="";
         updateMapVisibility();
         destination = null;
@@ -4068,6 +4088,7 @@ public final class MainActivity extends Activity implements LocationListener {
             vectorMap.setBuildingContext("","");
             vectorMap.setSharedRoute(null, null);
             vectorMap.setDestination(null);
+            vectorMap.setDestinationLabel("");
         }
         lastCameraUpdate = 0;
         stopButton.setVisibility(View.GONE);
@@ -4199,6 +4220,28 @@ public final class MainActivity extends Activity implements LocationListener {
 
     @Override @SuppressWarnings("deprecation")
     public void onStatusChanged(String provider, int status, Bundle extras) { }
+
+    /**
+     * Back cancels a route preview and returns to the map, exactly like Cancel.
+     * While navigating it sends the app to the background (guidance continues)
+     * instead of finishing the activity.
+     */
+    /** Arrival clock in the phone's own 12/24-hour setting, so it matches the status bar. */
+    private java.text.DateFormat clockFormat() {
+        return new SimpleDateFormat(android.text.format.DateFormat.is24HourFormat(this) ? "HH:mm" : "h:mm a", Locale.UK);
+    }
+
+    @Override @SuppressWarnings("deprecation") public void onBackPressed() {
+        if (!active && stopButton != null && stopButton.getVisibility() == View.VISIBLE) {
+            stopNavigation(false);
+            return;
+        }
+        if (active) {
+            moveTaskToBack(true);
+            return;
+        }
+        super.onBackPressed();
+    }
 
     @Override public void onStart() {
         super.onStart();

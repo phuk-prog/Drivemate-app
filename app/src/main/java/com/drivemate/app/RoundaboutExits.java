@@ -24,7 +24,20 @@ public final class RoundaboutExits {
         public final int exit;
         /** Index in the way list of the way the route leaves on, or -1. */
         public final int exitWayIndex;
-        Result(int exit, int exitWayIndex) { this.exit = exit; this.exitWayIndex = exitWayIndex; }
+        public Result(int exit, int exitWayIndex) { this.exit = exit; this.exitWayIndex = exitWayIndex; }
+    }
+
+    /**
+     * Does an exit number agree with the overall turn through the roundabout (UK, clockwise;
+     * positive = right)? A 1st exit that ends up turning right, or a 3rd-or-later exit that
+     * ends up as a sharp left, means the count is wrong: give no number. Unknown turn = keep.
+     */
+    public static boolean plausible(int exit, double overallTurnDegrees) {
+        if (exit <= 0) return false;
+        if (!Double.isFinite(overallTurnDegrees)) return true;
+        if (exit == 1 && overallTurnDegrees > 45) return false;
+        if (exit >= 3 && overallTurnDegrees < -100) return false;
+        return true;
     }
 
     static boolean onRoundabout(JSONObject tags) {

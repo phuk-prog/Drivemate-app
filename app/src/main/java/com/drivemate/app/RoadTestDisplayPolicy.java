@@ -3,8 +3,11 @@ package com.drivemate.app;
 /** Pure presentation rules. Never changes road matching or legal speed limits. */
 final class RoadTestDisplayPolicy {
     private RoadTestDisplayPolicy(){}
-    static boolean wideApproach(double remaining,double turn){
-        return Double.isFinite(remaining)&&Double.isFinite(turn)&&remaining>=300&&remaining<=1600&&turn>=200;
+    /** Driver-facing wording: "Mapped crossing" reads as jargon, "Crossing" does not. */
+    static String plainLabel(String label){
+        String t=label==null?"":label.trim();
+        if(t.regionMatches(true,0,"Mapped ",0,7)&&t.length()>7)t=Character.toUpperCase(t.charAt(7))+t.substring(8);
+        return t;
     }
     static boolean retainMetrics(long last,long now){return last>=0&&now>=last&&now-last<=30000;}
     static boolean atTurn(double boundary,double along,double distanceToTurn){
