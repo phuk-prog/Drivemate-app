@@ -30,7 +30,10 @@ final class NativeTileSource implements AutoCloseable {
         p.allowCoreThreadTimeOut(true);return p;
     }
     /** How long one viewport load waits for tiles; tiles still arriving are cached for the retry. */
-    static final long LOAD_BUDGET_MS=12000;
+    /** Decoded tiles kept in memory, so panning back and re-opening do not re-decode. */
+    static final int CACHE_TILES=96,CACHE_VERTICES=600000;
+    /** Show what has arrived after this long; missing tiles keep loading and are retried. */
+    static final long LOAD_BUDGET_MS=5000;
     private synchronized DriveTileServer ukServer()throws IOException{if(uk==null)uk=new DriveTileServer(app,false);return uk;}
     /** Start a background fetch of the tiles around a point (a wide area on Wi-Fi, a small one on mobile data). */
     void warm(GeoMath.Point p){
@@ -72,8 +75,8 @@ final class NativeTileSource implements AutoCloseable {
         synchronized(cache){List<NativeMapScene.Shape> hit=cache.get(key);if(hit!=null)return hit;}
         List<NativeMapScene.Shape> s=NativeMvtDecoder.decode(raw(z,x,y),z,x,y);int count=vertices(s);
         synchronized(cache){
-            while(!cache.isEmpty()&&(cache.size()>=32||cachedVertices+count>250000)){Iterator<List<NativeMapScene.Shape>> i=cache.values().iterator();cachedVertices-=vertices(i.next());i.remove();}
-            if(count<=250000){cache.put(key,s);cachedVertices+=count;}
+            while(!cache.isEmpty()&&(cache.size()>=CACHE_TILES||cachedVertices+count>CACHE_VERTICES)){Iterator<List<NativeMapScene.Shape>> i=cache.values().iterator();cachedVertices-=vertices(i.next());i.remove();}
+            if(count<=CACHE_VERTICES){cache.put(key,s);cachedVertices+=count;}
         }
         return s;
     }

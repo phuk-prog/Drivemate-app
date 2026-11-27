@@ -11,6 +11,8 @@ final class NativeMapView extends View {
     private final Path path=new Path();
     private final float[] screen=new float[2];
     private final ArrayList<RectF> occupied=new ArrayList<>();
+    private final HashMap<String,List<float[]>> labelNames=new HashMap<>();
+    private boolean loading;
     private NativeMapScene scene,background;
     private GeoMath.Point center,vehicle;
     private RouteRenderGeometry route;
@@ -44,6 +46,7 @@ final class NativeMapView extends View {
     void setSceneOnly(NativeMapScene value){scene=value;invalidate();}
     /** Base tiles drawn under the scene: areas everywhere, roads only where the scene has none. */
     void setBackgroundScene(NativeMapScene value){background=value;invalidate();}
+    void setLoading(boolean value){if(loading!=value){loading=value;invalidate();}}
     void setRoute(List<GeoMath.Point> value){route=new RouteRenderGeometry(value);progress=0;turn=secondTurn=Double.NaN;invalidate();}
     void setVehicle(GeoMath.Point p,double direction){vehicle=p;vehicleBearing=direction;invalidate();}
     void setMarkers(GeoMath.Point d,GeoMath.Point e,GeoMath.Point p){destination=d;entrance=e;parked=p;invalidate();}
@@ -116,7 +119,7 @@ final class NativeMapView extends View {
             for(NativeMapScene.Shape f:background.shapes){
                 if(f.kind==NativeMapScene.BUILDING&&(!showBuildings||zoom<15)||!visible(f,c))continue;
                 // Never double-draw a road inside the verified corridor: its own geometry is exact.
-                if(!f.area&&b!=null){double mx=(f.w+f.e)/2,my=(f.s+f.n)/2;if(mx>=bw&&mx<=be&&my>=Math.min(bn,bs)&&my<=Math.max(bn,bs))continue;}
+                if((!f.area||f.kind==NativeMapScene.BUILDING)&&b!=null){double mx=(f.w+f.e)/2,my=(f.s+f.n)/2;if(mx>=bw&&mx<=be&&my>=Math.min(bn,bs)&&my<=Math.max(bn,bs))continue;}
                 visible.add(f);
             }
         }
@@ -145,11 +148,16 @@ final class NativeMapView extends View {
             roadsDrawn++;
         }
         if(zoom>=2){paint.setTextSize(dp(11));paint.setTypeface(Typeface.create("sans-serif",Typeface.NORMAL));paint.setStyle(Paint.Style.FILL);
-            for(NativeMapScene.Shape f:visible){
-                if(f.name.isEmpty()||(f.kind!=NativeMapScene.LABEL&&(zoom<15||f.kind<NativeMapScene.LOCAL||f.kind>NativeMapScene.MOTORWAY))||occupied.size()>=160)continue;
+            // Places first, then motorways, main roads and streets; a name is never repeated close by.
+            labelNames.clear();
+            for(int pass=0;pass<4;pass++)for(NativeMapScene.Shape f:visible){
+                int want=pass==0?NativeMapScene.LABEL:pass==1?NativeMapScene.MOTORWAY:pass==2?NativeMapScene.MAIN:NativeMapScene.LOCAL;
+                if(f.kind!=want||f.name.isEmpty()||!MapLayers.labelVisible(f.kind,zoom)||occupied.size()>=160)continue;
                 int i=(f.xy.length/4)*2;c.screen(f.xy[i],f.xy[i+1],screen);float x=screen[0],y=screen[1],w=paint.measureText(f.name);if(!Float.isFinite(x)||!Float.isFinite(y))continue;
                 RectF box=new RectF(x-w/2-dp(3),y-dp(12),x+w/2+dp(3),y+dp(3));if(box.left<0||box.right>getWidth()||box.top<0||box.bottom>getHeight())continue;
                 boolean collision=false;for(RectF other:occupied)if(RectF.intersects(other,box)){collision=true;break;}if(collision)continue;
+                List<float[]> same=labelNames.get(f.name);if(MapLayers.repeatsNearby(x,y,same))continue;
+                if(same==null){same=new ArrayList<>();labelNames.put(f.name,same);}same.add(new float[]{x,y});
                 occupied.add(box);paint.setColor(color(0xfff8faf7,0xff142737));canvas.drawRoundRect(box,dp(3),dp(3),paint);
                 paint.setColor(color(0xff344451,0xffe4edf3));canvas.drawText(f.name,x-w/2,y,paint);
             }
@@ -161,8 +169,13 @@ final class NativeMapView extends View {
             boolean merged=Double.isFinite(secondTurn)&&Double.isFinite(turn)&&secondTurn>turn&&secondTurn-turn<=TURN_ARROW_MERGE_METRES;
             turnArrow(canvas,c,turn,merged?secondTurn-turn+TURN_ARROW_AFTER_METRES:TURN_ARROW_AFTER_METRES);
             if(!merged)arrow(canvas,c,secondTurn);
+            int previousKmh=-1;double lastShown=Double.NaN;
             for(RouteIntelligence.SpeedSection section:speeds){
-                if(section.start<=progress||section.start>progress+700||section.start>=route.length)continue;
+                int prev=previousKmh;previousKmh=section.kmh;
+                if(section.start>progress+700||section.start>=route.length)continue;
+                // No sign at the car (the speed cluster shows it), for a repeat, or stacked on another.
+                if(!MapLayers.showLimitMarker(section.kmh,prev,section.start,lastShown,progress))continue;
+                lastShown=section.start;
                 point(c,route.at(section.start));if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1])||screen[0]<0||screen[0]>getWidth()||screen[1]<0||screen[1]>getHeight())continue;
                 paint.setStyle(Paint.Style.FILL);paint.setColor(0xffb7232c);canvas.drawCircle(screen[0],screen[1],dp(11),paint);paint.setColor(Color.WHITE);canvas.drawCircle(screen[0],screen[1],dp(8),paint);
                 paint.setColor(0xff192635);paint.setTextSize(dp(9));String t=String.valueOf(metric?section.kmh:(int)Math.round(section.kmh/1.609344));canvas.drawText(t,screen[0]-paint.measureText(t)/2,screen[1]+dp(3),paint);
@@ -180,10 +193,23 @@ final class NativeMapView extends View {
         }
         if(System.currentTimeMillis()-incidentAt>=0&&System.currentTimeMillis()-incidentAt<=LiveTrafficIncidents.MAX_AGE_MS)
             for(LiveTrafficIncidents.Event event:incidents)if(event.present(System.currentTimeMillis())&&!event.points.isEmpty())marker(canvas,c,event.points.get(0),0xffbd5426,"T!");
-        destinationPin(canvas,c);marker(canvas,c,entrance,0xff267a58,"E");marker(canvas,c,parked,0xff426987,"P");
+        destinationPin(canvas,c);
+        // An entrance on top of the pin is drawn beside it, linked by a short line.
+        if(entrance!=null&&destination!=null&&GeoMath.distance(entrance,destination)<MapLayers.MARKER_OVERLAP_METRES){
+            point(c,destination);float dx=screen[0],dy=screen[1];
+            if(Float.isFinite(dx)&&Float.isFinite(dy)){float ex=dx+dp(26),ey=dy+dp(4);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(1.5f));paint.setColor(0xff267a58);canvas.drawLine(dx,dy,ex,ey,paint);
+                paint.setStyle(Paint.Style.FILL);canvas.drawCircle(ex,ey,dp(9),paint);paint.setColor(Color.WHITE);paint.setTextSize(dp(10));canvas.drawText("E",ex-paint.measureText("E")/2,ey+dp(3.5f),paint);}
+        }else marker(canvas,c,entrance,0xff267a58,"E");marker(canvas,c,parked,0xff426987,"P");
         if(vehicle!=null){point(c,vehicle);float x=screen[0],y=screen[1];if(Float.isFinite(x)&&Float.isFinite(y)){canvas.save();canvas.translate(x,y);canvas.rotate(Double.isFinite(vehicleBearing)?(float)(vehicleBearing-bearing):0);
             path.reset();path.moveTo(0,-dp(13));path.lineTo(dp(9),dp(10));path.lineTo(0,dp(5));path.lineTo(-dp(9),dp(10));path.close();fill(canvas,0xff007ac9);stroke(canvas,Color.WHITE,2);canvas.restore();}}
-        if(scene==null){paint.setColor(color(0xff344451,0xfff1f4f5));paint.setTextSize(dp(12));paint.setStyle(Paint.Style.FILL);canvas.drawText("Map coverage unavailable",dp(10),getHeight()*.45f,paint);}
+        if(scene==null&&background==null||loading){
+            // A small status chip, never a bare error line across the map.
+            String t=loading?"Loading map…":"Map not available here yet";
+            paint.setTextSize(dp(13));paint.setTypeface(Typeface.DEFAULT_BOLD);paint.setStyle(Paint.Style.FILL);float w=paint.measureText(t);
+            RectF chip=new RectF(getWidth()/2f-w/2-dp(12),getHeight()*.5f-dp(16),getWidth()/2f+w/2+dp(12),getHeight()*.5f+dp(14));
+            paint.setColor(color(0xee0f2236,0xee0f2236));canvas.drawRoundRect(chip,dp(15),dp(15),paint);
+            paint.setColor(Color.WHITE);canvas.drawText(t,chip.left+dp(12),chip.bottom-dp(10),paint);paint.setTypeface(Typeface.DEFAULT);
+        }
         long elapsed=System.nanoTime()-frameStart;frameCount++;drawTotalNanos+=elapsed;drawMaxNanos=Math.max(drawMaxNanos,elapsed);
         if(paintListener!=null)paintListener.run();
         paint.setStyle(Paint.Style.FILL);paint.setTextSize(dp(10));paint.setColor(color(0xff344451,0xfff1f4f5));canvas.drawText("© OpenStreetMap contributors · OpenFreeMap · OpenMapTiles",dp(8),getHeight()-dp(8),paint);

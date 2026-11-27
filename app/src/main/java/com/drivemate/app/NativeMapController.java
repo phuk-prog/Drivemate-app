@@ -17,7 +17,7 @@ final class NativeMapController {
     private NativeMapScene verifiedRoute;
     private MappedRoadside roadside;
     private MappedSignals signals;
-    private double lastZoom=-1;
+
     private int viewportTop,viewportBottom;
     private List<GeoMath.Point> junctionContext=Collections.emptyList();
     private List<GeoMath.Point> route=Collections.emptyList();
@@ -25,16 +25,14 @@ final class NativeMapController {
     private boolean night,traffic,disposed,busy;
     private int generation;
     private long requestedAt;
-    private GeoMath.Point lastRequested;
+
     private RoadDisplayHealth.State reported;
     /** At least one detail load has completed (successfully or not). */
     private volatile boolean loadFinished;
     private int detailRetries;
     /** Base map drawn underneath the verified route scene, so the screen is never blank around the route. */
     private NativeMapScene background;
-    private GeoMath.Point backgroundAt;private double backgroundZoom=-1;private boolean backgroundBusy;
-    /** A load was discarded (route cleared mid-load): reload once it finishes. */
-    private boolean reloadAfterBusy;
+    private GeoMath.Point backgroundAt;private double backgroundZoom=-1;
     /** Why the last detail load failed, or empty. Shown in diagnostics. */
     private volatile String lastDetailError="";
     NativeMapController(Activity activity,Listener listener){
@@ -90,13 +88,8 @@ final class NativeMapController {
     void setSharedRoute(NativeMapScene scene,List<GeoMath.Point> path){setSharedRoute(scene,path,"");}
     void setSharedRoute(NativeMapScene scene,List<GeoMath.Point> path,String provider){
         generation++;verifiedRoute=scene;current=scene;route=path==null?Collections.emptyList():path;view.setSceneOnly(scene);view.setRoute(route);view.setRoadside(Collections.emptyList());if(scene!=null)roadFurniture(scene);
-        if(scene==null&&route.isEmpty()){
-            background=null;backgroundAt=null;view.setBackgroundScene(null);
-            requestedAt=0;lastRequested=null;
-            // A load already in flight belongs to the old generation and is discarded: reload when it ends.
-            if(busy)reloadAfterBusy=true;
-            prefetch(center!=null?center:view.center());
-        }
+        // The base map is independent of the route and stays; only the overlay changes.
+        overlayAt=null;prefetch(center!=null?center:view.center());
     }
     void setBrowseGeometry(NativeMapScene scene){if(!route.isEmpty())return;current=scene;view.setSceneOnly(scene);if(scene!=null)roadFurniture(scene);}
     private void roadFurniture(NativeMapScene s){
@@ -108,21 +101,42 @@ final class NativeMapController {
             activity.runOnUiThread(()->{if(!disposed&&gen==generation&&current==s)view.setRoadside(rows);});
         }catch(Exception ignored){}});
     }
+    /**
+     * Two layers, the same at every zoom:
+     * 1. base map: the UK vector tiles (overzoomed past their top zoom), always drawn, never blank;
+     * 2. overlay: Drivemate's exact road data on top, the verified route corridor while a native route
+     *    is shown, otherwise the local road box at street zoom. The overlay never replaces the base.
+     */
     void prefetch(GeoMath.Point p){
         if(disposed||p==null)return;
-        if(!route.isEmpty())prefetchBackground(p);
-        if(verifiedRoute!=null&&verifiedRoute.covers(p)&&verifiedRoute.bounds[2]>verifiedRoute.bounds[0]&&verifiedRoute.bounds[3]>verifiedRoute.bounds[1]){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
+        prefetchBase(p);
+        prefetchOverlay(p);
+    }
+    private GeoMath.Point overlayAt;private boolean overlayBusy;
+    private void prefetchOverlay(GeoMath.Point p){
+        if(verifiedRoute!=null){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
+        if(!route.isEmpty())return;                       // online route: base map only
+        if(view.zoom()<MapLayers.OVERLAY_MIN_ZOOM||overlayBusy)return;
+        if(current!=null&&current.covers(p)&&overlayAt!=null&&GeoMath.distance(overlayAt,p)<MapLayers.OVERLAY_RELOAD_METRES)return;
+        overlayBusy=true;overlayAt=p;int gen=generation;
+        worker.execute(()->{
+            NativeMapScene loaded=null;
+            try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
+            final NativeMapScene result=loaded;
+            activity.runOnUiThread(()->{overlayBusy=false;
+                if(disposed||gen!=generation||result==null||!route.isEmpty())return;
+                current=result;view.setSceneOnly(result);roadFurniture(result);});
+        });
+    }
+    private void prefetchBase(GeoMath.Point p){
         double zoom=view.zoom();
-        if(current!=null&&current.covers(p)&&Math.abs(lastZoom-zoom)<1&&lastRequested!=null&&GeoMath.distance(lastRequested,p)<Math.max(100,4000/Math.pow(2,Math.max(0,zoom-13))))return;
-        long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<2000)return;
-        requestedAt=now;lastRequested=p;lastZoom=zoom;busy=true;int gen=generation,w=view.getWidth(),h=view.getHeight();
-        final NativeMapScene verified=verifiedRoute;final boolean routePresent=!route.isEmpty();
+        if(background!=null&&background.covers(p)&&backgroundAt!=null&&Math.abs(backgroundZoom-zoom)<1
+                &&GeoMath.distance(backgroundAt,p)<MapLayers.baseReloadMetres(zoom))return;
+        long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<1000)return;
+        requestedAt=now;busy=true;backgroundAt=p;backgroundZoom=zoom;int w=view.getWidth(),h=view.getHeight();
         worker.execute(()->{
             NativeMapScene loaded=null;boolean detailFailed=false;String detailError="";
-            if(zoom>=15)try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
-            // Never replace the verified route road geometry with independently generalized national tiles.
-            if(loaded==null&&routePresent)loaded=verified;
-            if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);
+            try{loaded=tileSource.load(p,zoom,w,h);
                 // Show what loaded, and keep filling in the missing tiles.
                 if(tileSource.missingTiles()>0){detailFailed=true;detailError=MapLoadHealth.partialReason(tileSource.missingTiles());}
                 else tileSource.warm(p);   // view is complete: pre-fetch the area around it in the background
@@ -133,38 +147,31 @@ final class NativeMapController {
             }
             final NativeMapScene result=loaded;final boolean failedDetail=detailFailed;final String failedReason=detailError;
             activity.runOnUiThread(()->{busy=false;loadFinished=true;lastDetailError=failedDetail?failedReason:"";
-                if(reloadAfterBusy&&!disposed){reloadAfterBusy=false;if(gen!=generation){requestedAt=0;lastRequested=null;view.post(()->prefetch(view.center()));return;}}
                 if(failedDetail&&!disposed){
                     long delay=MapLoadHealth.retryDelayMs(++detailRetries);
-                    if(delay>0)view.postDelayed(()->{if(!disposed){lastRequested=null;prefetch(view.center());}},delay);
+                    if(delay>0)view.postDelayed(()->{if(!disposed){backgroundAt=null;prefetch(view.center());}},delay);
                 }else if(!failedDetail)detailRetries=0;
-                if(disposed||gen!=generation||result==null)return;
-                GeoMath.Point c=view.center();if(c!=null&&result.covers(c)&&Math.abs(view.zoom()-zoom)<1.5){current=result;view.setSceneOnly(result);view.setRoadside(Collections.emptyList());roadFurniture(result);}
+                view.setLoading(false);
+                if(disposed||result==null)return;
+                // Keep the previous picture unless the new one is complete or there was nothing.
+                if(!failedDetail||background==null||!background.covers(view.center())){background=result;view.setBackgroundScene(result);}
+                GeoMath.Point c=view.center();
+                if(c!=null&&!result.covers(c)){backgroundAt=null;view.post(()->prefetch(view.center()));}
             });
         });
-    }
-    /** Base tiles under the route scene: areas everywhere, roads only outside the verified corridor. */
-    private void prefetchBackground(GeoMath.Point p){
-        if(disposed||p==null||backgroundBusy||route.isEmpty())return;
-        double zoom=view.zoom();
-        if(background!=null&&background.covers(p)&&backgroundAt!=null&&Math.abs(backgroundZoom-zoom)<1
-                &&GeoMath.distance(backgroundAt,p)<Math.max(150,3000/Math.pow(2,Math.max(0,zoom-13))))return;
-        backgroundBusy=true;backgroundAt=p;backgroundZoom=zoom;int gen=generation,w=view.getWidth(),h=view.getHeight();
-        worker.execute(()->{
-            NativeMapScene loaded=null;
-            try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){}
-            final NativeMapScene result=loaded;
-            activity.runOnUiThread(()->{backgroundBusy=false;
-                if(disposed||gen!=generation||result==null)return;
-                background=result;view.setBackgroundScene(result);});
-        });
+        if(background==null)view.setLoading(true);
     }
     void prefetchRoute(List<GeoMath.Point> ahead){if(ahead!=null&&!ahead.isEmpty()&&view.center()!=null)prefetch(view.center());}
     String cacheStats(){return "DriveMate regional + GitHub vector cache · frames "+view.frameCount()+" · mean CPU draw "+String.format(java.util.Locale.ROOT,"%.1f ms",view.meanDrawNanos()/1e6)+" · max "+String.format(java.util.Locale.ROOT,"%.1f ms",view.maxDrawNanos()/1e6);}
     void onStart(){}void onPause(){}void onStop(){}
     /** Coming back to the app: re-request tiles, since nothing else may move the camera. */
-    void onResume(){if(disposed)return;requestedAt=0;lastRequested=null;backgroundAt=null;GeoMath.Point c=view.center();if(c==null)c=center;if(c!=null)prefetch(c);view.invalidate();}
-    void onLowMemory(){if(route.isEmpty()){current=null;view.setSceneOnly(null);requestedAt=0;lastRequested=null;GeoMath.Point c=view.center();if(c!=null)view.post(()->prefetch(c));}else{background=null;backgroundAt=null;view.setBackgroundScene(null);}}
+    void onResume(){if(disposed)return;requestedAt=0;backgroundAt=null;overlayAt=null;GeoMath.Point c=view.center();if(c==null)c=center;if(c!=null)prefetch(c);view.invalidate();}
+    void onLowMemory(){
+        // Drop the base map (it reloads); keep the route corridor, which is not re-fetchable here.
+        background=null;backgroundAt=null;view.setBackgroundScene(null);
+        if(route.isEmpty()){current=null;view.setSceneOnly(null);overlayAt=null;}
+        GeoMath.Point c=view.center();if(c!=null)view.post(()->prefetch(c));
+    }
     void onSaveInstanceState(Bundle state){}
     void onDestroy(){disposed=true;generation++;worker.execute(tileSource::close);worker.shutdown();}
     static Bitmap makeVehicleArrow(){Bitmap b=Bitmap.createBitmap(100,100,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);Path path=new Path();path.moveTo(50,6);path.lineTo(84,87);path.lineTo(50,68);path.lineTo(16,87);path.close();p.setColor(0xff007ac9);c.drawPath(path,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(6);p.setColor(Color.WHITE);c.drawPath(path,p);return b;}
