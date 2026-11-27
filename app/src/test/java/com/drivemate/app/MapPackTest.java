@@ -1,6 +1,7 @@
 package com.drivemate.app;
 
-import com.sun.net.httpserver.HttpServer;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.io.File;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -48,17 +49,29 @@ public class MapPackTest {
     @Test public void downloaderResumesVerifiesAndRejectsCorruption() throws Exception {
         byte[] data = new byte[40000];
         for (int i = 0; i < data.length; i++) data[i] = (byte) (i * 31);
-        HttpServer srv = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-        srv.createContext("/p", ex -> {
-            String r = ex.getRequestHeaders().getFirst("Range");
-            int from = r == null ? 0 : Integer.parseInt(r.replace("bytes=", "").replace("-", ""));
-            byte[] body = Arrays.copyOfRange(data, from, data.length);
-            ex.sendResponseHeaders(r == null ? 200 : 206, body.length);
-            try (OutputStream o = ex.getResponseBody()) { o.write(body); }
+        final ServerSocket srv = new ServerSocket(0, 5, java.net.InetAddress.getByName("127.0.0.1"));
+        Thread server = new Thread(() -> {
+            try {
+                while (!srv.isClosed()) {
+                    try (Socket so = srv.accept()) {
+                        java.io.BufferedReader in = new java.io.BufferedReader(new java.io.InputStreamReader(so.getInputStream(), StandardCharsets.ISO_8859_1));
+                        String line, range = null;
+                        while ((line = in.readLine()) != null && !line.isEmpty())
+                            if (line.toLowerCase().startsWith("range:")) range = line.substring(6).trim();
+                        int from = range == null ? 0 : Integer.parseInt(range.replace("bytes=", "").replace("-", ""));
+                        byte[] body = Arrays.copyOfRange(data, from, data.length);
+                        OutputStream o = so.getOutputStream();
+                        o.write(((range == null ? "HTTP/1.1 200 OK" : "HTTP/1.1 206 Partial Content") + "\r\nContent-Length: " + body.length + "\r\nConnection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+                        o.write(body);
+                        o.flush();
+                    }
+                }
+            } catch (Exception ignored) { }
         });
-        srv.start();
+        server.setDaemon(true);
+        server.start();
         try {
-            String url = "http://127.0.0.1:" + srv.getAddress().getPort() + "/p";
+            String url = "http://127.0.0.1:" + srv.getLocalPort() + "/p";
             MapPackCatalog.Pack p = MapPackCatalog.parse(catalog(url, data.length, sha(data)).replace("\"https://x/uk\"", "\"https://x/uk\"")).find("north-west-england");
             // http is filtered by the catalog, so build the pack through a permissive JSON round trip
             if (p == null) {
@@ -79,7 +92,7 @@ public class MapPackTest {
             try { new MapPackDownloader(true).download(withUrl(wrong, url), bad, null); fail(); }
             catch (java.io.IOException expected) { assertTrue(expected.getMessage().contains("checksum")); }
             assertFalse(bad.exists());
-        } finally { srv.stop(0); }
+        } finally { srv.close(); }
     }
 
     private static MapPackCatalog.Pack withUrl(MapPackCatalog.Pack p, String url) throws Exception {
