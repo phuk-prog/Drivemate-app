@@ -1469,13 +1469,13 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Verified speed alerts (when available) · " + (speedWarningEnabled ? "On" : "Off"),
                 "Faster-route handling · " + (rerouteMode == 0 ? "Automatic" : "Ask first"),
                 "Overspeed alert above mapped limit · " + speedToleranceMph + " mph",
-                "DriveMate original renderer · Stockport preview",
+                "DriveMate map renderer",
                 "Save where I parked",
                 places != null && places.parkedCar() != null
                         ? "Find my parked car" : "Find my parked car · none saved",
                 "Share diagnostics (no location included)",
                 "3D buildings · " + (buildings3d ? "On" : "Off"),
-                "DriveMate native routing and search · preview",
+                "DriveMate routing and search",
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
                 "Independent map survey drafts",
                 "Offline routing · regional coverage",
@@ -1574,7 +1574,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             new AlertDialog.Builder(this).setTitle("DriveMate v" + installedVersionName())
                                     .setMessage("DriveMate Map © OpenStreetMap contributors (ODbL 1.0). "
                                             + "Cached vector tiles are map display only. "
-                                            + "DriveMate local route previews and generated instructions. No live traffic feed. " +
+                                            + "DriveMate calculates routes and instructions on your phone from map data. No live traffic feed. " +
                                             "Road-matching and route camera are experimental. " +
                                             "Keep DriveMate open; never use it as your sole navigator " +
                                             "before testing directions on a real device.")
@@ -1639,14 +1639,14 @@ public final class MainActivity extends Activity implements LocationListener {
             }
             String[] labels=new String[entries.size()];
             for(int i=0;i<labels.length;i++){NativeRegionPacks.Entry e=entries.get(i);labels[i]=e.id+" · "+(packs.installed(e)?"Installed":(e.bytes/1000000)+" MB");}
-            new AlertDialog.Builder(this).setTitle("DriveMate regional downloads · preview").setItems(labels,(dialog,index)->{
+            new AlertDialog.Builder(this).setTitle("DriveMate regional downloads").setItems(labels,(dialog,index)->{
                 NativeRegionPacks.Entry e=entries.get(index);
                 new AlertDialog.Builder(this).setTitle("Download "+e.id).setMessage("Verified GitHub data only, on unmetered Wi-Fi. No cross-region routing. Preview only until driving acceptance.")
                     .setPositiveButton("Download",(d,w)->{
                         if(active||route!=null||routing||downloadingLocalPack)return;
                         downloadingLocalPack=true;packWorker.execute(()->{try{
                             packs.install(e,message->runOnUiThread(()->{if(!isFinishing())setStatus(message);}));
-                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus("Regional pack installed · route preview only");});
+                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus("Regional pack installed · ready for routing");});
                         }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage());});}});
                     }).setNegativeButton("Cancel",null).show();
             }).setNegativeButton("Close",null).show();

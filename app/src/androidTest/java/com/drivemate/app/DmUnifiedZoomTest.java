@@ -28,7 +28,7 @@ public class DmUnifiedZoomTest {
         double previous=-1;
         for(TomTomApi.Instruction step:route.instructions){assertTrue(step.routeOffsetMetres>previous);assertTrue(step.routeOffsetMetres<=route.lengthMetres+.01);previous=step.routeOffsetMetres;}
         assertTrue(route.trafficSections.isEmpty());assertTrue(route.laneSections.isEmpty());
-        assertTrue(NavigationStartPolicy.previewOnly(route.provider));
+        assertFalse(NavigationStartPolicy.previewOnly(route.provider));
         assertFalse("Mapped street search must work offline",router.search("Yew Street",sample.points.get(0)).isEmpty());
         // Recalculate a real graph route after the simulated driver advances.
         GeoMath.Point advanced=sample.points.get(Math.max(1,sample.points.size()/3));
@@ -36,7 +36,7 @@ public class DmUnifiedZoomTest {
         assertEquals(NativeRegionalRouter.PROVIDER,rerouted.provider);
         assertTrue(rerouted.nativeScene.checkedEdges>0);
         assertTrue(GeoMath.distance(rerouted.points.get(0),advanced)<=75);
-        assertTrue(NavigationStartPolicy.previewOnly(rerouted.provider));
+        assertFalse(NavigationStartPolicy.previewOnly(rerouted.provider));
         try{router.preview(new GeoMath.Point(51,-2),new GeoMath.Point(51.01,-2));fail("Outside coverage routed");}
         catch(java.io.IOException expected){assertTrue(expected.getMessage().contains("No external fallback"));}
     }

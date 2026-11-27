@@ -34,7 +34,7 @@ final class NativeMapView extends View {
     private float lastX,lastY;
     private final ScaleGestureDetector scale;
     NativeMapView(Context context){
-        super(context);setContentDescription("DriveMate original map rendering preview; not for driving");
+        super(context);setContentDescription("DriveMate map");
         scale=new ScaleGestureDetector(context,new ScaleGestureDetector.SimpleOnScaleGestureListener(){
             @Override public boolean onScale(ScaleGestureDetector d){setZoom(zoom+Math.log(d.getScaleFactor())/Math.log(2));return true;}
         });

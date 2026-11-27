@@ -8,7 +8,7 @@ Use Gradle 8.9 wrapper with official distribution/JAR SHA-256. The app Gradle lo
 
 The separate older display-overhaul branch is not blindly merged over newer 2.x navigation. Its documentation and compact-screen policy are incorporated; route matching, provider behavior, new guidance and safety gates are retained. Remaining differences (alternate route UI, arrival cards, optional styling) require separate reconciliation and recorded device checks.
 
-Map lock records exact source pins; do not automatically move to a failed nationwide candidate. Local routing is still preview-only. Origin snaps must have usable outgoing edges; weighted A* uses same priority as revised verifier while retaining device resource limits. National acceptance remains pending; no increase in Android limits.
+Map lock records exact source pins; do not automatically move to a failed nationwide candidate. Local routing can be started for driving (owner lifted the preview-only guard; routing data is owner-approved, not independently road-validated). Origin snaps must have usable outgoing edges; weighted A* uses same priority as revised verifier while retaining device resource limits. National acceptance remains pending; no increase in Android limits.
 
 Before road use: recorded roundabout, motorway, GPS-loss, route refresh, reroute, lane, accessibility, day/night, landscape, and real update install test on previous signed APK. Release prereleases are engineering candidates, not safety certification.
 
