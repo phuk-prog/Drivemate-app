@@ -57,4 +57,10 @@ public class DiagnosticsReportTest {
         assertTrue(text.contains("Mock location fixes: 0"));
         assertTrue(text.contains("Sensor-fused heading: 92°"));
     }
+
+    @Test public void includesRouteSearchStats() {
+        DiagnosticsReport.Snapshot s = new DiagnosticsReport.Snapshot();
+        s.routingStats = "3 searches, 2 found; last 900 nodes in 210 ms";
+        assertTrue(DiagnosticsReport.build(s).contains("Route searches: 3 searches, 2 found; last 900 nodes in 210 ms"));
+    }
 }

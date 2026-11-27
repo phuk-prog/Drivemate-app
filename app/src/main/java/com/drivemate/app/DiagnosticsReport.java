@@ -30,6 +30,7 @@ public final class DiagnosticsReport {
         public String positionBridges = "";
         public int mockFixes = -1;
         public boolean estimatedPosition;
+        public String routingStats = "";
         public double headingFusion = Double.NaN;
         public float speedMps = Float.NaN;
         public double offRouteMetres = Double.NaN;
@@ -61,6 +62,7 @@ public final class DiagnosticsReport {
         line(out, "Estimated position now", yesNo(s.estimatedPosition));
         line(out, "Mock location fixes", s.mockFixes < 0 ? "—" : String.valueOf(s.mockFixes));
         line(out, "Sensor-fused heading", degrees(s.headingFusion));
+        line(out, "Route searches", s.routingStats);
         line(out, "Speed", Float.isFinite(s.speedMps)
                 ? String.format(Locale.UK, "%.1f m/s", s.speedMps) : "—");
         line(out, "Off route", metres(s.offRouteMetres));

@@ -63,7 +63,19 @@ public final class DmTileEngine {
     }
     public int cachedTiles(){return cache.size();}
     public DmCellPlanner.Coverage coverage(Route route,double radiusKm,long budget)throws Exception{return planner.coverage(route.points,route.cells,radiusKm,budget);}
-    private Node nearest(GeoMath.Point p,Set<String> allowed,boolean origin)throws Exception{
+    private Node nearest(GeoMath.Point p,Set<String> allowed,boolean origin)throws Exception{return nearest(p,allowed,origin,Double.NaN);}
+    /** Bearings from a junction to the far end of each of its usable exits. */
+    private double[] exitBearings(Node n,Set<String> allowed)throws Exception{
+        List<Double> out=new ArrayList<>();
+        for(int i=0;i<n.edges.length();i++){
+            JSONArray e=n.edges.getJSONArray(i);String cell=e.getString(2);
+            if((allowed!=null&&!allowed.contains(cell))||!catalog.has(cell))continue;
+            Node far=load(cell).nodes.get(e.getLong(1));if(far==null)continue;
+            out.add(GeoMath.bearingDegrees(n.point,far.point));
+        }
+        double[] r=new double[out.size()];for(int i=0;i<r.length;i++)r[i]=out.get(i);return r;
+    }
+    private Node nearest(GeoMath.Point p,Set<String> allowed,boolean origin,double travelBearing)throws Exception{
         int y=Math.floorDiv((int)Math.round(p.lat*1e6),CELL),x=Math.floorDiv((int)Math.round(p.lon*1e6),CELL);
         Node best=null;double dist=350;
         if(!catalog.has(key(p.lat,p.lon))||(allowed!=null&&!allowed.contains(key(p.lat,p.lon))))throw new CoverageException("Position outside pilot map");
@@ -81,18 +93,22 @@ public final class DmTileEngine {
                 boolean hasExit=false;for(int i=0;i<n.edges.length();i++){JSONArray e=n.edges.getJSONArray(i);if(allowed==null||allowed.contains(e.getString(2))){hasExit=true;break;}}
                 if(!hasExit)continue;
             }else if(!incoming.contains(n.id))continue;
-            double d=GeoMath.distance(p,n.point);if(d<dist||(d==dist&&best!=null&&n.id<best.id)){dist=d;best=n;}
+            double d=GeoMath.distance(p,n.point);if(d>dist)continue;double score=d;
+            if(origin&&Double.isFinite(travelBearing))score+=StartSnap.penaltyMetres(travelBearing,exitBearings(n,allowed));
+            if(score<dist||(score==dist&&best!=null&&n.id<best.id)){dist=score;best=n;}
         }
         if(best==null)throw new CoverageException("No eligible directed road node nearby");
         return best;
     }
     static final class State{
         final Node node;final long edge,way,prev;final double cost,distance,priority;final State parent;
+        /** Real travel seconds along this path. cost may also include search-only penalties and is not shown to the driver. */
+        double real;
         State(Node n,long e,long w,long p,double c,double d,double f,State prevState){node=n;edge=e;way=w;prev=p;cost=c;distance=d;priority=f;parent=prevState;}
     }
     public static final class Route{
         public final List<GeoMath.Point> points;public final List<Long> ways,nodeIds,edgeIds;public final Set<String> cells;public final double metres,seconds;public final int expansions;public final long ms;
-        Route(State end,int count,long elapsed){List<GeoMath.Point> p=new ArrayList<>();List<Long>w=new ArrayList<>(),n=new ArrayList<>(),e=new ArrayList<>();Set<String> c=new HashSet<>();metres=end.distance;seconds=end.cost;expansions=count;ms=elapsed;
+        Route(State end,int count,long elapsed){List<GeoMath.Point> p=new ArrayList<>();List<Long>w=new ArrayList<>(),n=new ArrayList<>(),e=new ArrayList<>();Set<String> c=new HashSet<>();metres=end.distance;seconds=end.real;expansions=count;ms=elapsed;
             for(State s=end;s!=null;s=s.parent){p.add(s.node.point);n.add(s.node.id);c.add(s.node.cell);if(s.edge!=0){w.add(s.way);e.add(s.edge);}}Collections.reverse(p);Collections.reverse(w);Collections.reverse(n);Collections.reverse(e);points=Collections.unmodifiableList(p);ways=Collections.unmodifiableList(w);nodeIds=Collections.unmodifiableList(n);edgeIds=Collections.unmodifiableList(e);cells=Collections.unmodifiableSet(c);}
     }
     private List<long[]> rules(State s)throws JSONException{
@@ -102,8 +118,11 @@ public final class DmTileEngine {
         return out;
     }
     public Route route(GeoMath.Point start,GeoMath.Point finish)throws Exception{return route(start,finish,null);}
-    public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed)throws Exception{
-        long began=SystemClock.elapsedRealtime();Node a=nearest(start,allowed,true),b=nearest(finish,allowed,false);
+    public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed)throws Exception{return route(start,finish,allowed,Double.NaN,null);}
+    /** @param travelBearing car heading to prefer a start junction ahead of the car, or NaN
+     *  @param penalisedWays ways made more expensive to find a different alternative, or null */
+    public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed,double travelBearing,Set<Long> penalisedWays)throws Exception{
+        long began=SystemClock.elapsedRealtime();Node a=nearest(start,allowed,true,travelBearing),b=nearest(finish,allowed,false);
         Map<String,Long> lower=planner.lowerBounds(b.cell);
         if(a.id==b.id)throw new IOException("Same snapped junction");
         PriorityQueue<State> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));Map<Long,Double> best=new HashMap<>();
@@ -116,10 +135,12 @@ public final class DmTileEngine {
                 JSONArray e=s.node.edges.getJSONArray(i);long id=e.getLong(0),dst=e.getLong(1),way=e.getLong(3);
                 if(s.edge!=0&&!LocalRoutingPilot.allowed(s.prev,dst,way,rs))continue;
                 double length=e.getLong(4)/1000.0,seconds=e.getLong(5)/1000.0;if(length<=0||seconds<=0)throw new IOException("Invalid edge");
-                double cost=s.cost+seconds;if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
+                double cost=s.cost+seconds*(penalisedWays!=null&&penalisedWays.contains(way)?AlternativeRoutes.PENALTY_FACTOR:1.0);if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
                 String nextCell=e.getString(2);if(allowed!=null&&!allowed.contains(nextCell))continue;
                 Node next=load(nextCell).nodes.get(dst);if(next==null)throw new IOException("Broken cross-tile connection");
-                best.put(id,cost);q.add(new State(next,id,way,s.node.id,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/160,lower.getOrDefault(next.cell,0L)/1000.0),s));
+                if(s.parent!=null)cost+=TurnPenalty.seconds(s.parent.node.point,s.node.point,next.point);
+                if(cost+1e-7>=best.getOrDefault(id,Double.POSITIVE_INFINITY))continue;
+                best.put(id,cost);State ns=new State(next,id,way,s.node.id,cost,s.distance+length,cost+Math.max(GeoMath.distance(next.point,b.point)*3.6/160,lower.getOrDefault(next.cell,0L)/1000.0),s);ns.real=s.real+seconds;q.add(ns);
             }
         }throw new CoverageException("No connected route inside pilot limits");
     }
