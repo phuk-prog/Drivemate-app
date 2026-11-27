@@ -585,6 +585,9 @@ public final class MainActivity extends Activity implements LocationListener {
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (sensorManager != null) rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
+        voicePausesMusic = getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean("voice_pauses_music", false);
+        voiceOutput = new VoiceOutput(this, this::speechFinished);
+        musicControl = new MusicControl(this, this::updateMusicBars);
         speech = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && speech != null) {
                 speech.setAudioAttributes(new AudioAttributes.Builder()
@@ -653,11 +656,11 @@ public final class MainActivity extends Activity implements LocationListener {
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.drivemate_mark);
         logo.setContentDescription("DriveMate road logo");
-        header.addView(logo, new LinearLayout.LayoutParams(dp(48), dp(51)));
+        header.addView(logo, new LinearLayout.LayoutParams(dp(36), dp(38)));
         LinearLayout branding = new LinearLayout(this);
         branding.setOrientation(LinearLayout.VERTICAL);
         branding.setPadding(dp(4), 0, 0, 0);
-        TextView brandName = text("DriveMate", 25, Color.WHITE, true);
+        TextView brandName = text("DriveMate", 20, Color.WHITE, true);
         SpannableString brand = new SpannableString("DriveMate");
         brand.setSpan(new ForegroundColorSpan(Color.WHITE), 0, 5, 0);
         brand.setSpan(new ForegroundColorSpan(CYAN), 5, 9, 0);
@@ -677,8 +680,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 Color.rgb(28, 68, 84)));
         settings.setTextColor(Color.WHITE);
         settings.setOnClickListener(v -> showSettings());
-        header.addView(settings, new LinearLayout.LayoutParams(dp(49), dp(49)));
-        top.addView(header, new LinearLayout.LayoutParams(-1, dp(68)));
+        header.addView(settings, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        // Slim brand bar: the map gets the space.
+        top.addView(header, new LinearLayout.LayoutParams(-1, dp(54)));
         brandHeader = header;
 
         searchBar = new LinearLayout(this);
@@ -799,6 +803,10 @@ public final class MainActivity extends Activity implements LocationListener {
         navigationPanel.addView(details, detailsPos);
         // ETA, journey duration and distance belong at the bottom while driving,
         // leaving the road and the next manoeuvre unobstructed above.
+        musicDriveBar = musicBar();
+        LinearLayout.LayoutParams musicDrivePos = new LinearLayout.LayoutParams(-1, dp(46));
+        musicDrivePos.bottomMargin = dp(6);
+        navigationPanel.addView(musicDriveBar, musicDrivePos);
         navigationPanel.addView(tripMetricsRow, new LinearLayout.LayoutParams(-1, -2));
         tripMetricsRow.setVisibility(View.GONE);
         rerouteSuggestionRow = new LinearLayout(this);
@@ -914,6 +922,10 @@ public final class MainActivity extends Activity implements LocationListener {
         homePanel.setPadding(dp(13), dp(12), dp(13), dp(10));
         homePanel.setBackground(rounded(DARK, 23));
         homePanel.setElevation(dp(9));
+        musicHomeBar = musicBar();
+        LinearLayout.LayoutParams musicHomePos = new LinearLayout.LayoutParams(-1, dp(48));
+        musicHomePos.bottomMargin = dp(8);
+        homePanel.addView(musicHomeBar, musicHomePos);
         TextView heading = text("YOUR DESTINATIONS", 12, Color.rgb(189, 227, 239), true);
         heading.setLetterSpacing(.08f);
         homePanel.addView(heading);
@@ -1358,6 +1370,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if(followButton!=null)followButton.requestLayout();
         }
         applyNavigationChrome();
+        updateMusicBars();
         if (show && !keyboardOpen) refreshHomePanel();
     }
 
@@ -1488,8 +1501,9 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
 
-    private void showSettings() {
-        String[] options = {
+    /** Every setting's label, in the order {@link #runSetting} handles them. */
+    private String[] settingsLabels() {
+        return new String[] {
                 "DriveMate native routing · coverage",
                 voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
                 "Voice guidance · " + voiceModeName(),
@@ -1523,11 +1537,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 "DriveMate original stack · Wells pilot",
                 "Free driving · "+(freeDriving?"On":"Off"),
                 "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off"),
-                "Map areas · fast offline detail"
+                "Map areas · fast offline detail",
+                "Play navigation voice through · " + VoiceRouting.label(voiceOutputMode()),
+                "While the voice speaks · " + (voicePausesMusic ? "Pause music" : "Lower music"),
+                "Test navigation voice",
+                "Music controls · " + (MusicControl.accessGranted(this) ? "On" : "Off · allow notification access")
         };
-        new AlertDialog.Builder(this).setTitle("DriveMate settings")
-                .setItems(options, (dialog, which) -> {
-                    switch (which) {
+    }
+
+    private void runSetting(int which) {
+        switch (which) {
                         case 0: showKeyDialog(); break;
                         case 1:
                             setVoiceMode(voiceMode == DrivingVoicePolicy.SILENT
@@ -1659,9 +1678,78 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 31: advanceSpeedVoice=!advanceSpeedVoice;
                             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("advance_speed_voice",advanceSpeedVoice).apply(); break;
                         case 32: showMapAreas(); break;
+                        case 33: selectVoiceOutput(); break;
+                        case 34: voicePausesMusic = !voicePausesMusic;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("voice_pauses_music", voicePausesMusic).apply(); break;
+                        case 35: testVoice(); break;
+                        case 36: openMusicAccess(); break;
                         default: break;
-                    }
-                }).setNegativeButton("Close", null).show();
+        }
+    }
+
+    private MusicControl musicControl;
+    private LinearLayout musicHomeBar, musicDriveBar;
+    private double musicUntilTurn = -1;
+
+    /** Compact music strip: track · artist and previous / play-pause / next; "Open Spotify" when idle. */
+    private LinearLayout musicBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(dp(12), 0, dp(4), 0);
+        bar.setBackground(rounded(Color.rgb(24, 58, 77), 12));
+        TextView line = text("", 14, Color.WHITE, true);
+        line.setSingleLine(true);
+        line.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        bar.addView(line, new LinearLayout.LayoutParams(0, -2, 1));
+        String[] glyphs = {"⏮", "⏯", "⏭"};
+        String[] names = {"Previous track", "Play or pause", "Next track"};
+        for (int i = 0; i < 3; i++) {
+            Button b = chip(glyphs[i]);
+            b.setTextSize(18);
+            b.setTextColor(Color.WHITE);
+            b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.TRANSPARENT));
+            b.setContentDescription(names[i]);
+            final int action = i;
+            b.setOnClickListener(v -> {
+                if (musicControl == null) return;
+                if (!musicControl.hasSession()) { if (!musicControl.openSpotify(this)) Toast.makeText(this, "Start your music app first", Toast.LENGTH_SHORT).show(); return; }
+                if (action == 0) musicControl.previous(); else if (action == 1) musicControl.playPause(); else musicControl.next();
+            });
+            bar.addView(b, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        }
+        bar.setTag(line);
+        bar.setVisibility(View.GONE);
+        return bar;
+    }
+
+    private void updateMusicBars() {
+        if (musicControl == null) return;
+        boolean granted = MusicControl.accessGranted(this);
+        boolean session = musicControl.hasSession();
+        String text = session ? musicControl.line() : "";
+        if (session && text.isEmpty()) text = musicControl.appName();
+        if (!session) text = "Open Spotify";
+        for (LinearLayout bar : new LinearLayout[]{musicHomeBar, musicDriveBar}) {
+            if (bar == null) continue;
+            ((TextView) bar.getTag()).setText((session && musicControl.playing() ? "♪  " : "") + text);
+            for (int i = 1; i < bar.getChildCount(); i++) bar.getChildAt(i).setVisibility(session || i == 1 ? View.VISIBLE : View.GONE);
+        }
+        if (musicHomeBar != null) musicHomeBar.setVisibility(granted ? View.VISIBLE : View.GONE);
+        if (musicDriveBar != null)
+            musicDriveBar.setVisibility(granted && active && MusicPolicy.showWhileDriving(session, musicUntilTurn) ? View.VISIBLE : View.GONE);
+    }
+
+    private void openMusicAccess() {
+        if (MusicControl.accessGranted(this)) {
+            Toast.makeText(this, "Music controls are on. Turn off in Android's notification access settings.", Toast.LENGTH_LONG).show();
+        }
+        try { startActivity(MusicControl.accessIntent()); }
+        catch (Exception e) { showError("Open Android Settings › Notifications › Device and app notifications to allow DriveMate."); }
+    }
+
+    private void showSettings() {
+        SettingsScreen.show(this, this::settingsLabels, this::runSetting,
+                getSharedPreferences(PREFS, MODE_PRIVATE));
     }
 
     private String ownEndpoint(){return "";}
@@ -1884,8 +1972,10 @@ public final class MainActivity extends Activity implements LocationListener {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putInt("voice_mode_v2", voiceMode).apply();
         if ((voiceMode == DrivingVoicePolicy.SILENT
-                || voiceMode == DrivingVoicePolicy.ALERTS_ONLY) && speech != null)
+                || voiceMode == DrivingVoicePolicy.ALERTS_ONLY) && speech != null) {
             speech.stop();
+            if (voiceOutput != null) voiceOutput.stop();
+        }
         updateVoiceButton();
         Toast.makeText(this, "Voice: " + voiceModeName(), Toast.LENGTH_SHORT).show();
     }
@@ -2658,7 +2748,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(next!=null){
             int future=metricUnits?next.kmh:(int)Math.round(next.kmh/1.609344);
             status+=" · "+future+(metricUnits?" km/h":" mph")+" in "+NavigationUnits.displayDistance(next.distance,metricUnits)+" if continuing";
-            if(advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()&&freeAdvanceNode!=next.node){
+            if(advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!voiceBusy()&&freeAdvanceNode!=next.node){
                 freeAdvanceNode=next.node;
                 speak("If continuing on this road, mapped limit "+future+(metricUnits?" kilometres per hour in ":" miles per hour in ")
                     +NavigationUnits.spokenDistance(next.distance,metricUnits)+". Check road signs.");
@@ -2667,12 +2757,12 @@ public final class MainActivity extends Activity implements LocationListener {
         setStatus(status);
         boolean speeding=fix.getSpeed()*2.2369362921>match.kmh/1.609344+speedToleranceMph;
         speedCluster.setLevel(speedLevel.update(SpeedClusterPolicy.classify(fix.getSpeed()*(metricUnits?3.6:2.2369362921),shown,SpeedClusterPolicy.tolerance(speedToleranceMph,metricUnits)),SystemClock.elapsedRealtime()));
-        if(speeding&&speedWarningEnabled&&speechReady&&speech!=null&&!speech.isSpeaking()
+        if(speeding&&speedWarningEnabled&&speechReady&&speech!=null&&!voiceBusy()
             &&(lastSpeedWarningAt==0||now-lastSpeedWarningAt>120000)){
             lastSpeedWarningAt=now;sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",true);
         }
         if(freeLastLimit>0&&freeLastLimit!=match.kmh&&advanceSpeedVoice&&voiceMode!=DrivingVoicePolicy.SILENT
-                &&speechReady&&speech!=null&&!speech.isSpeaking())
+                &&speechReady&&speech!=null&&!voiceBusy())
             speak("Mapped speed limit now "+shown+(metricUnits?" kilometres per hour.":" miles per hour.")+" Check road signs.");
         freeLastLimit=match.kmh;freeLastLimitAt=now;
     }
@@ -3055,6 +3145,10 @@ public final class MainActivity extends Activity implements LocationListener {
         updateFollowButton();
         destinationInput.setText(selected.title, false);
         destinationInput.dismissDropDown();
+        // Picking a result closes the keyboard so the route preview and Start are visible.
+        destinationInput.clearFocus();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(destinationInput.getWindowToken(), 0);
         if(vectorMap!=null){vectorMap.setDestination(selected.point);vectorMap.setDestinationLabel(selected.title);}
         planRoute(true);
     }
@@ -3457,8 +3551,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 final List<GeoMath.Point> previewPoints = calculated.points;
                 navigationPanel.post(() -> {
                     if (vectorMap == null || active || route != calculated) return;
+                    // Extra room above the destination pin for its name label.
                     int top = (topMapOverlay != null && topMapOverlay.getHeight() > 0
-                            ? topMapOverlay.getHeight() : dp(170)) + dp(28);
+                            ? topMapOverlay.getHeight() : dp(170)) + dp(64);
                     int bottom = (navigationPanel.getHeight() > 0
                             ? navigationPanel.getHeight() + dp(9) : dp(260)) + dp(28);
                     vectorMap.previewRoute(previewPoints, top, bottom, dp(36));
@@ -3476,6 +3571,7 @@ public final class MainActivity extends Activity implements LocationListener {
         setTripMetricLabels(false);
         dismissUpcoming();
         if(wasConfirmed&&speech!=null)speech.stop();
+        if(wasConfirmed&&voiceOutput!=null)voiceOutput.stop();
         if(vectorMap!=null)vectorMap.clearCurrentRoad();
         if(repeatButton!=null)repeatButton.setEnabled(false);
         if(topTurnTitle!=null){topTurnTitle.setText(title);topTurnTitle.setVisibility(View.VISIBLE);}
@@ -3729,6 +3825,7 @@ public final class MainActivity extends Activity implements LocationListener {
         verifiedJunctionRoad.setText("SIGNS · "+sign);
         verifiedJunctionRoad.setVisibility(!sign.isEmpty() && untilTurn<=DrivingDisplayPolicy.signpostHorizon(speedNow)?View.VISIBLE:View.GONE);
         topTurnTitle.setVisibility(View.GONE);
+        musicUntilTurn = untilTurn; updateMusicBars();
         updateCurrentRoadPill(along, next > 0 ? route.instructions.get(next - 1).street : "");
         int iconSide = dp(getResources().getConfiguration().screenWidthDp<360 ? 60 : 68);
         if (topTurnArrow.getLayoutParams().width != iconSide) {
@@ -3831,7 +3928,7 @@ public final class MainActivity extends Activity implements LocationListener {
         return !phrase.isEmpty()&&speechReady&&speech!=null&&speedChangeAwareness.shouldAnnounce(change)?phrase:"";
     }
     private boolean speechAvailable(){
-        return speechReady&&speech!=null&&!speech.isSpeaking()&&(lastSpeechAt<0||SystemClock.elapsedRealtime()-lastSpeechAt>=1500);
+        return speechReady&&speech!=null&&!voiceBusy()&&(lastSpeechAt<0||SystemClock.elapsedRealtime()-lastSpeechAt>=1500);
     }
     private void announceEnteredSpeed(double nextTurn,double along){
         SpeedChangeAwareness.Change change=speedChangeAwareness.pendingEntry();
@@ -3910,7 +4007,7 @@ public final class MainActivity extends Activity implements LocationListener {
             }
         }
         long now = SystemClock.elapsedRealtime();
-        if (speeding && speedWarningEnabled && (speech==null||!speech.isSpeaking()) && distanceToTurn > 300
+        if (speeding && speedWarningEnabled && (speech==null||!voiceBusy()) && distanceToTurn > 300
                 && (lastSpeedWarningAt == 0 || now - lastSpeedWarningAt > 120000)) {
             lastSpeedWarningAt = now;
             sayVerifiedAlert("Check your speed. You may be above the mapped speed limit.",
@@ -3934,7 +4031,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if(activeZone!=null)upcomingRoadsideText.setText("Average-speed zone · "+NavigationUnits.displayDistance(activeZone.end-along,metricUnits)+" remaining");
             if(roadside!=null){
                 if(activeZone==null)upcomingRoadsideText.setText(RoadTestDisplayPolicy.plainLabel(roadside.label)+" ahead · "+NavigationUnits.turnDistance(roadside.offset-along,metricUnits));
-                if(hazardWarningEnabled&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!speech.isSpeaking()
+                if(hazardWarningEnabled&&voiceMode!=DrivingVoicePolicy.SILENT&&speechReady&&speech!=null&&!voiceBusy()
                         && distanceToTurn>100 && fix.hasSpeed()&&fix.getSpeed()>1.5f && roadsideAwareness.announce(roadside))
                     sayVerifiedAlert(roadside.label+" ahead in "+NavigationUnits.spokenDistance(roadside.offset-along,metricUnits)+". Check road conditions.",false);
             }
@@ -3951,7 +4048,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 trafficNoticeText.setVisibility(View.VISIBLE);
             }
         }
-        if (traffic != null && hazardWarningEnabled && (speech==null||!speech.isSpeaking()) && traffic.start > along
+        if (traffic != null && hazardWarningEnabled && (speech==null||!voiceBusy()) && traffic.start > along
                 && traffic.start - along <= 450 && distanceToTurn > 300
                 && (lastTrafficWarningStart < 0
                         || Math.abs(lastTrafficWarningStart - traffic.start) > 50)
@@ -4068,6 +4165,7 @@ public final class MainActivity extends Activity implements LocationListener {
         route = null;
         routeBridge.setRoute(null);
         if (currentRoadPill != null) currentRoadPill.setVisibility(View.GONE);
+        musicUntilTurn = -1;
         if (speedCluster != null) { speedCluster.setUpcoming(-1, ""); speedCluster.setLevel(SpeedClusterPolicy.Level.NORMAL); speedLevel.reset(); }
         lastConfirmedMetricsAt=-1; confirmedEta=confirmedMinutes=confirmedDistance="";
         updateMapVisibility();
@@ -4122,6 +4220,7 @@ public final class MainActivity extends Activity implements LocationListener {
             instructionText.setText("Search for a destination to navigate.");
             setStatus("Ready to navigate");
             if (speech != null) speech.stop();
+            if (voiceOutput != null) voiceOutput.stop();
         }
         if (reviewAvailable && !isFinishing()) {
             // Never open the review UI when the car is still moving or speed is unknown.
@@ -4160,6 +4259,48 @@ public final class MainActivity extends Activity implements LocationListener {
 
     private void speak(String message) { speak(message, VoiceQueue.INFO); }
 
+    private VoiceOutput voiceOutput;
+    private boolean voicePausesMusic;
+
+    /** Voice is playing, from text-to-speech or from a routed output. */
+    private boolean voiceBusy() {
+        return (speech != null && speech.isSpeaking()) || (voiceOutput != null && voiceOutput.busy());
+    }
+
+    /** Chosen output for the connected car (or the default when no car is connected). */
+    private int voiceOutputMode() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        int fallback = prefs.getInt(VoiceRouting.prefKey(""), VoiceRouting.AUTOMATIC);
+        String car = voiceOutput == null ? "" : voiceOutput.carName();
+        return VoiceRouting.clamp(car.isEmpty() ? fallback : prefs.getInt(VoiceRouting.prefKey(car), fallback));
+    }
+
+    private void selectVoiceOutput() {
+        String car = voiceOutput == null ? "" : voiceOutput.carName();
+        String[] items = new String[VoiceRouting.NAMES.length];
+        for (int i = 0; i < items.length; i++) items[i] = VoiceRouting.NAMES[i] + "\n" + VoiceRouting.HELP[i];
+        new AlertDialog.Builder(this)
+                .setTitle(car.isEmpty() ? "Play navigation voice through" : "Voice output for " + car)
+                .setSingleChoiceItems(items, voiceOutputMode(), (d, which) -> {
+                    android.content.SharedPreferences.Editor e = getSharedPreferences(PREFS, MODE_PRIVATE).edit();
+                    e.putInt(VoiceRouting.prefKey(""), which);
+                    if (!car.isEmpty()) e.putInt(VoiceRouting.prefKey(car), which);
+                    e.apply();
+                    if (which != VoiceRouting.AUTOMATIC && Build.VERSION.SDK_INT < 28)
+                        Toast.makeText(this, "This phone needs Android 9 or later to choose the output; Automatic will be used.", Toast.LENGTH_LONG).show();
+                    d.dismiss();
+                    testVoice();
+                }).setNegativeButton("Cancel", null).show();
+    }
+
+    private void testVoice() {
+        if (voiceMode == DrivingVoicePolicy.SILENT) {
+            Toast.makeText(this, "Voice guidance is muted", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        speak("In 200 yards, turn left. This is how navigation directions will sound.", VoiceQueue.URGENT);
+    }
+
     private final VoiceQueue voiceQueue = new VoiceQueue();
     private AudioManager audioManager;
     private AudioFocusRequest voiceFocus;
@@ -4178,15 +4319,22 @@ public final class MainActivity extends Activity implements LocationListener {
             requestVoiceFocus();
             if (action == VoiceQueue.Action.PLAY_NOW) utterancesInFlight = 0;
             utterancesInFlight++;
-            speech.speak(message, action == VoiceQueue.Action.QUEUE
-                    ? TextToSpeech.QUEUE_ADD : TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
+            if (voiceOutput != null) voiceOutput.setMode(voiceOutputMode());
+            if (voiceOutput != null && voiceOutput.routed()) {
+                // A chosen output (phone speaker, Bluetooth media or call): played by VoiceOutput.
+                voiceOutput.say(message, action != VoiceQueue.Action.QUEUE, guidanceVolume);
+            } else {
+                if (voiceOutput != null) voiceOutput.stop();
+                speech.speak(message, action == VoiceQueue.Action.QUEUE
+                        ? TextToSpeech.QUEUE_ADD : TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
+            }
         }
     }
 
     /** Ask other audio (music, podcasts) to lower its volume while guidance speaks. */
     private void requestVoiceFocus() {
         if (audioManager == null || voiceFocus != null) return;
-        voiceFocus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        voiceFocus = new AudioFocusRequest.Builder(VoiceRouting.focusGain(voicePausesMusic))
                 .setAudioAttributes(new AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
@@ -4279,6 +4427,7 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsHandler.removeCallbacks(gpsWatchdog);
         gpsHandler.postDelayed(gpsWatchdog, 5000);
         if (active) startSmoothLoop();
+        if (musicControl != null) musicControl.start();
     }
 
     @Override public void onPause() {
@@ -4315,6 +4464,8 @@ public final class MainActivity extends Activity implements LocationListener {
         }
         ++requestGeneration;
         network.shutdownNow();incidentWorker.shutdownNow();
+        if (voiceOutput != null) voiceOutput.shutdown();
+        if (musicControl != null) musicControl.release();
         if (speech != null) {
             speech.stop();
             speech.shutdown();
