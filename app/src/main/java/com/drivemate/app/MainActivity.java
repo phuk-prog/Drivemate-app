@@ -37,6 +37,10 @@ import android.location.LocationListener;
 import android.location.LocationManager;
 import android.location.LocationRequest;
 import android.net.Uri;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.media.AudioManager;
@@ -96,7 +100,7 @@ public final class MainActivity extends Activity implements LocationListener {
         @Override public void run() {
             if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
             if ((active||freeDriving) && currentLocation != null
-                    && System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+                    && System.currentTimeMillis() - currentLocation.getTime() > LocationThresholds.GPS_LOST_AFTER_MS) {
                 if (!gpsLost) {
                     gpsLost = true;
                     setStatus("GPS signal lost · waiting for a fresh fix");
@@ -379,27 +383,98 @@ public final class MainActivity extends Activity implements LocationListener {
     private long quickEtaFetchedAt;
     /** Display-only estimate of the vehicle position during short GPS gaps. */
     private final DeadReckoner deadReckoner = new DeadReckoner();
+    /** Route-following estimate for longer gaps (tunnels); display only. */
+    private final RouteDeadReckoner routeBridge = new RouteDeadReckoner();
+    private final LocationPipeline locationPipeline = new LocationPipeline();
+    private final HeadingFusion headingFusion = new HeadingFusion();
+    private SensorManager sensorManager;
+    private Sensor rotationSensor;
+    private boolean rotationSensorOn;
+    private long estimateStartedAt = -1;
+    private boolean showingEstimate;
+    private final SensorEventListener rotationListener = new SensorEventListener() {
+        private final float[] matrix = new float[9], remapped = new float[9], angles = new float[3];
+        @Override public void onSensorChanged(SensorEvent event) {
+            // Phone assumed upright in a car mount (screen towards the driver, camera forward).
+            // Not validated on a device yet; HeadingFusion expires a stale offset.
+            SensorManager.getRotationMatrixFromVector(matrix, event.values);
+            SensorManager.remapCoordinateSystem(matrix, SensorManager.AXIS_X, SensorManager.AXIS_Z, remapped);
+            SensorManager.getOrientation(remapped, angles);
+            headingFusion.onSensorAzimuth(Math.toDegrees(angles[0]));
+        }
+        @Override public void onAccuracyChanged(Sensor sensor, int accuracy) { }
+    };
     private final Runnable deadReckonTick = new Runnable() {
         @Override public void run() {
             if (foreground && displayGps != null) {
-                GeoMath.Point estimate = deadReckoner.estimate(System.currentTimeMillis());
-                // While guidance runs, SmoothFollowCamera owns the marker position.
-                if (estimate != null && (!active || smoothFollow == null)) {
-                    if (vectorMap != null && useLocalMap) vectorMap.setVehicle(estimate);
+                long now = System.currentTimeMillis();
+                RouteDeadReckoner.Estimate bridged = active && route != null ? routeBridge.estimate(now) : null;
+                if (bridged != null) {
+                    if (estimateStartedAt < 0) estimateStartedAt = now;
+                    showingEstimate = true;
+                    if (vectorMap != null && useLocalMap) vectorMap.setVehicle(bridged.point);
+                    if (gpsAccuracyText != null) {
+                        gpsAccuracyText.setText((bridged.inTunnel ? "Tunnel · " : "")
+                                + "Estimated position ±" + Math.round(bridged.uncertaintyMetres) + " m · no GPS");
+                    }
+                } else {
+                    endEstimate(now);
+                    GeoMath.Point estimate = deadReckoner.estimate(now);
+                    // While guidance runs, SmoothFollowCamera owns the marker position.
+                    if (estimate != null && (!active || smoothFollow == null)) {
+                        if (vectorMap != null && useLocalMap) vectorMap.setVehicle(estimate);
+                    }
                 }
             }
             gpsHandler.postDelayed(this, 500);
         }
     };
+    private void endEstimate(long now) {
+        if (estimateStartedAt >= 0) locationPipeline.recordBridge(now - estimateStartedAt);
+        estimateStartedAt = -1;
+        showingEstimate = false;
+    }
+    private void startRotationSensor() {
+        if (sensorManager == null || rotationSensor == null || rotationSensorOn) return;
+        rotationSensorOn = sensorManager.registerListener(rotationListener, rotationSensor,
+                SensorManager.SENSOR_DELAY_UI);
+    }
+    private void stopRotationSensor() {
+        if (sensorManager != null && rotationSensorOn) sensorManager.unregisterListener(rotationListener);
+        rotationSensorOn = false;
+    }
+    /** Hand the active route to the bridge: geometry, tunnel spans, manoeuvre hold points. */
+    private void configureRouteBridge(TomTomApi.Route r) {
+        if (r == null || r.points.size() < 2) { routeBridge.setRoute(null); return; }
+        routeBridge.setRoute(r.points);
+        routeBridge.setTunnelSpans(r.nativeScene == null ? null
+                : TunnelSpans.fromShapes(r.points, r.nativeScene.shapes));
+        double[] holds = new double[r.instructions.size()];
+        for (int i = 0; i < holds.length; i++) holds[i] = r.instructions.get(i).routeOffsetMetres;
+        routeBridge.setHoldPoints(holds);
+    }
+    /** Speed to ease toward during a gap: the mapped limit at this point, else 0 (hold fix speed). */
+    private double expectedSpeedMps(TomTomApi.Route r, GeoMath.Point at) {
+        if (r == null || r.speedSections == null || r.speedSections.isEmpty()) return 0;
+        double along = GeoMath.project(r.points, at).alongMetres;
+        for (RouteIntelligence.SpeedSection section : r.speedSections) {
+            if (along >= section.start && along <= section.end) return section.kmh / 3.6;
+        }
+        return 0;
+    }
     /** Satellites used in the current GPS fix, or -1 until the first GNSS report. */
     private int satellitesUsed = -1;
+    private int l5SatellitesUsed = -1;
     private final GnssStatus.Callback gnssCallback = new GnssStatus.Callback() {
         @Override public void onSatelliteStatusChanged(GnssStatus status) {
-            int used = 0;
+            int used = 0, l5 = 0;
             for (int i = 0; i < status.getSatelliteCount(); i++) {
-                if (status.usedInFix(i)) used++;
+                if (!status.usedInFix(i)) continue;
+                used++;
+                if (status.hasCarrierFrequencyHz(i) && GnssBands.isL5(status.getCarrierFrequencyHz(i))) l5++;
             }
             satellitesUsed = used;
+            l5SatellitesUsed = l5;
         }
     };
     private long lastSpeechAt=-1;
@@ -473,6 +548,8 @@ public final class MainActivity extends Activity implements LocationListener {
         applyTheme();
         updateVoiceButton();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (sensorManager != null) rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         speech = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && speech != null) {
                 speech.setAudioAttributes(new AudioAttributes.Builder()
@@ -2118,6 +2195,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         interval, minDistance, this);
                 locationManager.registerGnssStatusCallback(gnssCallback,
                         new Handler(Looper.getMainLooper()));
+                startRotationSensor();
                 requested = true;
             }
             // Fused already uses Wi-Fi and cell, so the network provider is only
@@ -2150,6 +2228,7 @@ public final class MainActivity extends Activity implements LocationListener {
         try {
             locationManager.removeUpdates(this);
             locationManager.unregisterGnssStatusCallback(gnssCallback);
+            stopRotationSensor();
         } catch (SecurityException ignored) {
             // Permission revoked; startLocation() reports it.
         }
@@ -2173,11 +2252,30 @@ public final class MainActivity extends Activity implements LocationListener {
                 fix.getLatitude(), fix.getLongitude(), fix.getTime(),
                 fix.hasAccuracy() ? fix.getAccuracy() : 99f,
                 fixSource(fix));
-        if (!FixQualityPolicy.accept(lastAcceptedFix, sample)) return;
+        boolean mock = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                ? fix.isMock() : fix.isFromMockProvider();
+        LocationPipeline.Decision decision = locationPipeline.offer(sample, mock);
+        if (decision.firstMock) {
+            setStatus("Mock location in use · positions are simulated");
+        }
+        if (!decision.accepted) return;
         lastAcceptedFix = sample;
-        deadReckoner.onFix(new GeoMath.Point(fix.getLatitude(), fix.getLongitude()),
-                fix.getTime(), fix.hasSpeed() ? fix.getSpeed() : 0f,
-                fix.hasBearing() ? fix.getBearing() : 0d, fix.hasBearing());
+        boolean bearingTrusted = HeadingFusion.gpsBearingTrusted(fix.hasBearing(),
+                fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearingAccuracy() ? fix.getBearingAccuracyDegrees() : 0f,
+                fix.hasBearingAccuracy());
+        if (bearingTrusted) headingFusion.onTrustedGpsBearing(fix.getBearing(), fix.getTime());
+        double fusedHeading = bearingTrusted ? Double.NaN : headingFusion.fusedHeading(fix.getTime());
+        boolean haveHeading = fix.hasBearing() || Double.isFinite(fusedHeading);
+        GeoMath.Point fixPoint = new GeoMath.Point(fix.getLatitude(), fix.getLongitude());
+        deadReckoner.onFix(fixPoint, fix.getTime(), fix.hasSpeed() ? fix.getSpeed() : 0f,
+                fix.hasBearing() ? fix.getBearing() : (Double.isFinite(fusedHeading) ? fusedHeading : 0d),
+                haveHeading);
+        if (active && route != null) {
+            routeBridge.onFix(fixPoint, fix.hasAccuracy() ? fix.getAccuracy() : 30f, fix.getTime(),
+                    fix.hasSpeed() ? fix.getSpeed() : 0f, expectedSpeedMps(route, fixPoint));
+        }
+        endEstimate(System.currentTimeMillis());
         if (gpsLost) {
             gpsLost = false;
             if (active) {
@@ -2835,6 +2933,13 @@ public final class MainActivity extends Activity implements LocationListener {
             if (currentLocation.hasBearing()) s.gpsBearing = currentLocation.getBearing();
         }
         s.satellitesUsed = satellitesUsed;
+        s.l5SatellitesUsed = l5SatellitesUsed;
+        s.fixesAccepted = locationPipeline.accepted();
+        s.fixRejections = locationPipeline.rejectionSummary();
+        s.positionBridges = locationPipeline.bridgeSummary();
+        s.mockFixes = locationPipeline.mockFixes();
+        s.estimatedPosition = showingEstimate;
+        s.headingFusion = headingFusion.fusedHeading(System.currentTimeMillis());
         s.offRouteMetres = active ? lastOffRouteMetres : Double.NaN;
         s.matchReason=(joiningRoute?"JOINING_ROUTE / "+lastMatchReason:lastMatchReason)
                 +(route==null?"":" / map: "+(vectorMap!=null&&showingVector()?vectorMap.geometryDescription():RouteMapPolicy.description(route.provider,false)))
@@ -2940,7 +3045,7 @@ public final class MainActivity extends Activity implements LocationListener {
                     if (!firstRoute && active && route != null) {
                         if (currentLocation == null || !currentLocation.hasAccuracy()
                                 || currentLocation.getAccuracy() > 55
-                                || System.currentTimeMillis() - currentLocation.getTime() > 15000) {
+                                || System.currentTimeMillis() - currentLocation.getTime() > LocationThresholds.GPS_LOST_AFTER_MS) {
                             setStatus("Uncertain GPS · current route retained");
                             return;
                         }
@@ -3062,6 +3167,7 @@ public final class MainActivity extends Activity implements LocationListener {
     private void installCalculatedRoute(TomTomApi.Route calculated, boolean firstRoute) {
         clearPendingRoute();
         route = calculated;
+        configureRouteBridge(route);
         lastConfirmedMetricsAt=-1; confirmedEta=confirmedMinutes=confirmedDistance="";
         updateMapVisibility();
         confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
@@ -3691,6 +3797,7 @@ public final class MainActivity extends Activity implements LocationListener {
         resubscribeLocationForMode();
         arrivalPolicy.reset();
         route = null;
+        routeBridge.setRoute(null);
         lastConfirmedMetricsAt=-1; confirmedEta=confirmedMinutes=confirmedDistance="";
         updateMapVisibility();
         destination = null;
@@ -3853,6 +3960,7 @@ public final class MainActivity extends Activity implements LocationListener {
             if (locationManager != null) {
                 locationManager.removeUpdates(this);
                 locationManager.unregisterGnssStatusCallback(gnssCallback);
+            stopRotationSensor();
             }
             locationSubscribed = false;
         }
@@ -3866,6 +3974,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if (locationManager != null) {
             locationManager.removeUpdates(this);
             locationManager.unregisterGnssStatusCallback(gnssCallback);
+            stopRotationSensor();
         }
         ++requestGeneration;
         network.shutdownNow();incidentWorker.shutdownNow();

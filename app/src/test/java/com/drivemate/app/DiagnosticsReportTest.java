@@ -38,4 +38,23 @@ public class DiagnosticsReportTest {
         assertFalse(lower.contains("longitude"));
         assertFalse(lower.contains("destination:"));
     }
+
+    @Test public void includesLocationPipelineCountersWithoutCoordinates() {
+        DiagnosticsReport.Snapshot s = new DiagnosticsReport.Snapshot();
+        s.l5SatellitesUsed = 7;
+        s.fixesAccepted = 120;
+        s.fixRejections = "POOR_ACCURACY 4, TELEPORT 1";
+        s.positionBridges = "2 gaps, 41.0 s";
+        s.mockFixes = 0;
+        s.estimatedPosition = true;
+        s.headingFusion = 92;
+        String text = DiagnosticsReport.build(s);
+        assertTrue(text.contains("Dual-frequency (L5) satellites used: 7"));
+        assertTrue(text.contains("Fixes accepted: 120"));
+        assertTrue(text.contains("Fixes rejected: POOR_ACCURACY 4, TELEPORT 1"));
+        assertTrue(text.contains("Estimated-position bridges: 2 gaps, 41.0 s"));
+        assertTrue(text.contains("Estimated position now: yes"));
+        assertTrue(text.contains("Mock location fixes: 0"));
+        assertTrue(text.contains("Sensor-fused heading: 92°"));
+    }
 }
