@@ -10,8 +10,8 @@ public final class MapStartupPolicy {
 
     public static final long MAX_REMEMBERED_MS = 30L * 24 * 60 * 60 * 1000;
     public static final long MAX_SYSTEM_CACHED_MS = 7L * 24 * 60 * 60 * 1000;
-    public static final long MAX_NAVIGATION_FIX_MS = 20_000L;
-    public static final float MAX_NAVIGATION_ACCURACY_METRES = 100f;
+    public static final long MAX_NAVIGATION_FIX_MS = LocationThresholds.MAX_NAVIGATION_FIX_AGE_MS;
+    public static final float MAX_NAVIGATION_ACCURACY_METRES = LocationThresholds.MAX_NAVIGATION_ACCURACY_METRES;
 
     public static final class Viewport {
         public final GeoMath.Point center;

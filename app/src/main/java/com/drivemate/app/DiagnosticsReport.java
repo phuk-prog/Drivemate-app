@@ -24,6 +24,13 @@ public final class DiagnosticsReport {
         public long fixAgeMs=-1;
         public float accuracyMetres = Float.NaN;
         public int satellitesUsed = -1;
+        public int l5SatellitesUsed = -1;
+        public String fixRejections = "";
+        public int fixesAccepted = -1;
+        public String positionBridges = "";
+        public int mockFixes = -1;
+        public boolean estimatedPosition;
+        public double headingFusion = Double.NaN;
         public float speedMps = Float.NaN;
         public double offRouteMetres = Double.NaN;
         public String cameraMode = "";
@@ -47,6 +54,13 @@ public final class DiagnosticsReport {
         line(out,"Route match",s.matchReason);
         line(out, "Accuracy", metres(s.accuracyMetres));
         line(out, "Satellites used", s.satellitesUsed < 0 ? "—" : String.valueOf(s.satellitesUsed));
+        line(out, "Dual-frequency (L5) satellites used", s.l5SatellitesUsed < 0 ? "—" : String.valueOf(s.l5SatellitesUsed));
+        line(out, "Fixes accepted", s.fixesAccepted < 0 ? "—" : String.valueOf(s.fixesAccepted));
+        line(out, "Fixes rejected", s.fixRejections);
+        line(out, "Estimated-position bridges", s.positionBridges);
+        line(out, "Estimated position now", yesNo(s.estimatedPosition));
+        line(out, "Mock location fixes", s.mockFixes < 0 ? "—" : String.valueOf(s.mockFixes));
+        line(out, "Sensor-fused heading", degrees(s.headingFusion));
         line(out, "Speed", Float.isFinite(s.speedMps)
                 ? String.format(Locale.UK, "%.1f m/s", s.speedMps) : "—");
         line(out, "Off route", metres(s.offRouteMetres));
