@@ -45,6 +45,8 @@ final class NativeMapController {
     }
     View view(){return view;}
     void setOnUserGesture(Runnable r){view.setGesture(r);}
+    /** Pre-fetch map tiles around a place (Home, Work) in the background. */
+    void warmArea(GeoMath.Point p){if(!disposed&&p!=null)worker.execute(()->tileSource.warm(p));}
     boolean nightMode(){return night;}
     boolean hasRenderedRoads(){return view.roadsDrawn()>0;}
     double currentZoom(){return view.zoom();}
@@ -110,6 +112,7 @@ final class NativeMapController {
             if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);
                 // Show what loaded, and keep filling in the missing tiles.
                 if(tileSource.missingTiles()>0){detailFailed=true;detailError=MapLoadHealth.partialReason(tileSource.missingTiles());}
+                else tileSource.warm(p);   // view is complete: pre-fetch the area around it in the background
             }catch(Exception failure){
                 // Fall back to the coarse world overview, but remember why and retry the detail load.
                 detailFailed=true;detailError=MapLoadHealth.reason(failure);

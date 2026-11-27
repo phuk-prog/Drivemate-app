@@ -259,7 +259,8 @@ public final class DriveTileServer implements AutoCloseable {
      * reveal the visited area to the public DriveMate Map release host.
      */
     public void prefetchAround(double lat, double lon) {
-        if (closed || !unmetered()) return;
+        final boolean wifi = unmetered();
+        if (closed) return;
         int x = tileX(lon, 13);
         int y = tileY(lat, 13);
         long now = SystemClock.elapsedRealtime();
@@ -273,10 +274,12 @@ public final class DriveTileServer implements AutoCloseable {
             // Stop after repeated network errors rather than hammering a
             // disconnected phone or rate-limited public release host.
             int consecutiveFailures = 0;
-            for (int z = 14; z >= 11 && !closed; z--) {
-                int radius = z == 14 ? 7 : z == 13 ? 4 : z == 12 ? 2 : 1;
+            // On Wi-Fi: z14 down to z11, a wide area. On mobile data: only z13 and z12, one tile
+            // around the phone (about 18 tiles), so it stays small.
+            for (int z = wifi ? 14 : 13; z >= (wifi ? 11 : 12) && !closed; z--) {
+                int radius = !wifi ? 1 : z == 14 ? 7 : z == 13 ? 4 : z == 12 ? 2 : 1;
                 int cx = tileX(lon, z), cy = tileY(lat, z);
-                for (int ring = 0; ring <= radius && !closed && unmetered(); ring++) {
+                for (int ring = 0; ring <= radius && !closed && (!wifi || unmetered()); ring++) {
                     for (int dy = -ring; dy <= ring && !closed; dy++) {
                         for (int dx = -ring; dx <= ring && !closed; dx++) {
                             if (Math.max(Math.abs(dx), Math.abs(dy)) != ring) continue;
@@ -288,7 +291,7 @@ public final class DriveTileServer implements AutoCloseable {
                                 consecutiveFailures = 0;
                             } catch (IOException ignored) {
                                 consecutiveFailures++;
-                                if (consecutiveFailures >= 4 || !unmetered()) return;
+                                if (consecutiveFailures >= 4 || (wifi && !unmetered())) return;
                             }
                         }
                     }
@@ -358,6 +361,10 @@ public final class DriveTileServer implements AutoCloseable {
     private static final class RangeSource implements PmTilesReader.Source {
         final File directory, offline;
         private volatile long dataStarts;
+        /** The signed release-host URL GitHub redirects to; reused for a few minutes to skip the redirect hop. */
+        private volatile URL resolvedUrl;
+        private volatile long resolvedAtMs;
+        private static final long RESOLVED_TTL_MS = 4 * 60 * 1000L;
         RangeSource(File directory, File offline) { this.directory = directory; this.offline = offline; }
         @Override public long size() { return SOURCE_SIZE; }
 
@@ -380,9 +387,12 @@ public final class DriveTileServer implements AutoCloseable {
                 }
                 return cached;
             }
-            URL current = new URL(SOURCE);
+            URL cached = resolvedUrl;
+            boolean usingResolved = cached != null && SystemClock.elapsedRealtime() - resolvedAtMs < RESOLVED_TTL_MS;
+            URL current = usingResolved ? cached : new URL(SOURCE);
             for (int redirects = 0; redirects < 6; redirects++) {
                 HttpURLConnection connection = (HttpURLConnection) current.openConnection();
+                boolean finished = false;
                 connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(10000);
                 connection.setReadTimeout(18000);
@@ -403,6 +413,14 @@ public final class DriveTileServer implements AutoCloseable {
                         if (!"https".equalsIgnoreCase(next.getProtocol()))
                             throw new IOException("Map release redirect is not HTTPS");
                         current = next;
+                        continue;
+                    }
+                    if (usingResolved && (response == 400 || response == 401 || response == 403 || response == 404)) {
+                        // The cached signed URL expired: forget it and start again from the release URL.
+                        resolvedUrl = null;
+                        usingResolved = false;
+                        current = new URL(SOURCE);
+                        redirects = -1;
                         continue;
                     }
                     if (response != 206)
@@ -431,8 +449,17 @@ public final class DriveTileServer implements AutoCloseable {
                     }
                     if (offset == 0 || (dataStarts > 0 && offset < dataStarts))
                         storeAtomically(local, bytes);
+                    if (redirects > 0 || usingResolved) {
+                        resolvedUrl = current;
+                        if (!usingResolved) resolvedAtMs = SystemClock.elapsedRealtime();
+                    }
+                    finished = true;
                     return bytes;
-                } finally { connection.disconnect(); }
+                } finally {
+                    // A fully read 206 response leaves the connection reusable (keep-alive), so the
+                    // next range skips the TCP and TLS handshake. Anything else closes it.
+                    if (!finished) connection.disconnect();
+                }
             }
             throw new IOException("Map release redirected too many times");
         }

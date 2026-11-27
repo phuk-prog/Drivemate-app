@@ -370,6 +370,28 @@ public final class MainActivity extends Activity implements LocationListener {
     private FixQualityPolicy.Sample lastAcceptedFix;
     /** Whether the current location registration uses the navigating rate. */
     private boolean subscribedForNavigation;
+    private boolean placesWarmed;
+    /** Pre-fetch map tiles around Home and Work once per session, so the map is already there when needed. */
+    private void warmSavedPlaces() {
+        if (vectorMap == null || places == null) return;
+        TomTomApi.Destination h = places.home(), w = places.work();
+        if (h != null) vectorMap.warmArea(h.point);
+        if (w != null) vectorMap.warmArea(w.point);
+    }
+    /** Start was tapped before a fresh GPS fix existed: start as soon as one arrives. */
+    private boolean startWhenFix;
+    private final Runnable startWaitTimeout = () -> {
+        if (startWhenFix) {
+            startWhenFix = false;
+            showError("No fresh GPS position after 20 seconds. Check Precise Location is on and try again with a clear view of the sky.");
+        }
+    };
+    /**
+     * Full-rate location updates are needed while navigating, while a route is on screen, and while
+     * Start is waiting for a fix. The lighter idle rate asks for a new fix only after 5 m of
+     * movement, so a stationary driver on the route preview got no fixes and Start refused.
+     */
+    private boolean wantFastLocation() { return active || route != null || startWhenFix; }
     private boolean resubscribing;
     private boolean fusedActive;
     /** Latest camera angles, kept only for the shareable diagnostics report. */
@@ -1486,7 +1508,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Offline visual map · download full UK",
                 "DriveMate original stack · Wells pilot",
                 "Free driving · "+(freeDriving?"On":"Off"),
-                "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off")
+                "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off"),
+                "Map areas · fast offline detail"
         };
         new AlertDialog.Builder(this).setTitle("DriveMate settings")
                 .setItems(options, (dialog, which) -> {
@@ -1622,6 +1645,7 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 30: toggleFreeDriving(); break;
                         case 31: advanceSpeedVoice=!advanceSpeedVoice;
                             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean("advance_speed_voice",advanceSpeedVoice).apply(); break;
+                        case 32: showMapAreas(); break;
                         default: break;
                     }
                 }).setNegativeButton("Close", null).show();
@@ -1655,6 +1679,48 @@ public final class MainActivity extends Activity implements LocationListener {
                     }).setNegativeButton("Cancel",null).show();
             }).setNegativeButton("Close",null).show();
         }catch(Exception e){showError("Regional catalog invalid: "+e.getMessage());}
+    }
+    /** Free map areas: pick a region to download full road detail onto the phone (resumable, verified). */
+    private void showMapAreas(){
+        if(downloadingLocalPack){showError("Wait for the current download to finish.");return;}
+        setStatus("Loading map areas…");
+        packWorker.execute(()->{
+            final MapPacks store=new MapPacks(this);
+            final MapPackCatalog catalog;
+            try{catalog=store.catalog();}catch(Exception e){runOnUiThread(()->{if(!isFinishing())showError("Map areas are not available right now. "+e.getMessage());});return;}
+            final List<MapPackCatalog.Pack> offered=new ArrayList<>();
+            for(MapPackCatalog.Pack p:catalog.packs)if(!p.bundled)offered.add(p);
+            final String[] labels=new String[offered.size()];
+            for(int i=0;i<labels.length;i++){
+                MapPackCatalog.Pack p=offered.get(i);
+                String state=!store.installed(p.id)?"Download":MapPackCatalog.needsUpdate(p,store.installedVersion(p.id))?"Update":"Installed";
+                labels[i]=p.name+" · "+(p.bytes/1_000_000L)+" MB · "+state;
+            }
+            runOnUiThread(()->{
+                if(isFinishing())return;
+                setStatus("Map areas ready");
+                new AlertDialog.Builder(this).setTitle("Map areas")
+                    .setItems(labels,(d,which)->{
+                        final MapPackCatalog.Pack p=offered.get(which);
+                        if(store.installed(p.id)&&!MapPackCatalog.needsUpdate(p,store.installedVersion(p.id))){
+                            new AlertDialog.Builder(this).setTitle(p.name).setMessage("Installed. Delete it to free "+(p.bytes/1_000_000L)+" MB?")
+                                .setPositiveButton("Delete",(x,y)->{store.remove(p.id);setStatus(p.name+" removed");})
+                                .setNegativeButton("Keep",null).show();
+                            return;
+                        }
+                        if(downloadingLocalPack)return;
+                        downloadingLocalPack=true;
+                        packWorker.execute(()->{try{
+                            final long[] last={0};
+                            store.install(p,(done,total)->{long now=SystemClock.elapsedRealtime();
+                                if(now-last[0]>1000){last[0]=now;final int pct=(int)(done*100/Math.max(1,total));
+                                    runOnUiThread(()->{if(!isFinishing())setStatus("Downloading "+p.name+" · "+pct+"%");});}
+                                return !isFinishing();});
+                            runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())setStatus(p.name+" installed · map detail is now offline");});
+                        }catch(Exception err){runOnUiThread(()->{downloadingLocalPack=false;if(!isFinishing())showError(err.getMessage()==null?"Download failed":err.getMessage());});}});
+                    }).setNegativeButton("Close",null).show();
+            });
+        });
     }
     private void showOfflineDisplay(){
         if(active||route!=null||routing||downloadingLocalPack){showError("End navigation and wait for current downloads first.");return;}
@@ -2191,7 +2257,7 @@ public final class MainActivity extends Activity implements LocationListener {
             // Fastest rate while navigating, lighter on the home screen and route
             // preview (see LocationRatePolicy). resubscribeLocationForMode()
             // switches between the two when guidance starts or ends.
-            boolean navigating = active;
+            boolean navigating = wantFastLocation();
             long interval = LocationRatePolicy.gpsIntervalMs(navigating);
             float minDistance = LocationRatePolicy.minDistanceMetres(navigating);
             boolean fused = false;
@@ -2244,7 +2310,7 @@ public final class MainActivity extends Activity implements LocationListener {
      */
     private void resubscribeLocationForMode() {
         if (locationManager == null || !locationSubscribed
-                || subscribedForNavigation == active) return;
+                || subscribedForNavigation == wantFastLocation()) return;
         try {
             locationManager.removeUpdates(this);
             locationManager.unregisterGnssStatusCallback(gnssCallback);
@@ -2306,6 +2372,12 @@ public final class MainActivity extends Activity implements LocationListener {
         if (currentLocation != null && fix.getTime() < currentLocation.getTime()
                 && currentLocation.getTime() - fix.getTime() > 3000) return;
         currentLocation = fix;
+        if (!placesWarmed) { placesWarmed = true; warmSavedPlaces(); }
+        if (startWhenFix && !active && route != null) {
+            startWhenFix = false;
+            gpsHandler.removeCallbacks(startWaitTimeout);
+            startNavigation();
+        }
         if(upcomingDialog!=null&&!canInspectGuidance())dismissUpcoming();
         // The faster-route chip must disappear on its own as soon as the
         // offered geometry starts too far behind the moving car or goes stale.
@@ -2757,9 +2829,17 @@ public final class MainActivity extends Activity implements LocationListener {
         if (route == null || destination == null) return;
         if (NavigationStartPolicy.previewOnly(route.provider)){showError("Local routing is preview-only until driving guidance is validated.");return;}
         if (currentLocation == null || !NavigationStartPolicy.freshFix(currentLocation.getLatitude(), currentLocation.getLongitude(), currentLocation.getTime(), System.currentTimeMillis(), currentLocation.hasAccuracy() ? currentLocation.getAccuracy() : Float.NaN)) {
-            showError("Waiting for a fresh GPS position before starting.");
+            // Do not just refuse: ask for full-rate fixes and start as soon as a fresh one arrives.
+            if (!startWhenFix) {
+                startWhenFix = true;
+                setStatus("Getting a GPS fix · navigation starts as soon as it arrives");
+                resubscribeLocationForMode();
+                gpsHandler.postDelayed(startWaitTimeout, 20000);
+            }
             return;
         }
+        startWhenFix = false;
+        gpsHandler.removeCallbacks(startWaitTimeout);
         active = true;
         arrivalPolicy.reset();
         if (previewParkingButton != null) previewParkingButton.setVisibility(View.GONE);
