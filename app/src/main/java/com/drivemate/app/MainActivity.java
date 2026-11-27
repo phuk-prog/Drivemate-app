@@ -600,6 +600,10 @@ public final class MainActivity extends Activity implements LocationListener {
             vectorRoadsReady=status==RoadDisplayHealth.State.READY;
             if(!active&&route==null&&status==RoadDisplayHealth.State.FAILED)
                 setStatus("DriveMate detail unavailable · regional coverage required");
+            // The map recovered: clear the banner that said otherwise.
+            else if(status==RoadDisplayHealth.State.READY&&banner!=null
+                    &&banner.getText().toString().startsWith("DriveMate detail unavailable"))
+                setStatus("Map ready");
         });
         mapHost.addView(vectorMap.view(),0,new FrameLayout.LayoutParams(-1,-1));
         useLocalMap=true;autoFallback=false;

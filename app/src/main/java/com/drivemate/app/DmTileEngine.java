@@ -76,8 +76,14 @@ public final class DmTileEngine {
         double[] r=new double[out.size()];for(int i=0;i<r.length;i++)r[i]=out.get(i);return r;
     }
     private Node nearest(GeoMath.Point p,Set<String> allowed,boolean origin,double travelBearing)throws Exception{
+        return nearestCandidates(p,allowed,origin,travelBearing,1).get(0);
+    }
+    /**
+     * Up to {@code max} junctions within 350 m, best first. Several are returned because the nearest
+     * one can sit in a small isolated pocket of the road graph that cannot reach anything else.
+     */
+    private List<Node> nearestCandidates(GeoMath.Point p,Set<String> allowed,boolean origin,double travelBearing,int max)throws Exception{
         int y=Math.floorDiv((int)Math.round(p.lat*1e6),CELL),x=Math.floorDiv((int)Math.round(p.lon*1e6),CELL);
-        Node best=null;double dist=350;
         if(!catalog.has(key(p.lat,p.lon))||(allowed!=null&&!allowed.contains(key(p.lat,p.lon))))throw new CoverageException("Position outside pilot map");
         Map<String,Tile> nearby=new HashMap<>();
         for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){
@@ -88,18 +94,25 @@ public final class DmTileEngine {
         if(!origin)for(Tile tile:nearby.values())for(Node n:tile.nodes.values())for(int i=0;i<n.edges.length();i++){
             JSONArray e=n.edges.getJSONArray(i);if(nearby.containsKey(e.getString(2)))incoming.add(e.getLong(1));
         }
+        List<Object[]> found=new ArrayList<>();   // {score, node}
         for(Tile tile:nearby.values())for(Node n:tile.nodes.values()){
             if(origin){
                 boolean hasExit=false;for(int i=0;i<n.edges.length();i++){JSONArray e=n.edges.getJSONArray(i);if(allowed==null||allowed.contains(e.getString(2))){hasExit=true;break;}}
                 if(!hasExit)continue;
             }else if(!incoming.contains(n.id))continue;
-            double d=GeoMath.distance(p,n.point);if(d>dist)continue;double score=d;
+            double d=GeoMath.distance(p,n.point);if(d>=SNAP_RADIUS_METRES)continue;double score=d;
             if(origin&&Double.isFinite(travelBearing))score+=StartSnap.penaltyMetres(travelBearing,exitBearings(n,allowed));
-            if(score<dist||(score==dist&&best!=null&&n.id<best.id)){dist=score;best=n;}
+            if(score<SNAP_RADIUS_METRES)found.add(new Object[]{score,n});
         }
-        if(best==null)throw new CoverageException("No eligible directed road node nearby");
-        return best;
+        found.sort((u,v)->{int c=Double.compare((Double)u[0],(Double)v[0]);return c!=0?c:Long.compare(((Node)u[1]).id,((Node)v[1]).id);});
+        List<Node> out=new ArrayList<>();
+        for(Object[] f:found){if(out.size()>=max)break;out.add((Node)f[1]);}
+        if(out.isEmpty())throw new CoverageException("No eligible directed road node nearby");
+        return out;
     }
+    static final double SNAP_RADIUS_METRES=350;
+    /** Junctions tried at each end before giving up; the nearest can be in an isolated pocket. */
+    static final int START_CANDIDATES=12,END_CANDIDATES=6,MAX_ATTEMPTS=16;
     static final class State{
         final Node node;final long edge,way,prev;final double cost,distance,priority;final State parent;
         /** Real travel seconds along this path. cost may also include search-only penalties and is not shown to the driver. */
@@ -122,9 +135,24 @@ public final class DmTileEngine {
     /** @param travelBearing car heading to prefer a start junction ahead of the car, or NaN
      *  @param penalisedWays ways made more expensive to find a different alternative, or null */
     public Route route(GeoMath.Point start,GeoMath.Point finish,Set<String> allowed,double travelBearing,Set<Long> penalisedWays)throws Exception{
-        long began=SystemClock.elapsedRealtime();Node a=nearest(start,allowed,true,travelBearing),b=nearest(finish,allowed,false);
+        long began=SystemClock.elapsedRealtime();
+        List<Node> starts=nearestCandidates(start,allowed,true,travelBearing,START_CANDIDATES),ends=nearestCandidates(finish,allowed,false,Double.NaN,END_CANDIDATES);
+        // Try the nearest junctions first; if one end sits in an isolated pocket of the graph, try the next.
+        CoverageException lastFailure=null;int attempts=0;
+        for(int sum=0;sum<=START_CANDIDATES+END_CANDIDATES-2&&attempts<MAX_ATTEMPTS;sum++){
+            for(int i=Math.min(sum,starts.size()-1);i>=0&&attempts<MAX_ATTEMPTS;i--){
+                int j=sum-i;if(j<0||j>=ends.size())continue;
+                if(SystemClock.elapsedRealtime()-began>=25000)throw lastFailure!=null?lastFailure:new CoverageException("No connected route inside pilot limits");
+                Node a=starts.get(i),b=ends.get(j);if(a.id==b.id)continue;
+                attempts++;
+                try{return searchRoute(a,b,allowed,penalisedWays,began);}catch(CoverageException noPath){lastFailure=noPath;}
+            }
+        }
+        if(lastFailure==null)throw new IOException("Same snapped junction");
+        throw lastFailure;
+    }
+    private Route searchRoute(Node a,Node b,Set<String> allowed,Set<Long> penalisedWays,long began)throws Exception{
         Map<String,Long> lower=planner.lowerBounds(b.cell);
-        if(a.id==b.id)throw new IOException("Same snapped junction");
         PriorityQueue<State> q=new PriorityQueue<>(Comparator.comparingDouble(s->s.priority));Map<Long,Double> best=new HashMap<>();
         q.add(new State(a,0,0,0,0,0,0,null));best.put(0L,0.0);int count=0;
         while(!q.isEmpty()&&count<MAX_NODES&&best.size()<180000&&q.size()<160000&&SystemClock.elapsedRealtime()-began<25000){
