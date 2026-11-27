@@ -7,7 +7,7 @@ src=root/"app/src/main/java/com/drivemate/app"
 assets=root/"app/src/main/assets"
 main=(src/"MainActivity.java").read_text()
 native=(src/"NativeRegionalRouter.java").read_text()
-assert "new NativeRegionalRouter(this).preview(start,end)" in main
+assert "new NativeRegionalRouter(this).preview(start,end," in main   # native router, optionally with the travel bearing
 assert "new NativeRegionalRouter(this).search(query,near)" in main
 for forbidden in ("TomTomApi.route(","TomTomApi.search(","TomTomApi.parkingNearby(","DriveMateProvider.route(","DriveMateProvider.search(","DriveMateProvider.roadContext(","api.tomtom.com"):
     assert forbidden not in main, forbidden
