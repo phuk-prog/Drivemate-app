@@ -27,11 +27,19 @@ final class NativeMapController {
     private long requestedAt;
     private GeoMath.Point lastRequested;
     private RoadDisplayHealth.State reported;
+    /** At least one detail load has completed (successfully or not). */
+    private volatile boolean loadFinished;
+    private int detailRetries;
+    /** Why the last detail load failed, or empty. Shown in diagnostics. */
+    private volatile String lastDetailError="";
     NativeMapController(Activity activity,Listener listener){
         this.activity=activity;this.listener=listener;view=new NativeMapView(activity);tileSource=new NativeTileSource(activity);
         view.setCameraChanged(()->prefetch(view.center()));
         view.setPaintListener(()->{
-            RoadDisplayHealth.State state=view.roadsDrawn()>0?RoadDisplayHealth.State.READY:RoadDisplayHealth.State.FAILED;
+            // FAILED only after a detail load has finished with nothing drawn; never on the first frame.
+            MapLoadHealth.Report report=MapLoadHealth.report(loadFinished,busy,view.roadsDrawn());
+            if(report==MapLoadHealth.Report.NONE)return;
+            RoadDisplayHealth.State state=report==MapLoadHealth.Report.READY?RoadDisplayHealth.State.READY:RoadDisplayHealth.State.FAILED;
             if(state!=reported){reported=state;view.post(()->{if(!disposed)listener.status(state,view.roadsDrawn());});}
         });
     }
@@ -41,7 +49,7 @@ final class NativeMapController {
     boolean hasRenderedRoads(){return view.roadsDrawn()>0;}
     double currentZoom(){return view.zoom();}
     void setVisible(boolean v){view.setVisibility(v?View.VISIBLE:View.INVISIBLE);}
-    String geometryDescription(){return current==null?"DriveMate native · regional detail unavailable":current.checkedEdges>0?"DriveMate native · verified route roads":"DriveMate native · regional roads";}
+    String geometryDescription(){return current==null?"DriveMate native · regional detail unavailable"+(lastDetailError.isEmpty()?"":" ("+lastDetailError+")"):current.checkedEdges>0?"DriveMate native · verified route roads":"DriveMate native · regional roads";}
     String routeAlignmentDiagnostic(){return current!=null&&current.checkedEdges>0?current.checkedEdges+" exact source edges":"unverified";}
     void setHighDetailEnabled(boolean enabled){}
     void setBuildings3D(boolean enabled){view.setBuildings(enabled);}
@@ -95,15 +103,22 @@ final class NativeMapController {
         requestedAt=now;lastRequested=p;lastZoom=zoom;busy=true;int gen=generation,w=view.getWidth(),h=view.getHeight();
         final NativeMapScene verified=verifiedRoute;final boolean routePresent=!route.isEmpty();
         worker.execute(()->{
-            NativeMapScene loaded=null;
+            NativeMapScene loaded=null;boolean detailFailed=false;String detailError="";
             if(zoom>=15)try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
             // Never replace the verified route road geometry with independently generalized national tiles.
             if(loaded==null&&routePresent)loaded=verified;
-            if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception ignored){
+            if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception failure){
+                // Fall back to the coarse world overview, but remember why and retry the detail load.
+                detailFailed=true;detailError=MapLoadHealth.reason(failure);
                 try{loaded=tileSource.load(p,Math.min(6,zoom),w,h);}catch(Exception unavailable){}
             }
-            final NativeMapScene result=loaded;
-            activity.runOnUiThread(()->{busy=false;if(disposed||gen!=generation||result==null)return;
+            final NativeMapScene result=loaded;final boolean failedDetail=detailFailed;final String failedReason=detailError;
+            activity.runOnUiThread(()->{busy=false;loadFinished=true;lastDetailError=failedDetail?failedReason:"";
+                if(failedDetail&&!disposed){
+                    long delay=MapLoadHealth.retryDelayMs(++detailRetries);
+                    if(delay>0)view.postDelayed(()->{if(!disposed){lastRequested=null;prefetch(view.center());}},delay);
+                }else if(!failedDetail)detailRetries=0;
+                if(disposed||gen!=generation||result==null)return;
                 GeoMath.Point c=view.center();if(c!=null&&result.covers(c)&&Math.abs(view.zoom()-zoom)<1.5){current=result;view.setSceneOnly(result);view.setRoadside(Collections.emptyList());roadFurniture(result);}
             });
         });
