@@ -23,10 +23,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
         with:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-          gradle-version: '8.9'
+          gradle-version: '9.9.2'
       - name: Verify wrapper and release identity
         run: |
-          echo '498495120a03b9a6ab5d155f5de3c8f0d986a449153702fb80fc80e134484f17  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          echo '621008afc4f5d59357fcf06ffa644dd5aade5e091bdc363742710445f73cdaf8  gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
           python3 tools/check_release_version.py
           python3 tools/check_map_lock.py
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
