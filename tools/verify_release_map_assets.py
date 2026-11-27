@@ -15,5 +15,5 @@ def main():
             out=root/asset
             subprocess.run(["gh","release","download",pin["tag"],"--repo",MAP,"--pattern",asset,"--output",str(out)],check=True)
             if digest(out)!=sha:raise SystemExit("Map asset checksum mismatch: "+asset)
-    print("Exact remote map assets verified; UK routing remains preview-only.")
+    print("Exact remote map assets verified; UK routing is owner-approved for driving (not independently road-validated).")
 if __name__=="__main__":main()

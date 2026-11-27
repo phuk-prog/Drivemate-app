@@ -16,7 +16,7 @@ Orientation so sessions don't need to rediscover the repo. Keep this file short.
 - Don't edit dependency lockfiles by hand; they come from CI.
 - Cross-repo map data lives in Drivemate-map; pinned by hash (`check_map_lock.py`).
 - Run only the narrow test you need (`./gradlew :app:testDebugUnitTest --tests <Class>`), not the full suite.
-- Safety: routing is preview-only, not road-approved. Don't loosen safety gates.
+- Driving: the owner lifted the preview-only guard (`NavigationStartPolicy.LOCAL_ROUTES_PREVIEW_ONLY=false`); local routes can be started. Routing data is owner-approved, not independently road-validated. Keep the integrity checks (dependency lock, map-lock hashes, wrapper checksum, action pins, signing environment).
 
 ## Native integration note
 The independent candidate consolidates the new original renderer and regional routing in MainActivity and NativeMapController/NativeRegionalRouter. The older extracted provider-era controllers from PR #52 are superseded in the compiled app; their historical implementations remain in the Git history. Do not reintroduce SDK/provider adapters from that refactor. Documentation archive and read-deny rules remain.

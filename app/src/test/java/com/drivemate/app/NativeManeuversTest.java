@@ -29,8 +29,8 @@ public class NativeManeuversTest {
         assertEquals("ROUNDABOUT_EXIT",steps.get(1).maneuver);assertEquals(0,steps.get(1).exitNumber);
         assertTrue(NativeManeuvers.limits(points,Arrays.asList(1L,2L,3L),tags).isEmpty());
     }
-    @Test public void nativeCandidateCannotStartUnvalidatedDriving(){
-        assertTrue(NavigationStartPolicy.previewOnly(NativeRegionalRouter.PROVIDER));
+    @Test public void nativeRoutesCanBeStartedWhileGuardIsLifted(){
+        assertFalse(NavigationStartPolicy.previewOnly(NativeRegionalRouter.PROVIDER));
     }
 
     // ---- batch A: turn bands, forks, roundabout exits, lanes ----

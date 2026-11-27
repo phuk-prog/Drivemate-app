@@ -8,7 +8,7 @@
   "ukRouting": {
     "tag": "routes-20261124T044450Z-4f30f06120b2-ba57998035b63",
     "manifestSha256": "19e668dc43d0abdc09e22af2a09672ac0d5dc6b8b12dd39b2b1c74d3a97f5b51",
-    "approval": "experimental-preview-only"
+    "approval": "owner-approved-for-driving"
   },
   "pilotSourceCommit": "e4bd8c41a04bf17a319df01cb0ff9579a4393426",
   "pilotSourceSha256": "8cde16000a69096b62f7a75598fb892c2d8eea34b8f2237278a785ddf125ce26"

@@ -4,8 +4,10 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class NavigationStartPolicyTest {
-    @Test public void localProviderRemainsPreviewOnly() {
-        assertTrue(NavigationStartPolicy.previewOnly("DriveMate local preview"));
+    /** The owner lifted the preview-only guard; flipping the constant restores it. */
+    @Test public void localRoutesCanBeStartedWhileGuardIsLifted() {
+        assertFalse(NavigationStartPolicy.LOCAL_ROUTES_PREVIEW_ONLY);
+        assertFalse(NavigationStartPolicy.previewOnly("DriveMate local preview"));
         assertFalse(NavigationStartPolicy.previewOnly("TomTom"));
     }
     @Test public void trafficIsNotInventedForIndependentRouting() {
