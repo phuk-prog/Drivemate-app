@@ -14,6 +14,9 @@ final class NativeTileSource implements AutoCloseable {
     private FileInputStream worldStream;
     private final LinkedHashMap<String,List<NativeMapScene.Shape>> cache=new LinkedHashMap<>(16,.75f,true);
     private int cachedVertices;
+    /** Tiles that could not be loaded in the latest {@link #load}; 0 means the view is complete. */
+    private volatile int missing;
+    int missingTiles(){return missing;}
     NativeTileSource(Context app){this.app=app.getApplicationContext();}
     private byte[] raw(int z,int x,int y)throws IOException{
         if(z>6){if(uk==null)uk=new DriveTileServer(app,false);return uk.nativeTile(z,x,y);}
@@ -46,11 +49,15 @@ final class NativeTileSource implements AutoCloseable {
         double radius=Math.max(256,Math.hypot(Math.max(1,width),Math.max(1,height))*.85)/scale;
         int a,b,c,d,n;
         do{n=1<<z;a=Math.max(0,(int)Math.floor((cx-radius)*n));b=Math.min(n-1,(int)Math.floor((cx+radius)*n));c=Math.max(0,(int)Math.floor((cy-radius)*n));d=Math.min(n-1,(int)Math.floor((cy+radius)*n));if((long)(b-a+1)*(d-c+1)<=16||z<=2)break;z--;}while(true);
-        ArrayList<NativeMapScene.Shape> shapes=new ArrayList<>();int total=0;
-        // Reject incomplete coverage rather than claiming a full viewport after missing chunks.
+        ArrayList<NativeMapScene.Shape> shapes=new ArrayList<>();int total=0,loadedTiles=0;missing=0;IOException firstFailure=null;
+        // Draw the tiles that are available and report how many are still missing, so the caller can
+        // retry and fill the rest in. One slow or failed tile must not blank the whole view.
         for(int y=c;y<=d;y++)for(int x=a;x<=b;x++){
-            List<NativeMapScene.Shape> s=tile(z,x,y);total+=vertices(s);if(total>300000||shapes.size()+s.size()>32000)throw new IOException("Viewport exceeds display budget");shapes.addAll(s);
+            List<NativeMapScene.Shape> s;
+            try{s=tile(z,x,y);}catch(IOException unavailable){missing++;if(firstFailure==null)firstFailure=unavailable;continue;}
+            loadedTiles++;total+=vertices(s);if(total>300000||shapes.size()+s.size()>32000)throw new IOException("Viewport exceeds display budget");shapes.addAll(s);
         }
+        if(loadedTiles==0)throw firstFailure!=null?firstFailure:new IOException("No map tiles for this view");
         shapes.sort(Comparator.comparingInt(f->f.bridge?100+f.kind:f.kind));
         return NativeMapScene.tiles(shapes,new double[]{NativeMapProjection.lon(a/(double)n),NativeMapProjection.lat((d+1.0)/n),NativeMapProjection.lon((b+1.0)/n),NativeMapProjection.lat(c/(double)n)});
     }

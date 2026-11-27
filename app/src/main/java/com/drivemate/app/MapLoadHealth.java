@@ -32,6 +32,12 @@ public final class MapLoadHealth {
         return Math.min(30_000L, 4_000L * attempt);
     }
 
+    /** Reason shown while some tiles of the view are still missing. */
+    public static String partialReason(int missingTiles) {
+        int n = Math.max(1, missingTiles);
+        return "partial view, " + n + " tile" + (n == 1 ? "" : "s") + " still loading";
+    }
+
     /** Short, coordinate-free reason for diagnostics, e.g. "IOException: Read timed out". */
     public static String reason(Throwable error) {
         if (error == null) return "";

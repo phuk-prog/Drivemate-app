@@ -107,7 +107,10 @@ final class NativeMapController {
             if(zoom>=15)try{loaded=new NativeRegionalRouter(activity).roadContext(p).map;}catch(Exception ignored){}
             // Never replace the verified route road geometry with independently generalized national tiles.
             if(loaded==null&&routePresent)loaded=verified;
-            if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);}catch(Exception failure){
+            if(loaded==null&&!routePresent)try{loaded=tileSource.load(p,zoom,w,h);
+                // Show what loaded, and keep filling in the missing tiles.
+                if(tileSource.missingTiles()>0){detailFailed=true;detailError=MapLoadHealth.partialReason(tileSource.missingTiles());}
+            }catch(Exception failure){
                 // Fall back to the coarse world overview, but remember why and retry the detail load.
                 detailFailed=true;detailError=MapLoadHealth.reason(failure);
                 try{loaded=tileSource.load(p,Math.min(6,zoom),w,h);}catch(Exception unavailable){}

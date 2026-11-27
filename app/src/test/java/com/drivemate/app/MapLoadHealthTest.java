@@ -39,4 +39,10 @@ public class MapLoadHealthTest {
         String longText = new String(new char[500]).replace('\0', 'x');
         assertTrue(MapLoadHealth.reason(new RuntimeException(longText)).length() <= 120);
     }
+
+    @Test public void partialReasonCountsTiles() {
+        assertEquals("partial view, 1 tile still loading", MapLoadHealth.partialReason(1));
+        assertEquals("partial view, 5 tiles still loading", MapLoadHealth.partialReason(5));
+        assertEquals("partial view, 1 tile still loading", MapLoadHealth.partialReason(0));
+    }
 }
