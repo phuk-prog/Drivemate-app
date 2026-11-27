@@ -241,6 +241,65 @@ public final class DmTileEngine {
             return count;
         }finally{cache.clear();}
     }
+    /**
+     * Per route node: how many other legal exits are ordinary roads (for roundabout exit
+     * counts) and whether a real road forks off to the left or right. Ways the engine
+     * cannot classify set {@code unknownExit}, which suppresses an exit count.
+     */
+    JunctionDetail[] junctionDetails(Route route)throws Exception{
+        int n=route.points.size();JunctionDetail[] out=new JunctionDetail[n];
+        // Pass 1: gather other legal exits at each interior node and the ways they use.
+        class Alt{final long way;final double bearing;Alt(long w,double b){way=w;bearing=b;}}
+        List<List<Alt>> alts=new ArrayList<>();Set<Long> wanted=new HashSet<>();Set<String> cells=new TreeSet<>(route.cells);
+        double[] routeBearing=new double[n];
+        try{
+            for(int i=0;i<n;i++)alts.add(new ArrayList<>());
+            for(int i=1;i<n-1;i++){
+                GeoMath.Point p=route.points.get(i);Node node=load(key(p.lat,p.lon)).nodes.get(route.nodeIds.get(i));
+                if(node==null)throw new CoverageException("Missing route junction");
+                routeBearing[i]=GeoMath.bearingDegrees(p,route.points.get(i+1));
+                State state=new State(node,route.edgeIds.get(i-1),route.ways.get(i-1),route.nodeIds.get(i-1),0,0,0,null);
+                List<long[]> restrictions=rules(state);
+                for(int j=0;j<node.edges.length();j++){
+                    JSONArray e=node.edges.getJSONArray(j);long dst=e.getLong(1),way=e.getLong(3);
+                    if(e.getLong(0)==route.edgeIds.get(i))continue;
+                    if(!LocalRoutingPilot.allowed(state.prev,dst,way,restrictions))continue;
+                    String cell=e.getString(2);if(!catalog.has(cell))continue;
+                    Node far=load(cell).nodes.get(dst);if(far==null)continue;
+                    alts.get(i).add(new Alt(way,GeoMath.bearingDegrees(node.point,far.point)));wanted.add(way);cells.add(cell);
+                }
+            }
+            // Pass 2: highway class of every other way, from the cells involved.
+            Map<Long,String> classes=new HashMap<>();
+            for(String cell:cells){
+                if(!catalog.has(cell))continue;
+                JSONArray rows=load(cell).features;
+                for(int k=0;k<rows.length();k++){
+                    JSONArray row=rows.getJSONArray(k);long id=row.getLong(0);
+                    if(wanted.contains(id)){
+                        JSONObject tags=row.getJSONObject(1);
+                        boolean roundaboutWay="roundabout".equals(tags.optString("junction"))||"circular".equals(tags.optString("junction"));
+                        classes.put(id,roundaboutWay?"roundabout":tags.optString("highway",""));
+                    }
+                }
+            }
+            for(int i=1;i<n-1;i++){
+                int countable=0;boolean unknown=false,forkL=false,forkR=false;
+                for(Alt a:alts.get(i)){
+                    String cls=classes.get(a.way);
+                    if(cls==null||cls.isEmpty()){unknown=true;continue;}
+                    // Another roundabout way is not an exit; an ordinary road is; a driveway or path is ignored.
+                    if(JunctionDetail.countableHighway(cls)){
+                        countable++;
+                        double rel=JunctionDetail.relative(routeBearing[i],a.bearing);
+                        if(JunctionDetail.isFork(rel)){if(rel>0)forkR=true;else forkL=true;}
+                    }else if(!"roundabout".equals(cls)&&!JunctionDetail.ignorableHighway(cls))unknown=true;
+                }
+                out[i]=new JunctionDetail(countable,unknown,forkL,forkR);
+            }
+            return out;
+        }finally{cache.clear();}
+    }
     /** Search one verified cell at a time, avoiding retaining the whole regional graph. */
     List<JSONArray> regionalSearch(String query)throws Exception{
         ArrayList<JSONArray> rows=new ArrayList<>();Set<String> seen=new HashSet<>();

@@ -22,4 +22,14 @@ public class NavigationUnitsTest {
         assertTrue(NavigationUnits.duration(0).contains("min"));
         assertEquals("1 hr 5 min", NavigationUnits.duration(3900));
     }
+
+    @Test public void spokenDistanceNeverSaysOnePointZero() {
+        assertEquals("1 kilometre", NavigationUnits.spokenDistance(1000, true));
+        assertEquals("1 kilometre", NavigationUnits.spokenDistance(1040, true));
+        assertEquals("1.5 kilometres", NavigationUnits.spokenDistance(1500, true));
+        assertEquals("2 kilometres", NavigationUnits.spokenDistance(2000, true));
+        assertEquals("1 mile", NavigationUnits.spokenDistance(1609.344, false));
+        assertEquals("2 miles", NavigationUnits.spokenDistance(3218.688, false));
+        assertEquals("300 metres", NavigationUnits.spokenDistance(300, true));
+    }
 }

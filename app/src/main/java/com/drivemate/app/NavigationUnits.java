@@ -18,16 +18,26 @@ public final class NavigationUnits {
         return Math.round(safe / METRES_PER_YARD / 10.0) * 10 + " yd";
     }
 
+    /** "1 kilometre", "2 kilometres", "1.5 kilometres": never "1.0 kilometres". */
+    static String spokenUnits(double value, String singular, String plural) {
+        double rounded = Math.round(value * 10.0) / 10.0;
+        if (rounded == Math.rint(rounded)) {
+            long whole = (long) rounded;
+            return whole + " " + (whole == 1 ? singular : plural);
+        }
+        return String.format(Locale.UK, "%.1f %s", rounded, plural);
+    }
+
     public static String spokenDistance(double metres, boolean metric) {
         double safe = Math.max(0, metres);
         if (metric) {
             if (safe >= 1000) {
-                return String.format(Locale.UK, "%.1f kilometres", safe / 1000.0);
+                return spokenUnits(safe / 1000.0, "kilometre", "kilometres");
             }
             return Math.max(10, Math.round(safe / 10.0) * 10) + " metres";
         }
         if (safe >= 880) {
-            return String.format(Locale.UK, "%.1f miles", safe / METRES_PER_MILE);
+            return spokenUnits(safe / METRES_PER_MILE, "mile", "miles");
         }
         return Math.max(10, Math.round(safe / METRES_PER_YARD / 10.0) * 10)
                 + " yards";

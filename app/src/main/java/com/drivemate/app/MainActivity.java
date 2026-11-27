@@ -43,6 +43,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
@@ -553,6 +554,7 @@ public final class MainActivity extends Activity implements LocationListener {
         updateVoiceButton();
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         if (sensorManager != null) rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR);
         speech = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS && speech != null) {
@@ -562,6 +564,16 @@ public final class MainActivity extends Activity implements LocationListener {
                 int language = speech.setLanguage(Locale.UK);
                 speechReady = language != TextToSpeech.LANG_MISSING_DATA
                         && language != TextToSpeech.LANG_NOT_SUPPORTED;
+                speech.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+                    @Override public void onStart(String utteranceId) { }
+                    @Override public void onDone(String utteranceId) { runOnUiThread(() -> speechFinished()); }
+                    @Override public void onError(String utteranceId) { runOnUiThread(() -> speechFinished()); }
+                    @Override public void onStop(String utteranceId, boolean interrupted) { runOnUiThread(() -> speechFinished()); }
+                });
+            }
+            if (!speechReady && !voiceUnavailableShown && voiceMode != DrivingVoicePolicy.SILENT) {
+                voiceUnavailableShown = true;
+                runOnUiThread(() -> setStatus("Voice guidance unavailable · install a UK English text-to-speech voice"));
             }
         });
         // TomTom credentials optional; configure independent services in Settings.
@@ -811,7 +823,7 @@ public final class MainActivity extends Activity implements LocationListener {
             else if (voiceMode == DrivingVoicePolicy.SILENT)
                 Toast.makeText(this, "Enable voice guidance to repeat a turn",
                         Toast.LENGTH_SHORT).show();
-            else speak(nextInstruction); // Explicit repeat works in Alerts only mode.
+            else { voiceQueue.reset(); speak(nextInstruction, VoiceQueue.URGENT); } // Explicit repeat works in Alerts only mode and is never dropped as a duplicate.
         });
         navActions.addView(repeatButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         refreshButton = chip("↻ Reroute");
@@ -3581,26 +3593,26 @@ public final class MainActivity extends Activity implements LocationListener {
         double early = NavigationMatch.earlyDistance(speedNow);
         if (untilTurn <= immediate && spokenNowIndex != next) {
             spokenNowIndex = next;
-            if (DrivingVoicePolicy.turn(voiceMode, 2)) say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,true,"",followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
+            if (DrivingVoicePolicy.turn(voiceMode, 2)) sayTurn(true, IntelligentGuidance.voice(direction,untilTurn,metricUnits,true,"",followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
         } else if (untilTurn > immediate && untilTurn <= approach && spokenCloseIndex != next
                 && spokenNowIndex != next) {
             spokenCloseIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 1)) {
-                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
+                sayTurn(false, IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,followingVoice)+linkedSpeedSpeech(speedAtTurn,turnChange));
                 if(!currentLanePrompt.isEmpty()){spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;}
             }
         } else if (untilTurn > approach && untilTurn <= early && spokenDistanceIndex != next
                 && spokenCloseIndex != next && spokenNowIndex != next) {
             spokenDistanceIndex = next;
             if (DrivingVoicePolicy.turn(voiceMode, 0)) {
-                say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,untilTurn<=30,currentLanePrompt,"")+linkedSpeedSpeech(speedAtTurn,turnChange));
+                sayTurn(false, IntelligentGuidance.voice(direction,untilTurn,metricUnits,untilTurn<=30,currentLanePrompt,"")+linkedSpeedSpeech(speedAtTurn,turnChange));
                 if(!currentLanePrompt.isEmpty()){spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;}
             }
         } else if (untilTurn>immediate && !currentLanePrompt.isEmpty()
                 && (spokenLaneIndex!=next || !currentLanePrompt.equals(spokenLanePrompt))
                 && DrivingVoicePolicy.turn(voiceMode,1)) {
             spokenLaneIndex=next;spokenLanePrompt=currentLanePrompt;
-            say(IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,""));
+            sayTurn(false, IntelligentGuidance.voice(direction,untilTurn,metricUnits,false,currentLanePrompt,""));
         } else if (voiceMode==DrivingVoicePolicy.FULL && untilTurn>Math.max(2400,early*2) && reassuranceIndex!=next && speedNow>3) {
             reassuranceIndex=next;
             say("Continue along the highlighted route for "+NavigationUnits.spokenDistance(untilTurn,metricUnits));
@@ -3930,14 +3942,57 @@ public final class MainActivity extends Activity implements LocationListener {
         if (DrivingVoicePolicy.verifiedAlert(voiceMode, allowed)) speak(message);
     }
 
-    private void speak(String message) {
+    private void speak(String message) { speak(message, VoiceQueue.INFO); }
+
+    private final VoiceQueue voiceQueue = new VoiceQueue();
+    private AudioManager audioManager;
+    private AudioFocusRequest voiceFocus;
+    private int utterancesInFlight;
+    private boolean voiceUnavailableShown;
+
+    /** Speak with a priority so a status line cannot cut off a turn instruction. */
+    private void speak(String message, int priority) {
         if (voiceMode!=DrivingVoicePolicy.SILENT && speechReady && speech != null && message != null
                 && !message.trim().isEmpty()) {
+            VoiceQueue.Action action = voiceQueue.offer(priority, message, SystemClock.elapsedRealtime());
+            if (action == VoiceQueue.Action.DROP) return;
             Bundle params = new Bundle();
             params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, guidanceVolume);
             lastSpeechAt=SystemClock.elapsedRealtime();
-            speech.speak(message, TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
+            requestVoiceFocus();
+            if (action == VoiceQueue.Action.PLAY_NOW) utterancesInFlight = 0;
+            utterancesInFlight++;
+            speech.speak(message, action == VoiceQueue.Action.QUEUE
+                    ? TextToSpeech.QUEUE_ADD : TextToSpeech.QUEUE_FLUSH, params, "drivemate-guidance");
         }
+    }
+
+    /** Ask other audio (music, podcasts) to lower its volume while guidance speaks. */
+    private void requestVoiceFocus() {
+        if (audioManager == null || voiceFocus != null) return;
+        voiceFocus = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setOnAudioFocusChangeListener(change -> { })
+                .build();
+        audioManager.requestAudioFocus(voiceFocus);
+    }
+
+    private void speechFinished() {
+        if (utterancesInFlight > 0) utterancesInFlight--;
+        if (utterancesInFlight > 0) return;
+        voiceQueue.finished();
+        if (audioManager != null && voiceFocus != null) {
+            audioManager.abandonAudioFocusRequest(voiceFocus);
+            voiceFocus = null;
+        }
+    }
+
+    /** A turn instruction: urgent when it is due now. */
+    private void sayTurn(boolean urgent, String message) {
+        if (voiceMode != DrivingVoicePolicy.SILENT && voiceMode != DrivingVoicePolicy.ALERTS_ONLY)
+            speak(message, urgent ? VoiceQueue.URGENT : VoiceQueue.TURN);
     }
 
     @Override public void onProviderDisabled(String provider) {
