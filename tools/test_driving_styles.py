@@ -8,12 +8,12 @@ for file in ("drivemate_vector_style.json","drivemate_vector_style_night.json"):
     assert by["uk-roads"]["source-layer"]=="streets"
     assert by["uk-buildings-3d"]["type"]=="fill-extrusion"
     assert by["uk-buildings-3d"]["minzoom"]==14.5
-    assert ids.index("uk-roads")<ids.index("uk-ref-motorway")<ids.index("dm-tomtom-high-detail")
+    assert ids.index("uk-roads")<ids.index("uk-ref-motorway")
     assert by["uk-ref-motorway"]["filter"][1]==["has","ref"]
     assert by["uk-road-ref-fallback"]["filter"][1]==["has","ref"]
     assert style["sources"]["uk"]["maxzoom"]==14
-    assert by["dm-tomtom-high-detail"]["layout"]["visibility"]=="none"
-    assert by["tomtom-traffic-flow"]["layout"]["visibility"]=="none"
+    assert set(style["sources"])=={"world","uk"}
+    assert "tomtom" not in json.dumps(style).lower()
     expected={"ferries","street_labels_points","streets_polygons_labels","boundaries","boundary_labels","pier_lines","pier_polygons","dam_lines","dam_polygons","aerialways"}
     assert expected <= {l.get("source-layer") for l in layers}
     assert by["uk-motorway-junction-ref"]["source-layer"]=="street_labels_points"
@@ -33,4 +33,5 @@ for file in ("dm_unified_day.json","dm_unified_night.json"):
 for file in ("drivemate_vector_style.json","drivemate_vector_style_night.json"):
     s=json.loads((root/file).read_text());by={l["id"]:l for l in s["layers"]}
     for id in ("uk-road-casing","uk-roads","uk-road-links"):assert "bridge" in str(by[id]["filter"])
-    assert by["tomtom-traffic-flow"]["layout"]["visibility"]=="none"
+    assert set(s["sources"])=={"world","uk"}
+    assert "tomtom" not in json.dumps(s).lower()

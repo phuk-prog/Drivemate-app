@@ -5,7 +5,7 @@ import java.util.List;
 final class RouteMapPolicy {
     private RouteMapPolicy(){}
     static boolean useTomTomMap(String provider,boolean keyAvailable){return false;} // Vector display by default; raster remains an explicit preference or startup fallback.
-    static boolean useTomTomVector(String provider,boolean keyAvailable){return keyAvailable&&"TomTom".equals(provider);}
+    static boolean useTomTomVector(String provider,boolean keyAvailable){return false;} // DriveMate base only.
     static String description(String provider,boolean shared){
         return shared?"DriveMate shared road geometry":"DriveMate vector map · road alignment not verified";
     }
@@ -26,7 +26,8 @@ final class RouteMapPolicy {
         return 9;
     }
     // Inset avoids clipped road features at the regional extract boundary.
-    static boolean insideStockport(GeoMath.Point p){return p!=null&&p.lat>=53.392&&p.lat<=53.423&&p.lon>=-2.188&&p.lon<=-2.137;}
+    static double[] stockportBounds(){return new double[]{-2.243,53.367,-2.137,53.423};}
+    static boolean insideStockport(GeoMath.Point p){return insideBounds(p,stockportBounds());}
     static boolean insideStockport(List<GeoMath.Point> p){
         if(p==null||p.size()<2)return false;
         for(GeoMath.Point q:p)if(!insideStockport(q))return false;

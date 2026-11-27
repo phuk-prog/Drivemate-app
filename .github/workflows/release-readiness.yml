@@ -13,8 +13,10 @@ jobs:
   contract:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m unittest discover -s tools -p test_release_workflow.py -v
+      - name: Verify independent navigation and rendering contract
+        run: python3 tools/check_native_base.py && python3 tools/test_driving_styles.py
       - run: python3 tools/check_release_version.py && python3 tools/check_map_lock.py && python3 tools/check-apk-distribution.py
       - name: Verify immutable remote map pins
         env:

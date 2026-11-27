@@ -11,7 +11,29 @@ final class SpeedChangeAwareness {
     }
     private double lastOffset=Double.NaN;
     private int lastLimit=-1;
-    void reset(){lastOffset=Double.NaN;lastLimit=-1;}
+    private RouteIntelligence.SpeedSection previous;
+    private double previousAlong=Double.NaN;
+    private long previousAt=-1;
+    private Change pendingEntry;
+    private boolean entryConfirmed;
+    void reset(){lastOffset=Double.NaN;lastLimit=-1;clearEntry();}
+    void clearEntry(){previous=null;previousAlong=Double.NaN;previousAt=-1;pendingEntry=null;entryConfirmed=false;}
+    /** Entry requires recent trusted fixes on explicitly adjacent sections. */
+    void observeEntry(List<RouteIntelligence.SpeedSection> sections,RouteIntelligence.SpeedSection current,double along,long now){
+        entryConfirmed=false;
+        if(!Double.isFinite(along)||now<0){clearEntry();return;}
+        if(previous!=null&&(now<previousAt||now-previousAt>12000||along<previousAlong||along-previousAlong>180))clearEntry();
+        if(pendingEntry!=null&&(along-pendingEntry.offset>100||(current!=null&&current.kmh!=pendingEntry.kmh)))pendingEntry=null;
+        if(current==null)return;
+        if(previous!=null&&previous.kmh!=current.kmh){
+            Change c=next(sections,previous,previousAlong,0);
+            if(c!=null&&c.kmh==current.kmh&&Math.abs(c.offset-current.start)<=1&&along>=c.offset+3&&along-c.offset<=100)pendingEntry=c;
+        }
+        entryConfirmed=pendingEntry!=null&&current.kmh==pendingEntry.kmh;
+        previous=current;previousAlong=along;previousAt=now;
+    }
+    Change pendingEntry(){return entryConfirmed?pendingEntry:null;}
+    void entryAnnounced(){pendingEntry=null;entryConfirmed=false;}
     boolean shouldAnnounce(Change c){
         if(c==null || (Double.isFinite(lastOffset) && Math.abs(c.offset-lastOffset)<5 && c.kmh==lastLimit)) return false;
         lastOffset=c.offset;lastLimit=c.kmh;return true;

@@ -12,5 +12,5 @@ public class MappedSignalsTest {
         MappedSignals s=MappedSignals.read(new ByteArrayInputStream(fixture(false)));assertEquals(2,s.nearby(53.39,-2.18,53.42,-2.15,20).size());assertEquals(0,s.nearby(53.39,-2.18,53.42,-2.15,1).size());assertEquals(0,s.nearby(51,-3,55,-1,20).size());
     }
     @Test(expected=IOException.class) public void unorderedInputRejected()throws Exception{MappedSignals.read(new ByteArrayInputStream(fixture(true)));}
-    @Test public void noRasterTrafficOverIndependentRoads(){assertTrue(RouteMapPolicy.useTomTomVector("TomTom",true));assertFalse(RouteMapPolicy.useTomTomVector("DriveMate",true));assertFalse(RouteMapPolicy.useTomTomVector("TomTom",false));}
+    @Test public void noRasterTrafficOverIndependentRoads(){assertFalse(RouteMapPolicy.useTomTomVector("TomTom",true));assertFalse(RouteMapPolicy.useTomTomVector("DriveMate",true));assertFalse(RouteMapPolicy.useTomTomVector("TomTom",false));}
 }

@@ -100,7 +100,7 @@ public final class TomTomApi {
         // Optional proof from the exact hosted routing graph; never changes guidance.
         String geometrySourceSha = "";
         List<Long> geometryWays = java.util.Collections.emptyList();
-        DmUnifiedGeometry sharedGeometry;
+        NativeMapScene nativeScene;
         public final List<RouteIntelligence.LaneSection> laneSections;
         public final List<RouteIntelligence.SpeedSection> speedSections;
         public final List<RouteIntelligence.TrafficSection> trafficSections;

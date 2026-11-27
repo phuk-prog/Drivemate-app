@@ -3,7 +3,6 @@ package com.drivemate.app;
 import android.content.Context;
 import java.io.*;
 import java.util.*;
-import org.maplibre.geojson.*;
 
 /** Mapped locations only; not evidence of operating status or route/direction applicability. */
 final class MappedRoadside {
@@ -17,7 +16,9 @@ final class MappedRoadside {
     }
     static MappedRoadside read(InputStream input)throws IOException {
         DataInputStream in=new DataInputStream(new BufferedInputStream(input));
-        if(in.readInt()!=0x444d4831)throw new IOException("Bad roadside format");
+        int format=in.readInt();
+        if(format!=0x444d4831&&format!=0x444d4832)throw new IOException("Bad roadside format");
+        int maxKind=format==0x444d4832?11:4;
         byte[] sha=new byte[32];in.readFully(sha);
         StringBuilder hash=new StringBuilder();
         for(byte b:sha)hash.append(String.format(Locale.ROOT,"%02x",b&255));
@@ -26,7 +27,7 @@ final class MappedRoadside {
         int[] a=new int[n],o=new int[n];byte[] k=new byte[n];
         for(int i=0;i<n;i++){
             a[i]=in.readInt();o[i]=in.readInt();k[i]=in.readByte();
-            if(a[i]<490000000||a[i]>610000000||o[i]<-90000000||o[i]>30000000||k[i]<1||k[i]>4
+            if(a[i]<490000000||a[i]>610000000||o[i]<-90000000||o[i]>30000000||k[i]<1||k[i]>maxKind
                 ||i>0&&(a[i]<a[i-1]||a[i]==a[i-1]&&(o[i]<o[i-1]||o[i]==o[i-1]&&k[i]<=k[i-1])))
                 throw new IOException("Invalid roadside point");
         }
@@ -34,18 +35,9 @@ final class MappedRoadside {
         return new MappedRoadside(a,o,k);
     }
     private int first(int v){int l=0,r=lat.length;while(l<r){int m=(l+r)>>>1;if(lat[m]<v)l=m+1;else r=m;}return l;}
-    FeatureCollection features(double south,double west,double north,double east,boolean detailed){
-        ArrayList<Feature> out=new ArrayList<>();
-        if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)
-            ||south>north||west>east||north-south>.25||east-west>.25)return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
+    List<int[]> nativePoints(double south,double west,double north,double east){
+        if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)||south>north||west>east||north-south>.25||east-west>.25)return Collections.emptyList();
         int a=(int)Math.floor(south*1e7),b=(int)Math.ceil(north*1e7),x=(int)Math.floor(west*1e7),y=(int)Math.ceil(east*1e7);
-        for(int i=first(a);i<lat.length&&lat[i]<=b;i++){
-            if(lon[i]<x||lon[i]>y||kind[i]==4||(!detailed&&kind[i]!=1))continue;
-            if(out.size()>=1500)break;
-            Feature f=Feature.fromGeometry(Point.fromLngLat(lon[i]/1e7,lat[i]/1e7));
-            f.addStringProperty("icon",kind[i]==1?"dm-mapped-camera":kind[i]==2?"dm-mapped-crossing":"dm-mapped-calming");
-            out.add(f);
-        }
-        return FeatureCollection.fromFeatures(out.toArray(new Feature[0]));
+        List<int[]> out=new ArrayList<>();for(int i=first(a);i<lat.length&&lat[i]<=b;i++)if(lon[i]>=x&&lon[i]<=y){if(out.size()>=1500)break;out.add(new int[]{lat[i],lon[i],kind[i]});}return out;
     }
 }

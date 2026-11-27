@@ -2,7 +2,6 @@ package com.drivemate.app;
 import android.content.Context;
 import java.io.*;
 import java.util.*;
-import org.maplibre.geojson.*;
 
 /** Verified-at-build OSM node positions; not live signal phases or a navigation instruction. */
 final class MappedSignals {
@@ -31,10 +30,5 @@ final class MappedSignals {
         if(!Double.isFinite(south)||!Double.isFinite(west)||!Double.isFinite(north)||!Double.isFinite(east)||south>north||west>east||north-south>.25||east-west>.25||limit<1||limit>2000)return Collections.emptyList();
         int a=(int)Math.floor(south*1e7),b=(int)Math.ceil(north*1e7),x=(int)Math.floor(west*1e7),y=(int)Math.ceil(east*1e7);
         ArrayList<int[]> out=new ArrayList<>();for(int i=first(a);i<lat.length&&lat[i]<=b;i++){if(lon[i]<x||lon[i]>y)continue;if(out.size()==limit)return Collections.emptyList();out.add(new int[]{lat[i],lon[i]});}return out;
-    }
-    FeatureCollection features(double south,double west,double north,double east){
-        ArrayList<Feature> result=new ArrayList<>();
-        for(int[] p:nearby(south,west,north,east,2000))result.add(Feature.fromGeometry(Point.fromLngLat(p[1]/1e7,p[0]/1e7)));
-        return FeatureCollection.fromFeatures(result.toArray(new Feature[0]));
     }
 }

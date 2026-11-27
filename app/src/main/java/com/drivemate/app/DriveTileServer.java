@@ -62,7 +62,8 @@ public final class DriveTileServer implements AutoCloseable {
     private final AtomicInteger cachedHits = new AtomicInteger();
     private final AtomicInteger failures = new AtomicInteger();
 
-    public DriveTileServer(Context app) throws IOException {
+    public DriveTileServer(Context app) throws IOException {this(app,true);}
+    DriveTileServer(Context app,boolean listen) throws IOException {
         context = app.getApplicationContext();
         base = new File(context.getFilesDir(), "drivemate-map/" + MAP_RELEASE);
         tiles = new File(base, "tiles");
@@ -71,10 +72,8 @@ public final class DriveTileServer implements AutoCloseable {
                 || (!ranges.isDirectory() && !ranges.mkdirs()))
             throw new IOException("Cannot initialise local DriveMate map cache");
         source = new RangeSource(ranges, new File(base, "offline-verified.pmtiles"));
-        socket = new ServerSocket(0, 16, InetAddress.getByName("127.0.0.1"));
-        Thread acceptor = new Thread(this::accept, "drivemate-local-map");
-        acceptor.setDaemon(true);
-        acceptor.start();
+        socket = listen?new ServerSocket(0,16,InetAddress.getByName("127.0.0.1")):null;
+        if(listen){Thread acceptor=new Thread(this::accept,"drivemate-local-map");acceptor.setDaemon(true);acceptor.start();}
     }
 
     public int port() { return socket.getLocalPort(); }
@@ -174,6 +173,10 @@ public final class DriveTileServer implements AutoCloseable {
         return archive;
     }
 
+    byte[] nativeTile(int z,int x,int y)throws IOException{
+        if(z<0||z>MAX_ZOOM||x<0||y<0||x>=(1<<z)||y>=(1<<z))throw new IOException("Invalid tile coordinate");
+        return fetchTile(z,x,y);
+    }
     private byte[] fetchTile(int z, int x, int y) throws IOException {
         File path = path(z, x, y);
         if (path.exists() && path.length() > 0 && path.length() < MAX_TILE_BYTES) {
@@ -342,7 +345,7 @@ public final class DriveTileServer implements AutoCloseable {
 
     @Override public void close() {
         closed = true;
-        try { socket.close(); } catch (IOException ignored) { }
+        try { if(socket!=null)socket.close(); } catch (IOException ignored) { }
         connections.shutdownNow();
         prefetcher.shutdownNow();
     }
