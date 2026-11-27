@@ -154,8 +154,14 @@ public final class TomTomApi {
 
     public static List<Destination> search(String key, String query, GeoMath.Point near)
             throws IOException, JSONException {
+        return search(key, query, near, false, 8);
+    }
+
+    /** typeahead=true returns results for a partly typed query, for live suggestions. */
+    public static List<Destination> search(String key, String query, GeoMath.Point near, boolean typeahead, int limit)
+            throws IOException, JSONException {
         String url = "https://api.tomtom.com/search/2/search/" + encode(query) + ".json"
-                + "?key=" + encode(key) + "&limit=8&language=en-GB&typeahead=false&countrySet=GB";
+                + "?key=" + encode(key) + "&limit=" + limit + "&language=en-GB&typeahead=" + typeahead + "&countrySet=GB";
         if (near != null) {
             url += "&lat=" + coordinate(near.lat) + "&lon=" + coordinate(near.lon);
         }
