@@ -57,6 +57,20 @@ public class DriveLabTest {
         drive(ins, "stockport-offline", route, false, false);
     }
 
+    /** The same drive on the other engines, so DriveMate's own GPU map is checked against MapLibre and classic. */
+    @Test public void stockportOfflineDriveMapLibre() throws Exception { sameDriveOn(MapEngines.MAPLIBRE, "stockport-maplibre"); }
+    @Test public void stockportOfflineDriveClassic() throws Exception { sameDriveOn(MapEngines.CLASSIC, "stockport-classic"); }
+
+    private static void sameDriveOn(String engine, String name) throws Exception {
+        Instrumentation ins = InstrumentationRegistry.getInstrumentation();
+        DmUnifiedZoomTest.engine(ins.getTargetContext(), engine);
+        try {
+            TomTomApi.Route route = offlineRoute(ins.getTargetContext(), new double[][]{
+                    {53.3940, -2.2120, 53.4010, -2.1880}, {53.400, -2.154, 53.410, -2.171}, {53.405, -2.165, 53.410, -2.171}});
+            drive(ins, name, route, false, false);
+        } finally { DmUnifiedZoomTest.engine(ins.getTargetContext(), MapEngines.DEFAULT); }
+    }
+
     @Test public void missedTurnReroutes() throws Exception {
         Instrumentation ins = InstrumentationRegistry.getInstrumentation();
         TomTomApi.Route route = offlineRoute(ins.getTargetContext(), new double[][]{

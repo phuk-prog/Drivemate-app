@@ -229,6 +229,8 @@ public final class MainActivity extends Activity implements LocationListener {
     private DriveMap vectorMap;
     /** Settings → Map and display → Auto-zoom: On (speed and road type), Turns only, Off. */
     private int autoZoom = NavigationCamera.AUTO_ZOOM_ON;
+    /** Next manoeuvre is a roundabout, fork or motorway exit: the camera shows it as a flat close-up. */
+    private boolean complexJunctionAhead;
     /** Speed limit (m/s) of the route section at this point, NaN when unknown. */
     private double currentLimitMps(double along) {
         if (route == null || route.speedSections == null) return Double.NaN;
@@ -1588,7 +1590,7 @@ public final class MainActivity extends Activity implements LocationListener {
                             break;
                         case 5:
                             metricUnits = !metricUnits;
-                            if(vectorMap!=null && route!=null)vectorMap.setRouteEvents(route.speedSections,route.trafficSections,metricUnits,route.fetchedAtMs);
+                            if(vectorMap!=null && route!=null)vectorMap.setRouteEvents(route.speedSections,route.trafficSections,metricUnits,route.fetchedAtMs);if(vectorMap!=null && route!=null)vectorMap.setLanes(route.laneSections);
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                                     .putBoolean("metric_units", metricUnits).apply();
                             if (currentLocation != null) {
@@ -2907,7 +2909,7 @@ public final class MainActivity extends Activity implements LocationListener {
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
                 velocity, vectorMap.view().getHeight(), headerHeight, bottomPanelHeight,
-                closeZoom || highlightedJunctionIndex >= 0, currentLimitMps(along), autoZoom);
+                closeZoom || highlightedJunctionIndex >= 0 || complexJunctionAhead, currentLimitMps(along), autoZoom);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
@@ -3629,6 +3631,7 @@ public final class MainActivity extends Activity implements LocationListener {
             vectorMap.setBuildingContext("DriveMate".equals(calculated.provider)?ownEndpoint():"",calculated.geometrySourceSha);
             vectorMap.setSharedRoute(calculated.nativeScene, calculated.points, calculated.provider);
             vectorMap.setRouteEvents(calculated.speedSections,calculated.trafficSections,metricUnits,calculated.fetchedAtMs);
+            vectorMap.setLanes(calculated.laneSections);
             if (preview) {
                 // Fit once the preview panel has laid out, so the whole route
                 // sits between the search bar and the bottom panel.
@@ -3862,6 +3865,11 @@ public final class MainActivity extends Activity implements LocationListener {
         updateRoadIntelligence(fix, along, projected.offRouteMetres,
                 accuracy, untilTurn);
         JunctionIntelligence.Kind junctionKind = JunctionIntelligence.classify(step.maneuver,step.junctionType);
+        switch (junctionKind) {
+            case ROUNDABOUT: case DOUBLE_ROUNDABOUT: case SPIRAL_ROUNDABOUT: case MULTI_ARM: case FORK:
+            case MOTORWAY_EXIT: case INTERCHANGE: case RAMP: complexJunctionAhead = true; break;
+            default: complexJunctionAhead = false;
+        }
         String glyph = JunctionIntelligence.glyph(step,junctionKind);
         boolean roundabout = "↻".equals(glyph);
         int shownExit = roundabout ? JunctionFraming.reportedExit(step.exitNumber) : 0;

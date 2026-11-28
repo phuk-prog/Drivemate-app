@@ -115,18 +115,50 @@ final class NativeMapView extends View {
     private static boolean same(NativeMapProjection.Camera a,NativeMapProjection.Camera b){
         return a!=null&&b!=null&&a.cx==b.cx&&a.cy==b.cy&&a.scale==b.scale&&a.cos==b.cos&&a.sin==b.sin&&a.pitch==b.pitch;
     }
-    /** DriveMate's own GPU engine draws areas and roads underneath this view; this view then draws names only. */
+    /** One frame for DriveMate's GPU engine: everything it draws under this view's turn arrow, signs, pin and car. */
+    static final class GpuFrame{
+        NativeMapProjection.Camera camera;List<NativeMapScene> scenes;double zoom,tilt,progress;boolean night,extrude;float density;
+        List<GeoMath.Point> route;List<RouteIntelligence.TrafficSection> traffic;List<NativeBaseRenderer.Placed> labels;
+    }
+    /** DriveMate's own GPU engine: map, route and names; this view keeps the turn arrow, signs, pin, car and gestures. */
     interface GpuBase{
-        void frame(NativeMapProjection.Camera camera,List<NativeMapScene> scenes,double zoom,boolean night);
+        void frame(GpuFrame frame);
         int roadsDrawn();
         String stats();
+        void prepare(List<List<NativeMapScene.Shape>> groups);
     }
     private GpuBase gpu;
-    private NativeBaseRenderer.Frame pendingNames;
-    private void drawPendingNames(Canvas canvas){
-        if(pendingNames==null)return;
-        NativeBaseRenderer.Frame f=pendingNames;pendingNames=null;
-        uiRenderer.render(canvas,f);
+    private List<RouteIntelligence.TrafficSection> traffic=Collections.emptyList();
+    void setTraffic(List<RouteIntelligence.TrafficSection> value){traffic=value==null?Collections.emptyList():value;invalidate();}
+    private List<RouteIntelligence.LaneSection> lanes=Collections.emptyList();
+    void setLanes(List<RouteIntelligence.LaneSection> value){lanes=value==null?Collections.emptyList():value;invalidate();}
+    /** Classic engine: amber/red over the route where traffic is slow or stopped (the GPU engine does this itself). */
+    private void trafficOnRoute(Canvas canvas,NativeMapProjection.Camera c){
+        if(traffic.isEmpty()||route==null)return;
+        for(RouteIntelligence.TrafficSection t:traffic){
+            if(t.end<=progress)continue;
+            String cat=t.category==null?"":t.category.toUpperCase(java.util.Locale.ROOT);
+            int col=cat.contains("JAM")||cat.contains("STATIONARY")||cat.contains("CLOSED")||t.delaySeconds>=180?0xffd7352b:0xfff29d1d;
+            routePath(canvas,c,GeoMath.slice(route.full(),Math.max(progress,t.start),t.end),col,5);
+        }
+    }
+    /** Lane board at the next turn, where the route data has trusted lanes: one arrow per lane, the ones to use lit. */
+    private void laneBoard(Canvas canvas,NativeMapProjection.Camera c){
+        if(lanes.isEmpty()||route==null||!Double.isFinite(turn)||turn-progress>400||turn<progress)return;
+        RouteIntelligence.LaneSection use=null;
+        for(RouteIntelligence.LaneSection l:lanes)if(l.trusted()&&l.lanes.size()>=2&&l.start<=turn+20&&l.end>=turn-120){use=l;break;}
+        if(use==null)return;
+        point(c,route.at(Math.max(progress,turn-35)));
+        if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1]))return;
+        int n=use.lanes.size();float cell=dp(22),w=cell*n+dp(8),h=dp(30),x=screen[0]-w/2,y=screen[1]-h-dp(26);
+        paint.setStyle(Paint.Style.FILL);paint.setColor(0xee10202d);canvas.drawRoundRect(new RectF(x,y,x+w,y+h),dp(6),dp(6),paint);
+        paint.setTextSize(dp(16));
+        for(int i=0;i<n;i++){
+            RouteIntelligence.Lane lane=use.lanes.get(i);String d=lane.direction.toUpperCase(java.util.Locale.ROOT);
+            String glyph=d.contains("UTURN")||d.contains("U_TURN")?"↶":d.contains("SLIGHT_LEFT")||d.contains("HALF_LEFT")?"↖":d.contains("SLIGHT_RIGHT")||d.contains("HALF_RIGHT")?"↗":d.contains("LEFT")?"←":d.contains("RIGHT")?"→":"↑";
+            paint.setColor(lane.recommended?0xff2ee0ff:0x66ffffff);
+            float gx=x+dp(4)+cell*i+cell/2-paint.measureText(glyph)/2;canvas.drawText(glyph,gx,y+h-dp(9),paint);
+        }
     }
     void setGpuBase(GpuBase base){gpu=base;changed();invalidate();}
     GpuBase gpuBase(){return gpu;}
@@ -136,10 +168,14 @@ final class NativeMapView extends View {
             if(previous!=null&&previous!=background)layers.add(previous);
             if(background!=null)layers.add(background);
             if(scene!=null&&scene!=background)layers.add(scene);
-            gpu.frame(c,layers,zoom,night);
-            // Names are drawn after the route line (so the line never cuts a place name) but under the turn
-            // arrow, signs, pin and car: see drawPendingNames().
-            pendingNames=frame(c);pendingNames.labelsOnly=true;
+            // Names are placed here (priority, no overlaps, along roads, shields, fade) and drawn by the GPU.
+            NativeBaseRenderer.Frame names=frame(c);names.labelsOnly=true;names.collect=new ArrayList<>();
+            uiRenderer.render(canvas,names);
+            GpuFrame g=new GpuFrame();
+            g.camera=c;g.scenes=layers;g.zoom=zoom;g.tilt=tilt;g.night=night;g.extrude=extrude&&showBuildings;g.density=getResources().getDisplayMetrics().density;
+            g.route=route==null?null:route.full();g.progress=progress;g.traffic=traffic;g.labels=names.collect;
+            gpu.frame(g);
+            if(uiRenderer.fading())postInvalidateOnAnimation();
             roadsDrawn=gpu.roadsDrawn();buildingsDrawn=0;
             return;
         }
@@ -194,9 +230,11 @@ final class NativeMapView extends View {
         if(center==null||getWidth()==0){if(gpu==null)canvas.drawColor(color(0xffeef1e9,0xff132634));return;}
         NativeMapProjection.Camera c=camera();paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);
         drawBase(canvas,c);
-        if(route!=null){boolean full=routePath(canvas,c,route.full(),color(0xffaeb9bb,0xff516270),6);List<GeoMath.Point> remaining=route.remaining(progress);routePath(canvas,c,remaining,0xff143d64,8);boolean ahead=routePath(canvas,c,remaining,0xff16a6f4,5);
-            if(full||ahead)routeDrawn=1;
-            drawPendingNames(canvas);
+        if(route!=null){
+            if(gpu!=null){routeDrawn=route.full().size()>1?1:0;}   // the GPU engine draws the route under the names
+            else{boolean full=routePath(canvas,c,route.full(),color(0xffaeb9bb,0xff516270),6);List<GeoMath.Point> remaining=route.remaining(progress);routePath(canvas,c,remaining,0xff143d64,8);boolean ahead=routePath(canvas,c,remaining,0xff16a6f4,5);
+                if(full||ahead)routeDrawn=1;
+                trafficOnRoute(canvas,c);}
             // One bold manoeuvre arrow drawn on the road at the junction; a second turn close
             // behind it (a roundabout exit, a quick left-right) is folded into the same arrow.
             boolean merged=Double.isFinite(secondTurn)&&Double.isFinite(turn)&&secondTurn>turn&&secondTurn-turn<=TURN_ARROW_MERGE_METRES;
@@ -216,7 +254,7 @@ final class NativeMapView extends View {
             }
             shownLimits=new double[shown.size()];for(int q=0;q<shownLimits.length;q++)shownLimits[q]=shown.get(q);
         }
-        drawPendingNames(canvas);
+        laneBoard(canvas,c);
         List<GeoMath.Point> hazardTrack=hazardTrack();
         if(zoom>=14)for(int[] row:roadside){
             GeoMath.Point rp=new GeoMath.Point(row[0]/1e7,row[1]/1e7);

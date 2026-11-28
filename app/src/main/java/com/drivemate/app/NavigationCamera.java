@@ -137,6 +137,8 @@ public final class NavigationCamera {
             // More overhead than the default 3D view, especially for exits.
             double blend = 1 - junctionAhead / 420.0;
             tilt = Math.min(tilt, Math.max(23, tilt - 12 * blend));   // can only flatten further
+            // Junction close-up: within the last 120 m a roundabout, fork or exit is shown straight down, like a plan.
+            if (junctionAhead < 120) tilt = Math.min(tilt, NEAR_TURN_TILT * (junctionAhead / 120.0));
         }
 
         // Pitch foreshortens the near/far road. Reserve extra world-space

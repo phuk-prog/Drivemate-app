@@ -12,6 +12,8 @@ final class NativeBaseRenderer {
         int labelTop,labelBottom;
         /** GPU engine draws areas and roads: clear to transparent and draw names only. */
         boolean labelsOnly;
+        /** When set, names are placed but not drawn: the GPU engine draws them (same placement rules). */
+        List<Placed> collect;
     }
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG),halo=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path=new Path();
@@ -161,26 +163,82 @@ final class NativeBaseRenderer {
                 stroke(canvas,roads[pass][k][1],color(0xffd6d8d6,0xff465461),w);}
         }
     }
+    /** A name placed on screen. style: 0 place, 1 road name (along the road), 2 M shield, 3 A shield, 4 B shield. */
+    static final class Placed {
+        final String text;final float x,y,size,angle,alpha;final int style;
+        Placed(String text,float x,float y,float size,float angle,int style,float alpha){this.text=text;this.x=x;this.y=y;this.size=size;this.angle=angle;this.style=style;this.alpha=alpha;}
+    }
+    private static final java.util.regex.Pattern REF=java.util.regex.Pattern.compile("^([MAB])[0-9]{1,4}(\\([MT]\\))?$");
+    /** Shield style for a UK road number, or -1 for a name. */
+    static int shieldStyle(String name){
+        java.util.regex.Matcher m=REF.matcher(name.trim());
+        if(!m.matches())return -1;
+        char c=m.group(1).charAt(0);
+        return c=='M'?2:c=='A'?3:4;
+    }
+    /** Names fade in over this many milliseconds instead of popping. */
+    static final long FADE_MS=220;
+    private final HashMap<String,long[]> seen=new HashMap<>();
+    private boolean fading;
+    boolean fading(){return fading;}
+
     private void labels(Canvas canvas,NativeMapProjection.Camera c){
-        occupied.clear();labelNames.clear();
+        occupied.clear();labelNames.clear();fading=false;
+        long now=android.os.SystemClock.uptimeMillis();
         paint.setTypeface(Typeface.create("sans-serif-medium",Typeface.NORMAL));paint.setStyle(Paint.Style.FILL);
         halo.setTypeface(paint.getTypeface());halo.setStrokeWidth(dp(3));halo.setColor(color(0xf2f8faf7,0xf2142737));
         float top=Math.max(0,f.labelTop),bottom=f.height-Math.max(0,f.labelBottom);
+        // Priority: towns and places, then motorway numbers, main roads, local streets.
         for(int pass=0;pass<4;pass++)for(NativeMapScene.Shape s:visible){
             int want=pass==0?NativeMapScene.LABEL:pass==1?NativeMapScene.MOTORWAY:pass==2?NativeMapScene.MAIN:NativeMapScene.LOCAL;
             if(s.kind!=want||s.name.isEmpty()||!MapLayers.labelVisible(s.kind,f.zoom)||occupied.size()>=120)continue;
-            float size=dp(want==NativeMapScene.LABEL?13:11);paint.setTextSize(size);halo.setTextSize(size);
+            boolean place=want==NativeMapScene.LABEL;
+            int style=place?0:shieldStyle(s.name);if(style<0)style=1;
+            float size=dp(place?13:style>=2?11:11.5f);paint.setTextSize(size);halo.setTextSize(size);
             int i=(s.xy.length/4)*2;c.screen(s.xy[i],s.xy[i+1],screen);float x=screen[0],y=screen[1],w=paint.measureText(s.name);if(!Float.isFinite(x)||!Float.isFinite(y))continue;
-            // Generous box so names keep breathing room; nothing under the search bar or bottom panel.
-            RectF box=new RectF(x-w/2-dp(8),y-size-dp(4),x+w/2+dp(8),y+dp(6));
+            float angle=0;
+            if(style==1&&s.xy.length>=4){
+                // Street names follow the road at their position, kept upright.
+                int a=Math.max(0,i-2),b=Math.min(s.xy.length-2,i+2);
+                c.screen(s.xy[a],s.xy[a+1],corner);float ax=corner[0],ay=corner[1];c.screen(s.xy[b],s.xy[b+1],corner);
+                if(Float.isFinite(ax)&&Float.isFinite(corner[0])){
+                    angle=(float)Math.toDegrees(Math.atan2(corner[1]-ay,corner[0]-ax));
+                    if(angle>90)angle-=180;else if(angle<-90)angle+=180;
+                    if(Math.hypot(corner[0]-ax,corner[1]-ay)<w*0.6f)angle=0;   // too short or curly to follow
+                }
+            }
+            float pad=style>=2?dp(5):dp(8);
+            float hw=w/2+pad,hh=(size+dp(10))/2;
+            double r=Math.toRadians(angle);float cos=(float)Math.abs(Math.cos(r)),sin=(float)Math.abs(Math.sin(r));
+            float bx=hw*cos+hh*sin,by=hw*sin+hh*cos,cy=y-size/2+dp(1);
+            RectF box=new RectF(x-bx,cy-by,x+bx,cy+by);
             if(box.left<0||box.right>f.width||box.top<top||box.bottom>bottom)continue;
             boolean collision=false;for(RectF other:occupied)if(RectF.intersects(other,box)){collision=true;break;}if(collision)continue;
             List<float[]> same=labelNames.get(s.name);if(MapLayers.repeatsNearby(x,y,same))continue;
             if(same==null){same=new ArrayList<>();labelNames.put(s.name,same);}same.add(new float[]{x,y});
             occupied.add(box);
-            canvas.drawText(s.name,x-w/2,y,halo);
-            paint.setColor(want==NativeMapScene.LABEL?color(0xff1f2d38,0xffeef4f8):color(0xff4a5862,0xffc9d6de));canvas.drawText(s.name,x-w/2,y,paint);
+            String key=style+"|"+s.name;long[] t=seen.get(key);if(t==null){t=new long[]{now,now};seen.put(key,t);}t[1]=now;
+            float alpha=Math.min(1f,(now-t[0])/(float)FADE_MS);if(alpha<1)fading=true;
+            if(f.collect!=null){f.collect.add(new Placed(s.name,x,y,size,angle,style,alpha));continue;}
+            drawName(canvas,s.name,x,y,size,angle,style,alpha,w);
         }
+        if(seen.size()>600||now%50==0){java.util.Iterator<long[]> it=seen.values().iterator();while(it.hasNext())if(now-it.next()[1]>1500)it.remove();}
+    }
+
+    private void drawName(Canvas canvas,String text,float x,float y,float size,float angle,int style,float alpha,float w){
+        int a=Math.round(alpha*255);
+        canvas.save();canvas.rotate(angle,x,y-size/2);
+        if(style>=2){
+            float pad=dp(4);RectF r=new RectF(x-w/2-pad,y-size-dp(1),x+w/2+pad,y+dp(4));
+            int bg=style==2?0xff2a64b7:style==3?0xff1f6b3a:0xffffffff, fg=style==2?0xffffffff:style==3?0xffffd34d:0xff1d1d1d;
+            paint.setColor(bg);paint.setAlpha(a);canvas.drawRoundRect(r,dp(3),dp(3),paint);
+            if(style==4){paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(1));paint.setColor(0xff1d1d1d);paint.setAlpha(a);canvas.drawRoundRect(r,dp(3),dp(3),paint);paint.setStyle(Paint.Style.FILL);}
+            paint.setColor(fg);paint.setAlpha(a);canvas.drawText(text,x-w/2,y,paint);
+        }else{
+            halo.setAlpha(Math.round(alpha*0xf2));canvas.drawText(text,x-w/2,y,halo);
+            paint.setColor(style==0?color(0xff1f2d38,0xffeef4f8):color(0xff4a5862,0xffc9d6de));paint.setAlpha(a);canvas.drawText(text,x-w/2,y,paint);
+        }
+        canvas.restore();paint.setAlpha(255);
     }
     private void stroke(Canvas c,Path p,int color,float width){if(p.isEmpty())return;paint.setColor(color);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(width));c.drawPath(p,paint);}
     private void fill(Canvas c,Path p,int color){if(p.isEmpty())return;paint.setColor(color);paint.setStyle(Paint.Style.FILL);c.drawPath(p,paint);}

@@ -97,7 +97,8 @@ final class NativeMapController implements DriveMap {
     public void setEntrance(GeoMath.Point p){entrance=p;markers();}
     public void setParkedCar(GeoMath.Point p){parked=p;markers();}
     private void markers(){view.setMarkers(destination,entrance,parked);}
-    public void setRouteEvents(List<RouteIntelligence.SpeedSection> speeds,List<RouteIntelligence.TrafficSection> traffic,boolean metric,long fetchedAt){view.setEvents(speeds,metric);}
+    public void setRouteEvents(List<RouteIntelligence.SpeedSection> speeds,List<RouteIntelligence.TrafficSection> traffic,boolean metric,long fetchedAt){view.setEvents(speeds,metric);view.setTraffic(traffic);}
+    public void setLanes(List<RouteIntelligence.LaneSection> lanes){view.setLanes(lanes);}
     public void setTraffic(boolean v){traffic=v;if(!v)setLiveIncidents(null,0);}
     public boolean supportsLiveIncidents(){return traffic;}
     public void setLiveIncidents(List<LiveTrafficIncidents.Event> rows,long at){view.setIncidents(rows,at);}
@@ -186,7 +187,23 @@ final class NativeMapController implements DriveMap {
         });
         if(background==null)view.setLoading(true);
     }
-    public void prefetchRoute(List<GeoMath.Point> ahead){if(ahead!=null&&!ahead.isEmpty()&&view.center()!=null)prefetch(view.center());}
+    private long aheadAt;
+    /** Loads (and, on the GPU engine, tessellates) the map 300-900 m further along the route before it is on screen. */
+    public void prefetchRoute(List<GeoMath.Point> ahead){
+        if(ahead==null||ahead.isEmpty()||view.center()==null)return;
+        prefetch(view.center());
+        long now=SystemClock.elapsedRealtime();
+        if(disposed||now-aheadAt<4000||ahead.size()<2)return;
+        aheadAt=now;
+        GeoMath.Point next=GeoMath.pointAtDistance(ahead,Math.min(GeoMath.length(ahead),600));
+        final double z=view.zoom();final int w=Math.max(1,view.getWidth()),h=Math.max(1,view.getHeight());
+        worker.execute(()->{
+            try{
+                NativeMapScene s=tileSource.load(next,z,w,h);
+                if(gl!=null&&s!=null&&s.groups!=null)gl.prepare(s.groups);
+            }catch(Exception ignored){}
+        });
+    }
     public String cacheStats(){return (gl!=null?gl.stats()+" · GL frames "+gl.framesDrawn()+" · ":"")+"DriveMate regional + GitHub vector cache · frames "+view.frameCount()+" · mean CPU draw "+String.format(java.util.Locale.ROOT,"%.1f ms",view.meanDrawNanos()/1e6)+" · max "+String.format(java.util.Locale.ROOT,"%.1f ms",view.maxDrawNanos()/1e6);}
     // The GPU map keeps drawing while a dialog (permissions, settings) covers part of the screen: it pauses on stop, not pause.
     public void onStart(){if(gl!=null)gl.onResume();}public void onPause(){}public void onStop(){if(gl!=null)gl.onPause();}

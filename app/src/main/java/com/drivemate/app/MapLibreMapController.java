@@ -553,6 +553,7 @@ final class MapLibreMapController implements DriveMap {
         speeds = s == null ? Collections.emptyList() : s; this.metric = metric; publishLimits();
     }
 
+    @Override public void setLanes(List<RouteIntelligence.LaneSection> lanes) { }
     @Override public void setTraffic(boolean v) { traffic = v; if (!v) setLiveIncidents(null, 0); }
     @Override public boolean supportsLiveIncidents() { return traffic; }
     @Override public void setLiveIncidents(List<LiveTrafficIncidents.Event> rows, long at) {

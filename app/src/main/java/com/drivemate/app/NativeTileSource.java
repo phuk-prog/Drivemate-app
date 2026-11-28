@@ -30,9 +30,24 @@ final class NativeTileSource implements AutoCloseable {
             String key=(z-up)+"/"+(x>>up)+"/"+(y>>up);
             synchronized(cache){List<NativeMapScene.Shape> hit=cache.get(key);if(hit!=null)return used.add(key)?hit:null;}
         }
+        // No signal: a coarser copy from an installed map area keeps the map from going blank.
+        for(int up=1;up<=4&&z-up>=0;up++){
+            int pz=z-up,px=x>>up,py=y>>up;String key=pz+"/"+px+"/"+py;
+            if(used.contains(key))return null;
+            try{
+                byte[] raw=installedPacks().tile(pz,px,py);
+                if(raw!=null&&raw.length>0){used.add(key);return NativeMvtDecoder.decode(raw,pz,px,py);}
+            }catch(Exception ignored){}
+        }
         return null;
     }
-    NativeTileSource(Context app){this.app=app.getApplicationContext();}
+    NativeTileSource(Context app){
+        this.app=app.getApplicationContext();
+        android.app.ActivityManager am=(android.app.ActivityManager)this.app.getSystemService(Context.ACTIVITY_SERVICE);
+        int memory=am==null?192:am.getMemoryClass();
+        cacheTiles=memory>=384?192:memory>=256?CACHE_TILES:memory>=192?96:64;
+        cacheVertices=memory>=384?1800000:memory>=256?CACHE_VERTICES:memory>=192?900000:600000;
+    }
     /** Fetches and decodes tiles of one viewport in parallel; the network, not the CPU, is the slow part. */
     private static final java.util.concurrent.ThreadPoolExecutor POOL=newPool();
     private static java.util.concurrent.ThreadPoolExecutor newPool(){
@@ -43,6 +58,8 @@ final class NativeTileSource implements AutoCloseable {
     /** How long one viewport load waits for tiles; tiles still arriving are cached for the retry. */
     /** Decoded tiles kept in memory, so panning back and re-opening do not re-decode. */
     static final int CACHE_TILES=128,CACHE_VERTICES=1200000;
+    /** Tile cache sized to the phone's memory class (low-memory phones keep fewer decoded tiles). */
+    private final int cacheTiles,cacheVertices;
     /** Show what has arrived after this long; missing tiles keep loading and are retried. */
     static final long LOAD_BUDGET_MS=5000;
     private synchronized DriveTileServer ukServer()throws IOException{if(uk==null)uk=new DriveTileServer(app,false);return uk;}
@@ -96,8 +113,8 @@ final class NativeTileSource implements AutoCloseable {
         synchronized(cache){List<NativeMapScene.Shape> hit=cache.get(key);if(hit!=null)return hit;}
         List<NativeMapScene.Shape> s=NativeMvtDecoder.decode(raw(z,x,y),z,x,y);int count=vertices(s);
         synchronized(cache){
-            while(!cache.isEmpty()&&(cache.size()>=CACHE_TILES||cachedVertices+count>CACHE_VERTICES)){Iterator<List<NativeMapScene.Shape>> i=cache.values().iterator();cachedVertices-=vertices(i.next());i.remove();}
-            if(count<=CACHE_VERTICES){cache.put(key,s);cachedVertices+=count;}
+            while(!cache.isEmpty()&&(cache.size()>=cacheTiles||cachedVertices+count>cacheVertices)){Iterator<List<NativeMapScene.Shape>> i=cache.values().iterator();cachedVertices-=vertices(i.next());i.remove();}
+            if(count<=cacheVertices){cache.put(key,s);cachedVertices+=count;}
         }
         return s;
     }
