@@ -34,8 +34,21 @@ final class NativeMapController implements DriveMap {
     private GeoMath.Point backgroundAt;private double backgroundZoom=-1;
     /** Why the last detail load failed, or empty. Shown in diagnostics. */
     private volatile String lastDetailError="";
-    NativeMapController(Activity activity,Listener listener){
+    /** DriveMate GPU engine (beta): OpenGL draws areas and roads under the classic view, which keeps names,
+     *  route, markers, car and gestures. Null for the classic engine. */
+    private final GlBaseView gl;
+    private final View root;
+    NativeMapController(Activity activity,Listener listener){this(activity,listener,false);}
+    NativeMapController(Activity activity,Listener listener,boolean gpu){
         this.activity=activity;this.listener=listener;view=new NativeMapView(activity);tileSource=new NativeTileSource(activity);
+        if(gpu){
+            gl=new GlBaseView(activity);
+            android.widget.FrameLayout box=new android.widget.FrameLayout(activity);
+            box.addView(gl,new android.widget.FrameLayout.LayoutParams(-1,-1));
+            box.addView(view,new android.widget.FrameLayout.LayoutParams(-1,-1));
+            view.setGpuBase(gl);root=box;
+            gl.setOnFailure(()->view.setGpuBase(null));
+        }else{gl=null;root=view;}
         view.setCameraChanged(()->prefetch(view.center()));
         view.setPaintListener(()->{
             // FAILED only after a detail load has finished with nothing drawn; never on the first frame.
@@ -45,16 +58,16 @@ final class NativeMapController implements DriveMap {
             if(state!=reported){reported=state;view.post(()->{if(!disposed)listener.status(state,view.roadsDrawn());});}
         });
     }
-    public View view(){return view;}
-    public String engineName(){return "DriveMate classic";}
+    public View view(){return root;}
+    public String engineName(){return gl!=null?"DriveMate GPU (beta)":"DriveMate classic";}
     public void setOnUserGesture(Runnable r){view.setGesture(r);}
     /** Pre-fetch map tiles around a place (Home, Work) in the background. */
     public void warmArea(GeoMath.Point p){if(!disposed&&p!=null)worker.execute(()->tileSource.warm(p));}
     public boolean nightMode(){return night;}
     public boolean hasRenderedRoads(){return view.roadsDrawn()>0;}
     public double currentZoom(){return view.zoom();}
-    public void setVisible(boolean v){view.setVisibility(v?View.VISIBLE:View.INVISIBLE);}
-    String debugStats(){return tileSource.lastStats()+" · overlay "+(current==null?"none":current==verifiedRoute?"route":"box")+" · zoom "+String.format(java.util.Locale.UK,"%.1f",view.zoom());}
+    public void setVisible(boolean v){root.setVisibility(v?View.VISIBLE:View.INVISIBLE);}
+    String debugStats(){return (gl!=null?gl.stats()+" · ":"")+tileSource.lastStats()+" · overlay "+(current==null?"none":current==verifiedRoute?"route":"box")+" · zoom "+String.format(java.util.Locale.UK,"%.1f",view.zoom());}
     public void setDebug(boolean on){view.setDebug(on?this::debugStats:null);}
         public String geometryDescription(){return current==null?"DriveMate native · regional detail unavailable"+(lastDetailError.isEmpty()?"":" ("+lastDetailError+")"):current.checkedEdges>0?"DriveMate native · verified route roads":"DriveMate native · regional roads";}
     public String routeAlignmentDiagnostic(){return current!=null&&current.checkedEdges>0?current.checkedEdges+" exact source edges":"unverified";}
@@ -174,9 +187,9 @@ final class NativeMapController implements DriveMap {
     }
     public void prefetchRoute(List<GeoMath.Point> ahead){if(ahead!=null&&!ahead.isEmpty()&&view.center()!=null)prefetch(view.center());}
     public String cacheStats(){return "DriveMate regional + GitHub vector cache · frames "+view.frameCount()+" · mean CPU draw "+String.format(java.util.Locale.ROOT,"%.1f ms",view.meanDrawNanos()/1e6)+" · max "+String.format(java.util.Locale.ROOT,"%.1f ms",view.maxDrawNanos()/1e6);}
-    public void onStart(){}public void onPause(){}public void onStop(){}
+    public void onStart(){}public void onPause(){if(gl!=null)gl.onPause();}public void onStop(){}
     /** Coming back to the app: re-request tiles, since nothing else may move the camera. */
-    public void onResume(){if(disposed)return;requestedAt=0;backgroundAt=null;overlayAt=null;GeoMath.Point c=view.center();if(c==null)c=center;if(c!=null)prefetch(c);view.invalidate();}
+    public void onResume(){if(disposed)return;if(gl!=null)gl.onResume();requestedAt=0;backgroundAt=null;overlayAt=null;GeoMath.Point c=view.center();if(c==null)c=center;if(c!=null)prefetch(c);view.invalidate();}
     public void onLowMemory(){
         // Drop the base map (it reloads); keep the route corridor, which is not re-fetchable here.
         background=null;backgroundAt=null;view.setBackgroundScene(null);
@@ -184,6 +197,6 @@ final class NativeMapController implements DriveMap {
         GeoMath.Point c=view.center();if(c!=null)view.post(()->prefetch(c));
     }
     public void onSaveInstanceState(Bundle state){}
-    public void onDestroy(){disposed=true;generation++;worker.execute(tileSource::close);worker.shutdown();}
+    public void onDestroy(){disposed=true;if(gl!=null)gl.dispose();generation++;worker.execute(tileSource::close);worker.shutdown();}
     static Bitmap makeVehicleArrow(){Bitmap b=Bitmap.createBitmap(100,100,Bitmap.Config.ARGB_8888);Canvas c=new Canvas(b);Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);Path path=new Path();path.moveTo(50,6);path.lineTo(84,87);path.lineTo(50,68);path.lineTo(16,87);path.close();p.setColor(0xff007ac9);c.drawPath(path,p);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(6);p.setColor(Color.WHITE);c.drawPath(path,p);return b;}
 }

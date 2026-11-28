@@ -641,10 +641,16 @@ public final class MainActivity extends Activity implements LocationListener {
         };
         mapEngine=MapEngines.normalize(getSharedPreferences(PREFS,MODE_PRIVATE).getString(MapEngines.PREF,MapEngines.DEFAULT));
         vectorMap=null;
+        if(MapEngines.MAPLIBRE.equals(mapEngine)&&!GlBaseView.supported(this))mapEngine=MapEngines.CLASSIC;
         if(MapEngines.MAPLIBRE.equals(mapEngine)){
             // GPU map; if the graphics library cannot start on this phone, fall back to the classic renderer.
             try{vectorMap=new MapLibreMapController(this,mapHealth);}
             catch(Throwable failure){android.util.Log.e("DriveMate","GPU map unavailable",failure);vectorMap=null;mapEngine=MapEngines.CLASSIC;}
+        }
+        if(vectorMap==null&&MapEngines.GPU.equals(mapEngine)&&!GlBaseView.supported(this)){mapEngine=MapEngines.CLASSIC;}
+        if(vectorMap==null&&MapEngines.GPU.equals(mapEngine)){
+            try{vectorMap=new NativeMapController(this,mapHealth,true);}
+            catch(Throwable failure){android.util.Log.e("DriveMate","DriveMate GPU engine unavailable",failure);vectorMap=null;mapEngine=MapEngines.CLASSIC;}
         }
         if(vectorMap==null)vectorMap=new NativeMapController(this,mapHealth);
         mapHost.addView(vectorMap.view(),0,new FrameLayout.LayoutParams(-1,-1));

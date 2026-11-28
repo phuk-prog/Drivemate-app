@@ -122,7 +122,8 @@ public class DmUnifiedZoomTest {
             ins.runOnMainSync(()->{live.setSharedRoute(null,sample.points,NativeRegionalRouter.PROVIDER);live.setCamera(center,17,0);});
             long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean roads=new AtomicBoolean();
             while(SystemClock.elapsedRealtime()<deadline){ins.runOnMainSync(()->roads.set(live.hasRenderedRoads()));if(roads.get())break;SystemClock.sleep(1000);}
-            assertTrue("MapLibre drew no roads offline",roads.get());
+            java.util.concurrent.atomic.AtomicReference<String> why=new java.util.concurrent.atomic.AtomicReference<>();ins.runOnMainSync(()->why.set(live.cacheStats()));
+            assertTrue("MapLibre drew no roads offline: "+why.get(),roads.get());
             for(double zoom:new double[]{14,17,19}){ins.runOnMainSync(()->live.setCamera(center,zoom,0));SystemClock.sleep(4000);capture(ins,app,a,"maplibre-zoom-"+(int)zoom+".png");}
             ins.runOnMainSync(()->live.setBrowseCamera(center,18,40,45,40));SystemClock.sleep(4000);capture(ins,app,a,"maplibre-tilted.png");
         }finally{ins.runOnMainSync(a::finish);engine(app,MapEngines.DEFAULT);}

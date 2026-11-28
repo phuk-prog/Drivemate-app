@@ -527,7 +527,13 @@ final class MapLibreMapController implements DriveMap {
 
     @Override public String geometryDescription() { return "MapLibre GPU map · DriveMate tiles"; }
     @Override public String routeAlignmentDiagnostic() { return "route drawn from DriveMate route geometry"; }
-    @Override public String cacheStats() { return "MapLibre GPU · tiles served " + (server == null ? 0 : server.downloadedTiles() + server.localHits()); }
+    @Override public String cacheStats() {
+        String cam = map == null ? "no map" : String.format(java.util.Locale.UK, "z%.1f %.4f,%.4f",
+                map.getCameraPosition().zoom, map.getCameraPosition().target.getLatitude(), map.getCameraPosition().target.getLongitude());
+        return "MapLibre GPU · style " + (style != null ? "loaded" : "not loaded") + " · server " + (server == null ? "none" : server.tilesUrl())
+                + " · fetched " + (server == null ? 0 : server.downloadedTiles()) + " · cached " + (server == null ? 0 : server.localHits())
+                + " · errors " + (server == null ? 0 : server.errors()) + " · " + cam + " · roads on screen " + roadsOnScreen();
+    }
 
     // ---------------------------------------------------------------- health: report READY once roads are on screen
 

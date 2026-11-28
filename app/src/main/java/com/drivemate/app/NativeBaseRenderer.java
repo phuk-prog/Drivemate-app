@@ -10,6 +10,8 @@ final class NativeBaseRenderer {
         NativeMapProjection.Camera camera;NativeMapScene scene,background,previous;
         double zoom,tilt;int width,height;float density;boolean night,showBuildings,extrude;
         int labelTop,labelBottom;
+        /** GPU engine draws areas and roads: clear to transparent and draw names only. */
+        boolean labelsOnly;
     }
     private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG),halo=new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path=new Path();
@@ -32,6 +34,15 @@ final class NativeBaseRenderer {
 
     void render(Canvas canvas,Frame frame){
         f=frame;roadsDrawn=buildingsDrawn=0;
+        if(f.labelsOnly){
+            NativeMapProjection.Camera c=f.camera;visible.clear();
+            for(NativeMapScene sc:new NativeMapScene[]{f.background,f.scene}){
+                if(sc==null||sc==f.background&&sc==f.scene&&visible.size()>0)continue;
+                for(NativeMapScene.Shape s:sc.shapes)if(!s.name.isEmpty()&&(s.kind==NativeMapScene.LABEL||s.kind>=NativeMapScene.LOCAL&&s.kind<=NativeMapScene.MOTORWAY)&&visible(s,c))visible.add(s);
+            }
+            labels(canvas,c);
+            return;
+        }
         canvas.drawColor(color(0xffeef1e9,0xff132634));
         NativeMapProjection.Camera c=f.camera;paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);
         visible.clear();

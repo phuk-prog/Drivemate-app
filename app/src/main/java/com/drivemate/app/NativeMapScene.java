@@ -19,6 +19,9 @@ final class NativeMapScene {
             this.w=w;this.s=s;this.e=e;this.n=n;
         }
     }
+    /** The tiles this scene was assembled from (each the tile cache's own list), or null for a single group.
+     *  The GPU engine tessellates and caches per tile, so a new scene of known tiles costs nothing to draw. */
+    volatile List<List<Shape>> groups;
     final List<Shape> shapes;final List<GeoMath.Point> route;final int checkedEdges;final double[] bounds;
     final List<RouteRoadsideAwareness.Event> routeRoadside;
     final List<MappedEnforcement.Zone> averageZones;
