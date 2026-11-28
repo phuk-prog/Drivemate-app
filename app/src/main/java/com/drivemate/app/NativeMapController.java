@@ -187,9 +187,10 @@ final class NativeMapController implements DriveMap {
     }
     public void prefetchRoute(List<GeoMath.Point> ahead){if(ahead!=null&&!ahead.isEmpty()&&view.center()!=null)prefetch(view.center());}
     public String cacheStats(){return (gl!=null?gl.stats()+" · GL frames "+gl.framesDrawn()+" · ":"")+"DriveMate regional + GitHub vector cache · frames "+view.frameCount()+" · mean CPU draw "+String.format(java.util.Locale.ROOT,"%.1f ms",view.meanDrawNanos()/1e6)+" · max "+String.format(java.util.Locale.ROOT,"%.1f ms",view.maxDrawNanos()/1e6);}
-    public void onStart(){}public void onPause(){if(gl!=null)gl.onPause();}public void onStop(){}
+    // The GPU map keeps drawing while a dialog (permissions, settings) covers part of the screen: it pauses on stop, not pause.
+    public void onStart(){if(gl!=null)gl.onResume();}public void onPause(){}public void onStop(){if(gl!=null)gl.onPause();}
     /** Coming back to the app: re-request tiles, since nothing else may move the camera. */
-    public void onResume(){if(disposed)return;if(gl!=null)gl.onResume();requestedAt=0;backgroundAt=null;overlayAt=null;GeoMath.Point c=view.center();if(c==null)c=center;if(c!=null)prefetch(c);view.invalidate();}
+    public void onResume(){if(disposed)return;requestedAt=0;backgroundAt=null;overlayAt=null;GeoMath.Point c=view.center();if(c==null)c=center;if(c!=null)prefetch(c);view.invalidate();}
     public void onLowMemory(){
         // Drop the base map (it reloads); keep the route corridor, which is not re-fetchable here.
         background=null;backgroundAt=null;view.setBackgroundScene(null);
