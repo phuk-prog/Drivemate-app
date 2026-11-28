@@ -7,7 +7,7 @@ import java.util.*;
  * are all drawn before fills (no dark rings where roads meet or tiles join), and panning stays cheap. */
 final class NativeBaseRenderer {
     static final class Frame {
-        NativeMapProjection.Camera camera;NativeMapScene scene,background;
+        NativeMapProjection.Camera camera;NativeMapScene scene,background,previous;
         double zoom,tilt;int width,height;float density;boolean night,showBuildings,extrude;
         int labelTop,labelBottom;
     }
@@ -43,6 +43,19 @@ final class NativeBaseRenderer {
                 if((!s.area||s.kind==NativeMapScene.BUILDING)&&b!=null){double mx=(s.w+s.e)/2,my=(s.s+s.n)/2;if(mx>=bw&&mx<=be&&my>=Math.min(bn,bs)&&my<=Math.max(bn,bs))continue;}
                 visible.add(s);
             }
+        }
+        // Previous base map: only where the new one has no tiles, and without names (they may be out of date).
+        if(f.previous!=null&&f.background!=null&&f.previous!=f.background&&f.background.bounds!=null){
+            double[] b=f.background.bounds;
+            double bw=NativeMapProjection.x(b[0]),be=NativeMapProjection.x(b[2]),y1=NativeMapProjection.y(b[3]),y2=NativeMapProjection.y(b[1]);
+            double bn=Math.min(y1,y2),bs=Math.max(y1,y2);
+            ArrayList<NativeMapScene.Shape> older=new ArrayList<>();
+            for(NativeMapScene.Shape s:f.previous.shapes){
+                if(s.kind==NativeMapScene.LABEL||s.kind==NativeMapScene.BUILDING||!visible(s,c))continue;
+                double mx=(s.w+s.e)/2,my=(s.s+s.n)/2;if(mx>=bw&&mx<=be&&my>=bn&&my<=bs)continue;
+                older.add(s);
+            }
+            visible.addAll(0,older);
         }
         if(f.scene!=null)for(NativeMapScene.Shape s:f.scene.shapes){if(s.kind==NativeMapScene.BUILDING&&(!f.showBuildings||f.zoom<15)||!visible(s,c))continue;visible.add(s);}
         areas(canvas,c);lines(canvas,c);labels(canvas,c);

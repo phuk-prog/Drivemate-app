@@ -2171,9 +2171,13 @@ public final class MainActivity extends Activity implements LocationListener {
         final int seq = ++typeaheadSeq;
         final GeoMath.Point near = currentLocation == null ? null : gpsPoint(currentLocation);
         typeaheadHandler.postDelayed(() -> suggestWorker.execute(() -> {
-            List<TomTomApi.Destination> result = online ? OnlineFirst.suggest(key, typed, near) : null;
-            // TomTom unavailable or silent: suggest from the installed map areas instead.
-            if (result == null) { List<TomTomApi.Destination> local = packSearch(typed, near, new int[]{2, 4}); if (!local.isEmpty()) result = local; }
+            List<TomTomApi.Destination> result = null;
+            // Suggestions are a nicety: a failure here must never close the app.
+            try {
+                result = online ? OnlineFirst.suggest(key, typed, near) : null;
+                // TomTom unavailable or silent: suggest from the installed map areas instead.
+                if (result == null) { List<TomTomApi.Destination> local = packSearch(typed, near, new int[]{2, 4}); if (!local.isEmpty()) result = local; }
+            } catch (Throwable failure) { android.util.Log.w("DriveMate", "suggestions", failure); result = null; }
             if (result == null) return;
             final List<TomTomApi.Destination> found = result;
             runOnUiThread(() -> {
@@ -2914,9 +2918,10 @@ public final class MainActivity extends Activity implements LocationListener {
                             .show();
                     setStatus("Select the matching destination.");
                 });
-            } catch (Exception error) {
+            } catch (Throwable error) {
+                android.util.Log.w("DriveMate", "search", error);
                 runOnUiThread(() -> {
-                    if (searchId == requestGeneration) showError(error.getMessage());
+                    if (searchId == requestGeneration) showError("Search didn't work just now. Try again, or check the internet connection.");
                 });
             }
         });

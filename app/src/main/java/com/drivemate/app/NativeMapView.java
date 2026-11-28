@@ -42,7 +42,9 @@ final class NativeMapView extends View {
     void setScene(NativeMapScene value){scene=value;changed();route=new RouteRenderGeometry(value==null?Collections.emptyList():value.route);if(value!=null&&!value.route.isEmpty()){center=route.at(route.length*.4);vehicle=center;}invalidate();}
     void setSceneOnly(NativeMapScene value){scene=value;changed();invalidate();}
     /** Base tiles drawn under the scene: areas everywhere, roads only where the scene has none. */
-    void setBackgroundScene(NativeMapScene value){background=value;changed();invalidate();}
+    void setBackgroundScene(NativeMapScene value){if(background!=null&&background!=value)previous=background;background=value;changed();invalidate();}
+    /** The last base map, kept under the new one so areas already seen never blank out while tiles load. */
+    private NativeMapScene previous;
     void setLoading(boolean value){if(loading!=value){loading=value;invalidate();}}
     private java.util.function.Supplier<String> debug;
     void setDebug(java.util.function.Supplier<String> value){debug=value;invalidate();}
@@ -104,7 +106,7 @@ final class NativeMapView extends View {
     void setLabelInsets(int top,int bottom){if(top!=labelTop||bottom!=labelBottom){labelTop=top;labelBottom=bottom;changed();invalidate();}}
     private NativeBaseRenderer.Frame frame(NativeMapProjection.Camera c){
         NativeBaseRenderer.Frame f=new NativeBaseRenderer.Frame();
-        f.camera=c;f.scene=scene;f.background=background;f.zoom=zoom;f.tilt=tilt;f.width=getWidth();f.height=getHeight();
+        f.camera=c;f.scene=scene;f.background=background;f.previous=previous;f.zoom=zoom;f.tilt=tilt;f.width=getWidth();f.height=getHeight();
         f.density=getResources().getDisplayMetrics().density;f.night=night;f.showBuildings=showBuildings;f.extrude=extrude;
         f.labelTop=labelTop;f.labelBottom=labelBottom;return f;
     }
@@ -135,7 +137,7 @@ final class NativeMapView extends View {
         if(target==null||target.getWidth()!=f.width||target.getHeight()!=f.height)target=Bitmap.createBitmap(f.width,f.height,Bitmap.Config.ARGB_8888);
         final Bitmap into=target;
         renderThread.execute(()->{
-            try{workRenderer.render(new Canvas(into),f);}catch(RuntimeException e){android.util.Log.w("DriveMate","map render",e);}
+            try{workRenderer.render(new Canvas(into),f);}catch(Throwable e){android.util.Log.w("DriveMate","map render",e);}
             final int roads=workRenderer.roadsDrawn(),blds=workRenderer.buildingsDrawn();
             post(()->{rendering=false;spare=front;front=into;frontCamera=f.camera;frontVersion=version;roadsDrawn=roads;buildingsDrawn=blds;invalidate();});
         });

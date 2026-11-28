@@ -96,6 +96,15 @@ final class NativeTileSource implements AutoCloseable {
         // Source zoom by screen density: "zoom" is measured in physical pixels, so a high-density phone shows a
         // wider area than the number suggests and needs the matching tile detail, not an extra-low level.
         int z=MapLayers.sourceZoom(zoom,app.getResources().getDisplayMetrics().density);
+        // Too much detail for one view (trimmed tiles leave holes): step down a level rather than show gaps.
+        for(int attempt=0;;attempt++){
+            NativeMapScene scene=loadAt(p,zoom,width,height,z);
+            if(lastTrimmed==0||attempt>=MapLayers.MAX_DETAIL_STEPS_DOWN||z<=2)return scene;
+            z--;
+        }
+    }
+    private volatile int lastTrimmed;
+    private NativeMapScene loadAt(GeoMath.Point p,double zoom,int width,int height,int z)throws IOException{
         double cx=NativeMapProjection.x(p.lon),cy=NativeMapProjection.y(p.lat),scale=256*Math.pow(2,zoom);
         // Rotated viewport diagonal + margin; lower source zoom until tile count is bounded.
         double radius=Math.max(256,Math.hypot(Math.max(1,width),Math.max(1,height))*.85)/scale;
@@ -127,7 +136,7 @@ final class NativeTileSource implements AutoCloseable {
             if(total+vertices(s)>MapLayers.MAX_VIEW_VERTICES||shapes.size()+s.size()>MapLayers.MAX_VIEW_SHAPES){trimmed++;continue;}
             loadedTiles++;total+=vertices(s);shapes.addAll(s);
         }
-        lastStats=String.format(java.util.Locale.UK,"tiles z%d · %d/%d · missing %d · trimmed %d · %,d pts",z,loadedTiles,order.size(),missing,trimmed,total);
+        lastTrimmed=trimmed;lastStats=String.format(java.util.Locale.UK,"tiles z%d · %d/%d · missing %d · trimmed %d · %,d pts",z,loadedTiles,order.size(),missing,trimmed,total);
         if(loadedTiles==0)throw firstFailure!=null?firstFailure:new IOException("No map tiles for this view");
         shapes.sort(Comparator.comparingInt(f->f.bridge?100+f.kind:f.kind));
         return NativeMapScene.tiles(shapes,new double[]{NativeMapProjection.lon(a/(double)n),NativeMapProjection.lat((d+1.0)/n),NativeMapProjection.lon((b+1.0)/n),NativeMapProjection.lat(c/(double)n)});
