@@ -7,7 +7,7 @@ final class JunctionFraming {
     static List<GeoMath.Point> context(List<GeoMath.Point> route,double offset,boolean roundabout){
         if(route==null||route.size()<2||!Double.isFinite(offset))return Collections.emptyList();
         double length=GeoMath.length(route);if(offset<0||offset>length+1)return Collections.emptyList();
-        List<GeoMath.Point> slice=GeoMath.slice(route,Math.max(0,offset-(roundabout?65:35)),Math.min(length,offset+(roundabout?180:75)));
+        List<GeoMath.Point> slice=GeoMath.slice(route,Math.max(0,offset-(roundabout?65:35)),Math.min(length,offset+(roundabout?180:NavigationCamera.AFTER_TURN_METRES)));
         if(slice.isEmpty())return Collections.emptyList();
         double south=90,north=-90,west=180,east=-180;
         for(GeoMath.Point p:slice){south=Math.min(south,p.lat);north=Math.max(north,p.lat);west=Math.min(west,p.lon);east=Math.max(east,p.lon);}
@@ -20,7 +20,9 @@ final class JunctionFraming {
     static double fitZoom(double requested,GeoMath.Point center,GeoMath.Point car,List<GeoMath.Point> context,int width,int height,int top,int bottom,int margin){
         if(center==null||car==null||context==null||context.isEmpty()||width<100||height-top-bottom<120)return requested;
         // Conservatively fit a circle around the camera target so bearing changes do not crop the context.
-        double radius=GeoMath.distance(center,car);
+        // Fit the junction itself; the car is already placed low on screen by the camera, so including it
+        // (as before) made a turn 300-400 m ahead zoom the map out over a whole town (Ulverston report).
+        double radius=0;
         for(GeoMath.Point p:context)radius=Math.max(radius,GeoMath.distance(center,p));
         // The actual screen centre can be offset from the usable viewport centre.
         double half=Math.min(width/2.0,Math.min(height/2.0-top,height/2.0-bottom))-margin;

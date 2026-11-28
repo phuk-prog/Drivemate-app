@@ -227,6 +227,15 @@ public final class MainActivity extends Activity implements LocationListener {
         followButton.setTextColor(paused ? DARK : Color.WHITE);
     }
     private DriveMap vectorMap;
+    /** Settings → Map and display → Auto-zoom: On (speed and road type), Turns only, Off. */
+    private int autoZoom = NavigationCamera.AUTO_ZOOM_ON;
+    /** Speed limit (m/s) of the route section at this point, NaN when unknown. */
+    private double currentLimitMps(double along) {
+        if (route == null || route.speedSections == null) return Double.NaN;
+        for (RouteIntelligence.SpeedSection s : route.speedSections)
+            if (along >= s.start && along < s.end && s.kmh > 0) return s.kmh / 3.6;
+        return Double.NaN;
+    }
     /** Map engine in use (Settings → Map and display → Map engine). */
     private String mapEngine = MapEngines.DEFAULT;
     private Bundle vectorSavedState;
@@ -569,6 +578,7 @@ public final class MainActivity extends Activity implements LocationListener {
         advanceSpeedVoice = settings.getBoolean("advance_speed_voice", true);
         buildings3d = settings.getBoolean("buildings_3d", true);
         closeZoom = settings.getBoolean("close_zoom", true);
+        autoZoom = Math.max(0, Math.min(2, settings.getInt("auto_zoom", NavigationCamera.AUTO_ZOOM_ON)));
         highDetailOnline = settings.getBoolean("high_detail_online", true);
         places = new DestinationStore(this);
         incidentEnhancementKey=settings.getString("incident_enhancement_key","");
@@ -1559,7 +1569,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "Test navigation voice",
                 "Music controls · " + (MusicControl.accessGranted(this) ? "On" : "Off · allow notification access"),
                 "Map debug overlay · " + (mapDebug ? "On" : "Off"),
-                "Map engine · " + MapEngines.label(mapEngine)
+                "Map engine · " + MapEngines.label(mapEngine),
+                "Auto-zoom · " + NavigationCamera.autoZoomName(autoZoom)
         };
     }
 
@@ -1703,6 +1714,11 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 36: openMusicAccess(); break;
                         case 37: mapDebug = !mapDebug; if (vectorMap != null) vectorMap.setDebug(mapDebug); break;
                         case 38: selectMapEngine(); break;
+                        case 39:
+                            autoZoom = (autoZoom + 1) % 3;
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putInt("auto_zoom", autoZoom).apply();
+                            lastCameraUpdate = 0;
+                            break;
                         default: break;
         }
     }
@@ -2891,7 +2907,7 @@ public final class MainActivity extends Activity implements LocationListener {
         NavigationCamera.Frame target = NavigationCamera.calculate(
                 route.points, gpsPoint(fix), along, nextJunctionOffsetMetres,
                 velocity, vectorMap.view().getHeight(), headerHeight, bottomPanelHeight,
-                closeZoom || highlightedJunctionIndex >= 0);
+                closeZoom || highlightedJunctionIndex >= 0, currentLimitMps(along), autoZoom);
         float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 100f;
         // Retain the route-aware look-ahead in all camera modes. Flat modes
         // request zero pitch instead of abandoning the smooth-follow engine.
@@ -2899,17 +2915,18 @@ public final class MainActivity extends Activity implements LocationListener {
         List<GeoMath.Point> cameraContext=junctionFramePoints;
         if (vectorMap != null && showingVector()) {
             double distance = nextJunctionOffsetMetres-along;
-            GeoMath.Point junction = distance >= 0 && distance <= Math.max(480,velocity*8+100)
-                    ? GeoMath.pointAtDistance(route.points,nextJunctionOffsetMetres) : null;
+            // Frame only a close turn, and only the turn plus ~100 m after it (not the whole approach).
+            boolean close = autoZoom != NavigationCamera.AUTO_ZOOM_OFF && distance >= 0 && distance <= NavigationCamera.FRAME_TURN_METRES;
+            GeoMath.Point junction = close ? GeoMath.pointAtDistance(route.points,nextJunctionOffsetMetres) : null;
             vectorMap.setFollowViewport(headerHeight,bottomPanelHeight,junction,
-                    distance<=260&&distance>=0?junctionFramePoints:java.util.Collections.emptyList());
+                    close?junctionFramePoints:java.util.Collections.emptyList());
         }
-        boolean frameJunction=!junctionFramePoints.isEmpty()&&target.junctionMetres<=260;
+        boolean frameJunction=autoZoom!=NavigationCamera.AUTO_ZOOM_OFF&&!junctionFramePoints.isEmpty()&&target.junctionMetres<=NavigationCamera.FRAME_TURN_METRES;
         double fittedZoom=frameJunction?JunctionFraming.fitZoom(target.zoom,target.center,gpsPoint(fix),cameraContext,vectorMap.view().getWidth(),vectorMap.view().getHeight(),headerHeight,bottomPanelHeight,dp(20)):target.zoom;
         target = new NavigationCamera.Frame(target.center, fittedZoom,
                 target.roadBearingDegrees, target.junctionMetres,
                 target.cameraCenterAlongMetres,
-                DrivingDisplayPolicy.tilt(frameJunction?Math.min(20,target.tiltDegrees):target.tiltDegrees, cameraMode));
+                DrivingDisplayPolicy.tilt(target.tiltDegrees, cameraMode));
         smoothFollow.onGps(displayGps != null ? displayGps : gpsPoint(fix),
                 along, progress.offRouteMetres, accuracy, velocity,
                 Math.max(0, nextJunctionOffsetMetres - along),

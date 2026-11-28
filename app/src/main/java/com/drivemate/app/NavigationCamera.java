@@ -66,6 +66,35 @@ public final class NavigationCamera {
                                   double nextJunctionOffsetMetres, float speedMetresPerSecond,
                                   int screenHeightPx, int headerHeightPx, int panelHeightPx,
                                   boolean junctionDetail) {
+        return calculate(path, gps, routeProgressMetres, nextJunctionOffsetMetres, speedMetresPerSecond,
+                screenHeightPx, headerHeightPx, panelHeightPx, junctionDetail, Double.NaN, AUTO_ZOOM_ON);
+    }
+
+    /** Auto-zoom choices (Settings → Map and display → Auto-zoom), like TomTom's. */
+    public static final int AUTO_ZOOM_ON = 0, AUTO_ZOOM_TURNS = 1, AUTO_ZOOM_OFF = 2;
+    static String autoZoomName(int mode) {
+        return mode == AUTO_ZOOM_TURNS ? "Turns only" : mode == AUTO_ZOOM_OFF ? "Off" : "On";
+    }
+    /** Fixed road ahead (metres) when auto-zoom does not follow speed and road type. */
+    static final double FIXED_HORIZON = 250;
+    /** From here the view eases to almost overhead, so the junction reads like a plan (Mapbox/Apple style). */
+    static final double FLATTEN_FROM_METRES = 150;
+    static final double NEAR_TURN_TILT = 8;
+    /** Road shown beyond the turn while approaching it. */
+    static final double AFTER_TURN_METRES = 100;
+    /** Only a turn this close is framed on its own; further away the cruise view rules. */
+    static final double FRAME_TURN_METRES = 180;
+
+    /**
+     * @param roadLimitMps speed limit of the road the car is on (NaN if unknown): wider view on faster roads
+     *                     even in slow traffic, so a motorway queue does not zoom into the tarmac.
+     * @param autoZoom     {@link #AUTO_ZOOM_ON}, {@link #AUTO_ZOOM_TURNS} or {@link #AUTO_ZOOM_OFF}
+     */
+    public static Frame calculate(List<GeoMath.Point> path,
+                                  GeoMath.Point gps, double routeProgressMetres,
+                                  double nextJunctionOffsetMetres, float speedMetresPerSecond,
+                                  int screenHeightPx, int headerHeightPx, int panelHeightPx,
+                                  boolean junctionDetail, double roadLimitMps, int autoZoom) {
         if (path == null || path.size() < 2) {
             return new Frame(gps, 16.5, 0, 0);
         }
@@ -80,20 +109,21 @@ public final class NavigationCamera {
         // about 130 m of road ahead at walking pace, growing with speed (about
         // 235 m at 30 mph, 385 m at 70 mph). A distant next turn never zooms
         // the map out to fit the whole approach.
-        double cruise = cruiseHorizon(speed);
+        double cruise = cruiseHorizon(roadSpeed(speed, roadLimitMps));
+        if (autoZoom != AUTO_ZOOM_ON) cruise = FIXED_HORIZON;
         double horizon = cruise;
         // Slightly widen only to bring a turn that is just out of view onto the screen.
-        if(junctionAhead>cruise&&junctionAhead<=CLOSE_JUNCTION_METRES) horizon=junctionAhead+65;
-        if (junctionAhead <= cruise) {
-            // Approaching the manoeuvre: zoom in so the turn and a short stretch
-            // of road beyond it fill the view, keeping more at higher speed.
-            horizon = clamp(junctionAhead + Math.max(65, speed * 4.0), 105, cruise);
+        if(autoZoom!=AUTO_ZOOM_OFF&&junctionAhead>cruise&&junctionAhead<=CLOSE_JUNCTION_METRES) horizon=junctionAhead+AFTER_TURN_METRES;
+        if (autoZoom != AUTO_ZOOM_OFF && junctionAhead <= cruise) {
+            // Approaching the manoeuvre: zoom in so the turn and about 100 m beyond it
+            // fill the view, keeping more at higher speed.
+            horizon = clamp(junctionAhead + Math.max(AFTER_TURN_METRES, speed * 4.0), 120, cruise);
         }
         boolean detailApproach = junctionDetail && junctionAhead <= 420;
         if (detailApproach) {
             // Junction detail: a little closer still, never cropping the turn
             // itself plus a short exit (longer at speed).
-            double tight = Math.max(60, junctionAhead + Math.max(30, speed * 2.5));
+            double tight = Math.max(90, junctionAhead + Math.max(AFTER_TURN_METRES * 0.7, speed * 2.5));
             horizon = Math.min(horizon, Math.max(tight, horizon * 0.82));
         }
 
@@ -101,12 +131,12 @@ public final class NavigationCamera {
         // clearer overhead junction diagram as the manoeuvre gets close.
         // Moderate tilt: a steep perspective shows mostly empty horizon when zoomed out.
         double tilt = clamp(32 + Math.min(10, speed * 0.30), 32, MAX_TILT);
-        // Ease toward overhead over the last 150 m so the junction reads like a plan.
-        if (junctionAhead < 150) tilt -= 8 * (1 - junctionAhead / 150.0);
+        // Ease to almost overhead over the last 150 m so the junction reads like a plan.
+        tilt = nearTurnTilt(tilt, junctionAhead);
         if (detailApproach) {
             // More overhead than the default 3D view, especially for exits.
             double blend = 1 - junctionAhead / 420.0;
-            tilt = Math.max(23, tilt - 12 * blend);
+            tilt = Math.min(tilt, Math.max(23, tilt - 12 * blend));   // can only flatten further
         }
 
         // Pitch foreshortens the near/far road. Reserve extra world-space
@@ -177,6 +207,20 @@ public final class NavigationCamera {
     static double cruiseHorizon(double speedMetresPerSecond) {
         double v = Double.isFinite(speedMetresPerSecond) ? Math.max(0, speedMetresPerSecond) : 0;
         return clamp(120 + v * 8.5, 130, 600);
+    }
+
+    /** Speed used for the cruise view: the car's speed, or most of the road's limit when that is higher. */
+    static double roadSpeed(double speed, double limitMps) {
+        double v = Double.isFinite(speed) ? Math.max(0, speed) : 0;
+        return Double.isFinite(limitMps) && limitMps > 0 ? Math.max(v, limitMps * 0.8) : v;
+    }
+
+    /** Tilt eased smoothly (smoothstep) from the cruise tilt to {@link #NEAR_TURN_TILT} over the last 150 m. */
+    static double nearTurnTilt(double cruiseTilt, double junctionAhead) {
+        if (!Double.isFinite(junctionAhead) || junctionAhead >= FLATTEN_FROM_METRES) return cruiseTilt;
+        double t = 1 - Math.max(0, junctionAhead) / FLATTEN_FROM_METRES;
+        double k = t * t * (3 - 2 * t);
+        return cruiseTilt + (Math.min(cruiseTilt, NEAR_TURN_TILT) - cruiseTilt) * k;
     }
 
     static double clamp(double value, double min, double max) {
