@@ -131,11 +131,17 @@ final class NativeMapController {
                 current=result;view.setSceneOnly(result);roadFurniture(result);});
         });
     }
+    private boolean basePending,baseDeferred;
     private void prefetchBase(GeoMath.Point p){
         double zoom=view.zoom();
         if(background!=null&&background.covers(p)&&backgroundAt!=null&&Math.abs(backgroundZoom-zoom)<1
                 &&GeoMath.distance(backgroundAt,p)<MapLayers.baseReloadMetres(zoom))return;
-        long now=SystemClock.elapsedRealtime();if(busy||requestedAt>0&&now-requestedAt<1000)return;
+        long now=SystemClock.elapsedRealtime();
+        // Never drop a request: a busy or too-soon load is re-run as soon as it can be, for wherever the map is then.
+        if(busy){basePending=true;return;}
+        if(requestedAt>0&&now-requestedAt<MapLayers.BASE_MIN_INTERVAL_MS){
+            if(!baseDeferred){baseDeferred=true;view.postDelayed(()->{baseDeferred=false;if(!disposed)prefetch(view.center());},MapLayers.BASE_MIN_INTERVAL_MS-(now-requestedAt));}
+            return;}
         requestedAt=now;busy=true;backgroundAt=p;backgroundZoom=zoom;int w=view.getWidth(),h=view.getHeight();
         worker.execute(()->{
             NativeMapScene loaded=null;boolean detailFailed=false;String detailError="";
@@ -149,7 +155,9 @@ final class NativeMapController {
                 try{loaded=tileSource.load(p,Math.min(6,zoom),w,h);}catch(Exception unavailable){}
             }
             final NativeMapScene result=loaded;final boolean failedDetail=detailFailed;final String failedReason=detailError;
-            activity.runOnUiThread(()->{busy=false;loadFinished=true;lastDetailError=failedDetail?failedReason:"";
+            activity.runOnUiThread(()->{busy=false;loadFinished=true;
+                if(basePending&&!disposed){basePending=false;view.post(()->prefetch(view.center()));}
+               lastDetailError=failedDetail?failedReason:"";
                 if(failedDetail&&!disposed){
                     long delay=MapLoadHealth.retryDelayMs(++detailRetries);
                     if(delay>0)view.postDelayed(()->{if(!disposed){backgroundAt=null;prefetch(view.center());}},delay);

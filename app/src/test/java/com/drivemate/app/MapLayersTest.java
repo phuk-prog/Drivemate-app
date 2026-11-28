@@ -47,4 +47,25 @@ public class MapLayersTest {
         assertEquals(14, MapLayers.sourceZoom(14.7, Double.NaN));
         assertFalse(MapLayers.BROWSE_OVERLAY);
     }
+
+    @Test public void roadsThinOutAtOverviewZoomAndKeepClassOrder() {
+        float far = MapLayers.roadWidth(NativeMapScene.MOTORWAY, 11), near = MapLayers.roadWidth(NativeMapScene.MOTORWAY, 16);
+        org.junit.Assert.assertTrue(far < near);
+        for (double z = 8; z <= 20; z += .5) {
+            org.junit.Assert.assertTrue(MapLayers.roadWidth(NativeMapScene.MOTORWAY, z) >= MapLayers.roadWidth(NativeMapScene.MAIN, z));
+            org.junit.Assert.assertTrue(MapLayers.roadWidth(NativeMapScene.MAIN, z) >= MapLayers.roadWidth(NativeMapScene.LOCAL, z));
+            org.junit.Assert.assertTrue(MapLayers.roadWidth(NativeMapScene.PATH, z) > 0);
+        }
+    }
+
+    @Test public void casingsOnlyWhereRoadsAreWideEnough() {
+        org.junit.Assert.assertFalse(MapLayers.casing(NativeMapScene.LOCAL, 12));
+        org.junit.Assert.assertTrue(MapLayers.casing(NativeMapScene.MAIN, 12));
+        org.junit.Assert.assertTrue(MapLayers.casing(NativeMapScene.LOCAL, 15));
+    }
+
+    @Test public void mapLoadsAreThrottledButFrequentWhileDragging() {
+        org.junit.Assert.assertTrue(MapLayers.BASE_MIN_INTERVAL_MS <= 500);
+        org.junit.Assert.assertTrue(MapLayers.DRAG_LOAD_INTERVAL_MS >= MapLayers.BASE_MIN_INTERVAL_MS);
+    }
 }
