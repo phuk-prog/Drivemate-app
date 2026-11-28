@@ -11,8 +11,9 @@ final class MapEngines {
     static final String CLASSIC = "classic";
     /** DriveMate's own GPU engine (beta): OpenGL areas and roads, classic names and overlays on top. */
     static final String GPU = "gpu";
-    static final String DEFAULT = MAPLIBRE;
-    static final String[] ALL = {MAPLIBRE, GPU, CLASSIC};
+    /** DriveMate's own GPU engine is the default; MapLibre stays as a choice and for comparison. */
+    static final String DEFAULT = GPU;
+    static final String[] ALL = {GPU, MAPLIBRE, CLASSIC};
 
     static String normalize(String id) {
         for (String e : ALL) if (e.equals(id)) return e;
@@ -22,7 +23,7 @@ final class MapEngines {
     static String label(String id) {
         switch (normalize(id)) {
             case CLASSIC: return "DriveMate classic";
-            case GPU: return "DriveMate GPU (beta)";
+            case GPU: return "DriveMate (GPU)";
             default: return "MapLibre (GPU)";
         }
     }
@@ -30,8 +31,8 @@ final class MapEngines {
     static String description(String id) {
         switch (normalize(id)) {
             case CLASSIC: return "DriveMate's own renderer, drawn on the main processor";
-            case GPU: return "DriveMate's own graphics-chip engine, still being tested";
-            default: return "Smooth graphics-chip map (recommended)";
+            case GPU: return "DriveMate's own graphics-chip map (recommended)";
+            default: return "MapLibre graphics-chip map";
         }
     }
 }

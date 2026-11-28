@@ -6,8 +6,8 @@ import static org.junit.Assert.assertNotEquals;
 import org.junit.Test;
 
 public class MapEnginesTest {
-    @Test public void gpuMapIsTheDefaultAndUnknownValuesFallBackToIt() {
-        assertEquals(MapEngines.MAPLIBRE, MapEngines.DEFAULT);
+    @Test public void ownGpuEngineIsTheDefaultAndUnknownValuesFallBackToIt() {
+        assertEquals(MapEngines.GPU, MapEngines.DEFAULT);
         assertEquals(MapEngines.DEFAULT, MapEngines.normalize(null));
         assertEquals(MapEngines.DEFAULT, MapEngines.normalize("something-old"));
         assertEquals(MapEngines.CLASSIC, MapEngines.normalize("classic"));

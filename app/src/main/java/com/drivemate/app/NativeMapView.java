@@ -122,6 +122,12 @@ final class NativeMapView extends View {
         String stats();
     }
     private GpuBase gpu;
+    private NativeBaseRenderer.Frame pendingNames;
+    private void drawPendingNames(Canvas canvas){
+        if(pendingNames==null)return;
+        NativeBaseRenderer.Frame f=pendingNames;pendingNames=null;
+        uiRenderer.render(canvas,f);
+    }
     void setGpuBase(GpuBase base){gpu=base;changed();invalidate();}
     GpuBase gpuBase(){return gpu;}
     private void drawBase(Canvas canvas,NativeMapProjection.Camera c){
@@ -131,8 +137,10 @@ final class NativeMapView extends View {
             if(background!=null)layers.add(background);
             if(scene!=null&&scene!=background)layers.add(scene);
             gpu.frame(c,layers,zoom,night);
-            NativeBaseRenderer.Frame f=frame(c);f.labelsOnly=true;
-            uiRenderer.render(canvas,f);roadsDrawn=gpu.roadsDrawn();buildingsDrawn=0;
+            // Names are drawn after the route line (so the line never cuts a place name) but under the turn
+            // arrow, signs, pin and car: see drawPendingNames().
+            pendingNames=frame(c);pendingNames.labelsOnly=true;
+            roadsDrawn=gpu.roadsDrawn();buildingsDrawn=0;
             return;
         }
         int w=getWidth(),h=getHeight();
@@ -188,6 +196,7 @@ final class NativeMapView extends View {
         drawBase(canvas,c);
         if(route!=null){boolean full=routePath(canvas,c,route.full(),color(0xffaeb9bb,0xff516270),6);List<GeoMath.Point> remaining=route.remaining(progress);routePath(canvas,c,remaining,0xff143d64,8);boolean ahead=routePath(canvas,c,remaining,0xff16a6f4,5);
             if(full||ahead)routeDrawn=1;
+            drawPendingNames(canvas);
             // One bold manoeuvre arrow drawn on the road at the junction; a second turn close
             // behind it (a roundabout exit, a quick left-right) is folded into the same arrow.
             boolean merged=Double.isFinite(secondTurn)&&Double.isFinite(turn)&&secondTurn>turn&&secondTurn-turn<=TURN_ARROW_MERGE_METRES;
@@ -207,6 +216,7 @@ final class NativeMapView extends View {
             }
             shownLimits=new double[shown.size()];for(int q=0;q<shownLimits.length;q++)shownLimits[q]=shown.get(q);
         }
+        drawPendingNames(canvas);
         List<GeoMath.Point> hazardTrack=hazardTrack();
         if(zoom>=14)for(int[] row:roadside){
             GeoMath.Point rp=new GeoMath.Point(row[0]/1e7,row[1]/1e7);

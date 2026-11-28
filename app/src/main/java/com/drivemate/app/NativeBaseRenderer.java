@@ -23,6 +23,17 @@ final class NativeBaseRenderer {
     private final ArrayList<RectF> occupied=new ArrayList<>();
     private final HashMap<String,List<float[]>> labelNames=new HashMap<>();
     private Frame f;private int roadsDrawn,buildingsDrawn;
+    /** Named shapes per scene, worked out once per scene rather than scanning every shape each frame. */
+    private final NativeMapScene[] namedFor=new NativeMapScene[2];
+    @SuppressWarnings("unchecked") private final ArrayList<NativeMapScene.Shape>[] namedCache=new ArrayList[]{new ArrayList<>(),new ArrayList<>()};
+    private List<NativeMapScene.Shape> named(NativeMapScene sc,int slot){
+        if(namedFor[slot]!=sc){
+            ArrayList<NativeMapScene.Shape> out=namedCache[slot];out.clear();
+            for(NativeMapScene.Shape s:sc.shapes)if(!s.name.isEmpty()&&(s.kind==NativeMapScene.LABEL||s.kind>=NativeMapScene.LOCAL&&s.kind<=NativeMapScene.MOTORWAY))out.add(s);
+            namedFor[slot]=sc;
+        }
+        return namedCache[slot];
+    }
     NativeBaseRenderer(){
         for(Path[][] a:roads)for(Path[] b:a)for(int i=0;i<b.length;i++)b[i]=new Path();
         water.setFillType(Path.FillType.WINDING);green.setFillType(Path.FillType.WINDING);buildings.setFillType(Path.FillType.WINDING);
@@ -36,10 +47,8 @@ final class NativeBaseRenderer {
         f=frame;roadsDrawn=buildingsDrawn=0;
         if(f.labelsOnly){
             NativeMapProjection.Camera c=f.camera;visible.clear();
-            for(NativeMapScene sc:new NativeMapScene[]{f.background,f.scene}){
-                if(sc==null||sc==f.background&&sc==f.scene&&visible.size()>0)continue;
-                for(NativeMapScene.Shape s:sc.shapes)if(!s.name.isEmpty()&&(s.kind==NativeMapScene.LABEL||s.kind>=NativeMapScene.LOCAL&&s.kind<=NativeMapScene.MOTORWAY)&&visible(s,c))visible.add(s);
-            }
+            if(f.background!=null)for(NativeMapScene.Shape s:named(f.background,0))if(visible(s,c))visible.add(s);
+            if(f.scene!=null&&f.scene!=f.background)for(NativeMapScene.Shape s:named(f.scene,1))if(visible(s,c))visible.add(s);
             labels(canvas,c);
             return;
         }
