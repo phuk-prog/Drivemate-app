@@ -16,7 +16,11 @@ grep -F 'OK (1 test)' unified-zoom-results/native-renderer.txt
 adb shell am force-stop com.drivemate.android.mapzoom
 adb shell am instrument -w -r -e class com.drivemate.app.NativeMainMapDeviceTest com.drivemate.android.mapzoom.test/androidx.test.runner.AndroidJUnitRunner | tee unified-zoom-results/native-main-map.txt
 grep -F 'OK (1 test)' unified-zoom-results/native-main-map.txt
-adb shell am force-stop com.drivemate.android.mapzoom
-adb shell am instrument -w -r -e class com.drivemate.app.EngineComparisonTest com.drivemate.android.mapzoom.test/androidx.test.runner.AndroidJUnitRunner | tee unified-zoom-results/engine-comparison.txt
-grep -F 'OK (1 test)' unified-zoom-results/engine-comparison.txt
+# Same drive on every engine, fresh app each time. RESULT lines are the comparison (see EngineComparisonTest).
+for engine in maplibre gpu classic; do
+  adb shell am force-stop com.drivemate.android.mapzoom
+  adb shell am instrument -w -r -e class "com.drivemate.app.EngineComparisonTest#$engine" com.drivemate.android.mapzoom.test/androidx.test.runner.AndroidJUnitRunner | tee "unified-zoom-results/engine-$engine.txt"
+  grep -F 'OK (1 test)' "unified-zoom-results/engine-$engine.txt"
+done
+adb logcat -d -s EngineComparison | grep RESULT || true
 adb pull /sdcard/Android/data/com.drivemate.android.mapzoom/files/unified-zoom unified-zoom-results/ || true

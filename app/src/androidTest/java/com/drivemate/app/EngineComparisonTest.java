@@ -23,7 +23,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -35,21 +34,25 @@ import org.junit.runner.RunWith;
  */
 @RunWith(AndroidJUnit4.class)
 public class EngineComparisonTest {
-    @Test public void compareEnginesOnTheSameDrive() throws Exception {
+    // One engine per test method: the script force-stops the app between them, as a fresh start each time.
+    @Test public void maplibre() throws Exception { compare(MapEngines.MAPLIBRE); }
+    @Test public void gpu() throws Exception { compare(MapEngines.GPU); }
+    @Test public void classic() throws Exception { compare(MapEngines.CLASSIC); }
+
+    private static void compare(String engine) throws Exception {
         Instrumentation ins = InstrumentationRegistry.getInstrumentation();
         Context app = ins.getTargetContext();
         DmUnifiedRegion region = new DmUnifiedRegion(app, true);
         DmTileEngine.Route sample = region.sample(true);
         GeoMath.Point center = GeoMath.pointAtDistance(sample.points, sample.metres * .4);
-        JSONArray results = new JSONArray();
         NativeMapScene scene = region.nativeScene(sample);
-        for (String engine : MapEngines.ALL) results.put(run(ins, app, engine, center, sample.points, scene));
+        JSONObject result = run(ins, app, engine, center, sample.points, scene);
         File dir = new File(app.getExternalFilesDir(null), "unified-zoom");
         assertTrue(dir.isDirectory() || dir.mkdirs());
-        try (FileOutputStream out = new FileOutputStream(new File(dir, "engine-comparison.json"))) {
-            out.write(results.toString(2).getBytes("UTF-8"));
+        try (FileOutputStream out = new FileOutputStream(new File(dir, "engine-" + engine + ".json"))) {
+            out.write(result.toString(2).getBytes("UTF-8"));
         }
-        Log.i("EngineComparison", results.toString());
+        Log.i("EngineComparison", "RESULT " + result);
         DmUnifiedZoomTest.engine(app, MapEngines.DEFAULT);
     }
 
