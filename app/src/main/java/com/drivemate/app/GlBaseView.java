@@ -68,6 +68,7 @@ final class GlBaseView extends GLSurfaceView implements NativeMapView.GpuBase {
 
     GlBaseView(Context context) {
         super(context);
+        Log.i(TAG, "DriveMate GPU engine starting");
         setEGLContextClientVersion(3);
         setEGLConfigChooser(new MultisampleChooser());
         setPreserveEGLContextOnPause(true);
@@ -128,6 +129,7 @@ final class GlBaseView extends GLSurfaceView implements NativeMapView.GpuBase {
         }
 
         private void create() {
+            Log.i(TAG, "GPU surface created: " + GLES30.glGetString(GLES30.GL_RENDERER) + " · " + GLES30.glGetString(GLES30.GL_VERSION));
             meshes.clear();
             areaProgram = program(AREA_VS, FILL_FS);
             lineProgram = program(LINE_VS, FILL_FS);
@@ -153,6 +155,7 @@ final class GlBaseView extends GLSurfaceView implements NativeMapView.GpuBase {
             GLES30.glEnable(GLES30.GL_BLEND);
             GLES30.glBlendFunc(GLES30.GL_SRC_ALPHA, GLES30.GL_ONE_MINUS_SRC_ALPHA);
             uploadFinished();
+            if (framesDrawn % 120 == 0) Log.i(TAG, "frame " + framesDrawn + " · groups " + f.groups.size() + " · meshes " + meshes.size());
             List<Gpu[]> visible = new ArrayList<>();
             int waiting = 0;
             for (List<NativeMapScene.Shape> g : f.groups) {

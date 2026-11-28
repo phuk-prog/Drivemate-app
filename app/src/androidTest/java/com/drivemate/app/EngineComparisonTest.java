@@ -76,7 +76,10 @@ public class EngineComparisonTest {
                 SystemClock.sleep(250);
             }
             r.put("roadsAfterMs", roads.get() ? SystemClock.elapsedRealtime() - start : -1);
-            assertTrue(engine + " drew no roads", roads.get());
+            java.util.concurrent.atomic.AtomicReference<String> why = new java.util.concurrent.atomic.AtomicReference<>();
+            ins.runOnMainSync(() -> why.set(map.engineName() + " · " + map.cacheStats()));
+            r.put("state", why.get());
+            assertTrue(engine + " drew no roads: " + why.get(), roads.get());
             SystemClock.sleep(3000);
             // Scripted pan + zoom: 240 frames, the camera moves every frame like a finger drag.
             List<Long> stamps = new ArrayList<>();
