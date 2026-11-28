@@ -2,7 +2,7 @@
 set -euo pipefail
 mkdir -p unified-zoom-results
 # Preserve diagnostics even if the renderer never becomes ready.
-trap 'adb logcat -d -s UnifiedRegion UnifiedZoom AndroidRuntime DEBUG libc DriveMate > unified-zoom-results/render-logcat.txt || true; echo "--- map engine log ---"; adb logcat -d | grep -iE "mbgl|maplibre|DriveMate|EngineComparison|AndroidRuntime" | tail -250 || true' EXIT
+trap 'adb logcat -d -s UnifiedRegion UnifiedZoom AndroidRuntime DEBUG libc DriveMate > unified-zoom-results/render-logcat.txt || true; echo "--- map engine log ---"; adb logcat -d | grep -iE "mbgl|maplibre|DriveMate|EngineComparison|AndroidRuntime|THREAD_STATE|GLSurfaceView|EGL" | grep -v Mbgl-HttpRequest | tail -300 || true' EXIT
 : > unified-zoom-results/instrumentation.txt
 for method in searchTypingAndPickingDoNotCrash mapLibreGpuMapDrawsRoadsAndRoute actualStockportGpuRoadsAndRouteAtEveryZoom actualLiveVectorRendererUsesSharedRoadsAtDrivingZoom nativeRegionalRouteAndSearchWithoutProvider; do
   adb shell am force-stop com.drivemate.android.mapzoom

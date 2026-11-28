@@ -431,11 +431,19 @@ final class GlBaseView extends GLSurfaceView implements NativeMapView.GpuBase {
     private static final class MultisampleChooser implements GLSurfaceView.EGLConfigChooser {
         private static final int EGL_OPENGL_ES3_BIT = 0x40;
         @Override public EGLConfig chooseConfig(EGL10 egl, EGLDisplay display) {
-            int[][] attempts = {
+            // Multisampling is only used where the platform says it is safe (not emulators/software GL):
+            // a config the window surface cannot use would stall the GL thread.
+            boolean msaa = !android.os.Build.FINGERPRINT.contains("generic") && !android.os.Build.HARDWARE.contains("ranchu")
+                    && !android.os.Build.HARDWARE.contains("goldfish");
+            int[][] attempts = msaa ? new int[][]{
                     {EGL10.EGL_RED_SIZE, 8, EGL10.EGL_GREEN_SIZE, 8, EGL10.EGL_BLUE_SIZE, 8, EGL10.EGL_ALPHA_SIZE, 8,
-                            EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL10.EGL_SAMPLE_BUFFERS, 1, EGL10.EGL_SAMPLES, 4, EGL10.EGL_NONE},
+                            EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT,
+                            EGL10.EGL_SAMPLE_BUFFERS, 1, EGL10.EGL_SAMPLES, 4, EGL10.EGL_NONE},
                     {EGL10.EGL_RED_SIZE, 8, EGL10.EGL_GREEN_SIZE, 8, EGL10.EGL_BLUE_SIZE, 8, EGL10.EGL_ALPHA_SIZE, 8,
-                            EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL10.EGL_NONE},
+                            EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT, EGL10.EGL_NONE},
+            } : new int[][]{
+                    {EGL10.EGL_RED_SIZE, 8, EGL10.EGL_GREEN_SIZE, 8, EGL10.EGL_BLUE_SIZE, 8, EGL10.EGL_ALPHA_SIZE, 8,
+                            EGL10.EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT, EGL10.EGL_SURFACE_TYPE, EGL10.EGL_WINDOW_BIT, EGL10.EGL_NONE},
             };
             for (int[] spec : attempts) {
                 int[] count = new int[1];
