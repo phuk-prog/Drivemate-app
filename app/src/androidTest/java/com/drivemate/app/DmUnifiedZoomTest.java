@@ -44,6 +44,32 @@ public class DmUnifiedZoomTest {
         try{router.preview(new GeoMath.Point(51,-2),new GeoMath.Point(51.01,-2));fail("Outside coverage routed");}
         catch(java.io.IOException expected){assertTrue(expected.getMessage().contains("No external fallback"));}
     }
+    /** Owner report (2.2.2): typing in "Where to?" and searching closed the app. Drive the real UI the same way. */
+    @Test public void searchTypingAndPickingDoNotCrash()throws Exception{
+        Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
+        MainActivity a=(MainActivity)ins.startActivitySync(new Intent(app,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try{
+            SystemClock.sleep(3000);
+            java.lang.reflect.Field input=MainActivity.class.getDeclaredField("destinationInput");input.setAccessible(true);
+            final android.widget.AutoCompleteTextView box=(android.widget.AutoCompleteTextView)input.get(a);
+            ins.runOnMainSync(()->{box.requestFocus();android.view.inputmethod.InputMethodManager k=(android.view.inputmethod.InputMethodManager)a.getSystemService(Context.INPUT_METHOD_SERVICE);if(k!=null)k.showSoftInput(box,0);});
+            String typed="";for(char ch:"Yew Street".toCharArray()){typed+=ch;final String t=typed;ins.runOnMainSync(()->{box.setText(t);box.setSelection(t.length());});SystemClock.sleep(250);}
+            SystemClock.sleep(3000);
+            // Drag the map while the keyboard is up, as a driver would.
+            java.lang.reflect.Field field=MainActivity.class.getDeclaredField("vectorMap");field.setAccessible(true);
+            NativeMapController live=(NativeMapController)field.get(a);
+            ins.runOnMainSync(()->live.setCamera(new GeoMath.Point(53.405,-2.16),12,0));SystemClock.sleep(1500);
+            ins.runOnMainSync(()->live.setCamera(new GeoMath.Point(53.40,-2.20),14,0));SystemClock.sleep(1500);
+            java.lang.reflect.Method search=MainActivity.class.getDeclaredMethod("searchDestination");search.setAccessible(true);
+            ins.runOnMainSync(()->{try{search.invoke(a);}catch(Exception e){throw new RuntimeException(e);}});
+            SystemClock.sleep(8000);
+            java.lang.reflect.Method pick=MainActivity.class.getDeclaredMethod("selectDestination",TomTomApi.Destination.class);pick.setAccessible(true);
+            ins.runOnMainSync(()->{try{pick.invoke(a,new TomTomApi.Destination("Yew Street","Stockport",new GeoMath.Point(53.4038,-2.1702)));}catch(Exception e){throw new RuntimeException(e);}});
+            SystemClock.sleep(12000);
+            AtomicBoolean alive=new AtomicBoolean();ins.runOnMainSync(()->alive.set(!a.isFinishing()&&!a.isDestroyed()));
+            assertTrue("Activity closed during search",alive.get());
+        }finally{ins.runOnMainSync(a::finish);}
+    }
     @Test public void actualLiveVectorRendererUsesSharedRoadsAtDrivingZoom()throws Exception{
         Instrumentation ins=InstrumentationRegistry.getInstrumentation();Context app=ins.getTargetContext();
         assertNull(((ConnectivityManager)app.getSystemService(Context.CONNECTIVITY_SERVICE)).getActiveNetwork());
