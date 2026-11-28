@@ -95,6 +95,9 @@ final class MapLibreMapController implements DriveMap {
         this.density = activity.getResources().getDisplayMetrics().density;
         this.tileSource = new NativeTileSource(activity);
         MapLibre.getInstance(activity.getApplicationContext());
+        // Every tile comes from DriveMate's own server on this phone (127.0.0.1), which handles offline itself.
+        // Without this MapLibre pauses all requests whenever Android reports no internet, leaving a blank map.
+        MapLibre.setConnected(true);
         root = new FrameLayout(activity);
         mapView = new MapView(activity);
         mapView.setContentDescription("DriveMate map");
