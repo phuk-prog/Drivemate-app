@@ -253,7 +253,7 @@ public final class TomTomApi {
         String url = "https://api.tomtom.com/routing/1/calculateRoute/" + pair + "/json"
                 + "?key=" + encode(key)
                 + "&travelMode=car&routeType=fastest&traffic=true&routeRepresentation=polyline"
-                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all";
+                + "&instructionsType=text&language=en-GB&computeTravelTimeFor=all&maxAlternatives=2";
         try {
             return parseRoute(request.get(url
                     + "&sectionType=lanes&sectionType=speedLimit&sectionType=traffic"));
@@ -275,13 +275,43 @@ public final class TomTomApi {
         }
     }
 
+    /** A U-turn after the start: drivers find these confusing and they are often a sign the destination was
+     *  matched to the wrong side or stretch of road. A start U-turn (facing the wrong way) is normal. */
+    static boolean needlessUTurn(JSONObject route) {
+        JSONObject guidance = route.optJSONObject("guidance");
+        JSONArray steps = guidance == null ? null : guidance.optJSONArray("instructions");
+        if (steps == null) return false;
+        for (int i = 0; i < steps.length(); i++) {
+            JSONObject step = steps.optJSONObject(i);
+            if (step == null) continue;
+            String m = step.optString("maneuver", "");
+            if (("MAKE_UTURN".equals(m) || "TRY_MAKE_UTURN".equals(m)) && step.optDouble("routeOffsetInMeters", 0) > 40) return true;
+        }
+        return false;
+    }
+
+    /** Fastest route, unless it needs a U-turn and an alternative without one costs at most 25% (+2 min) more. */
+    static int preferredRoute(JSONArray routes) {
+        if (routes.length() < 2) return 0;
+        JSONObject first = routes.optJSONObject(0);
+        if (first == null || !needlessUTurn(first)) return 0;
+        double best = first.optJSONObject("summary") == null ? Double.NaN : first.optJSONObject("summary").optDouble("travelTimeInSeconds", Double.NaN);
+        for (int i = 1; i < routes.length(); i++) {
+            JSONObject r = routes.optJSONObject(i);
+            if (r == null || needlessUTurn(r) || r.optJSONObject("summary") == null) continue;
+            double t = r.optJSONObject("summary").optDouble("travelTimeInSeconds", Double.NaN);
+            if (!Double.isFinite(best) || (Double.isFinite(t) && t <= best * 1.25 + 120)) return i;
+        }
+        return 0;
+    }
+
     /** Package-private to test real response shapes without network/API keys. */
     static Route parseRoute(JSONObject response) throws IOException, JSONException {
         JSONArray routes = response.optJSONArray("routes");
         if (routes == null || routes.length() == 0) {
             throw new IOException("TomTom did not return a drivable route.");
         }
-        JSONObject route = routes.getJSONObject(0);
+        JSONObject route = routes.getJSONObject(preferredRoute(routes));
         JSONObject summary = route.getJSONObject("summary");
         List<GeoMath.Point> points = new ArrayList<>();
         // TomTom section point indices refer to the original flattened

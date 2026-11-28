@@ -23,4 +23,17 @@ for engine in maplibre gpu classic; do
   grep -F 'OK (1 test)' "unified-zoom-results/engine-$engine.txt"
 done
 adb logcat -d -s EngineComparison | grep RESULT || true
+# Drive lab: scripted drives through the real app with driver-facing checks; frames printed for review.
+adb shell pm grant com.drivemate.android.mapzoom android.permission.ACCESS_FINE_LOCATION || true
+adb shell pm grant com.drivemate.android.mapzoom android.permission.ACCESS_COARSE_LOCATION || true
+lab_failed=0
+for drive in stockportOfflineDrive missedTurnReroutes needlessUTurnIsAvoided unavoidableUTurnIsWordedPlainly; do
+  adb shell am force-stop com.drivemate.android.mapzoom
+  adb shell am instrument -w -r -e class "com.drivemate.app.DriveLabTest#$drive" com.drivemate.android.mapzoom.test/androidx.test.runner.AndroidJUnitRunner | tee "unified-zoom-results/drive-$drive.txt"
+  grep -F 'OK (1 test)' "unified-zoom-results/drive-$drive.txt" || lab_failed=1
+done
+adb pull /sdcard/Android/data/com.drivemate.android.mapzoom/files/drive-lab unified-zoom-results/ || true
+adb logcat -d -s DriveLab | grep -E "SUMMARY|rerouted" || true
+python3 tools/print_drive_lab.py unified-zoom-results/drive-lab || true
+test "$lab_failed" = 0
 adb pull /sdcard/Android/data/com.drivemate.android.mapzoom/files/unified-zoom unified-zoom-results/ || true

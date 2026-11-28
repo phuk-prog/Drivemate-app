@@ -10,13 +10,26 @@ final class IntelligentGuidance {
     private IntelligentGuidance() {}
     private static String clean(String s) { return s == null ? "" : s.trim(); }
 
+    static boolean uTurn(TomTomApi.Instruction step) {
+        String m = clean(step.maneuver);
+        return "MAKE_UTURN".equals(m) || "TRY_MAKE_UTURN".equals(m);
+    }
+
+    /** Provider text in DriveMate's own words: "Try to make a U-turn" becomes "Make a U-turn". */
+    static String ownWords(String message) {
+        String m = clean(message);
+        if (m.regionMatches(true, 0, "Try to ", 0, 7)) m = Character.toUpperCase(m.charAt(7)) + m.substring(8);
+        return m;
+    }
+
     /** A 1st exit within a few metres of joining: the driver must already be in the left lane. */
     static boolean immediateExit(TomTomApi.Instruction step, int exit) {
         return exit == 1 && clean(step.message).toLowerCase(Locale.UK).contains("straight away");
     }
 
     static String action(TomTomApi.Instruction step, String glyph, int exit) {
-        String message = clean(step.message);
+        if (uTurn(step)) return "Make a U-turn";
+        String message = ownWords(step.message);
         String road = clean(step.street);
         if ("ROUNDABOUT_EXIT".equals(step.maneuver) && exit<=0) return message.isEmpty()?"Exit roundabout":message;
         if ("↻".equals(glyph)) {
@@ -41,6 +54,7 @@ final class IntelligentGuidance {
     }
 
     static String direction(TomTomApi.Instruction step, String glyph, int exit) {
+        if (uTurn(step)) return clean(step.street).isEmpty() ? "Make a U-turn" : "Make a U-turn at " + clean(step.street);
         if ("ROUNDABOUT_EXIT".equals(step.maneuver) && exit<=0) return clean(step.message).isEmpty()?"Exit the roundabout":clean(step.message);
         if (!"↻".equals(glyph)) {
             String highway=highwayExit(step);
@@ -48,7 +62,7 @@ final class IntelligentGuidance {
                 String target=roadLine(action(step,glyph,exit),step);
                 return action(step,glyph,exit)+(target.isEmpty()?"":" onto "+target)+(clean(step.signpost).isEmpty()?"":" towards "+clean(step.signpost));
             }
-            return clean(step.message).isEmpty() ? "Follow the highlighted route" : clean(step.message);
+            return clean(step.message).isEmpty() ? "Follow the highlighted route" : ownWords(step.message);
         }
         String road = clean(step.street);
         if (immediateExit(step, exit)) return "At the roundabout, keep left and take the 1st exit straight away" + (road.isEmpty() ? "" : " onto " + road);
@@ -122,6 +136,7 @@ final class IntelligentGuidance {
         String glyph = JunctionIntelligence.glyph(step,JunctionIntelligence.classify(step.maneuver,step.junctionType));
         int exit = "↻".equals(glyph) ? JunctionFraming.reportedExit(step.exitNumber) : 0;
         String action=action(step,glyph,exit);
+        if (uTurn(step)) return "Then " + glyph + "  " + action;
         String road=roadLine(action,step);
         // Waze-style: just the arrow and where it goes; the main card already carries distances.
         return "Then " + glyph + "  " + (road.isEmpty() ? action : road);

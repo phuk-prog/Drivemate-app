@@ -59,6 +59,7 @@ final class NativeMapController implements DriveMap {
         });
     }
     public View view(){return root;}
+    public double[] limitMarkerOffsets(){return view.limitMarkerOffsets();}
     public String engineName(){return gl!=null?"DriveMate GPU (beta)":"DriveMate classic";}
     public void setOnUserGesture(Runnable r){view.setGesture(r);}
     /** Pre-fetch map tiles around a place (Home, Work) in the background. */

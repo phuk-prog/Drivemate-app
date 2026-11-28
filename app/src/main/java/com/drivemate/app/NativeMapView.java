@@ -78,6 +78,8 @@ final class NativeMapView extends View {
     void setCamera(GeoMath.Point p,double z,double bearing,double tilt){if(p==null)return;if(flingVx!=0||flingVy!=0)stopFling();center=p;zoom=Math.max(2,Math.min(21,z));this.bearing=bearing;this.tilt=tilt;invalidate();}
     void setProgress(double value,GeoMath.Point vehicle,double turnOffset){progress=Math.max(0,value);this.vehicle=vehicle;turn=turnOffset;invalidate();}
     double bearing(){return bearing;}
+    private volatile double[] shownLimits=new double[0];
+    double[] limitMarkerOffsets(){return shownLimits.clone();}
     int roadsDrawn(){return gpu!=null?gpu.roadsDrawn():roadsDrawn;}int routeDrawn(){return routeDrawn;}int buildingsDrawn(){return buildingsDrawn;}
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
     private int color(int day,int dark){return night?dark:day;}
@@ -191,17 +193,19 @@ final class NativeMapView extends View {
             boolean merged=Double.isFinite(secondTurn)&&Double.isFinite(turn)&&secondTurn>turn&&secondTurn-turn<=TURN_ARROW_MERGE_METRES;
             turnArrow(canvas,c,turn,merged?secondTurn-turn+TURN_ARROW_AFTER_METRES:TURN_ARROW_AFTER_METRES);
             if(!merged)arrow(canvas,c,secondTurn);
-            int previousKmh=-1;double lastShown=Double.NaN;
+            int previousKmh=-1;double lastShown=Double.NaN;ArrayList<Double> shown=new ArrayList<>();
             for(RouteIntelligence.SpeedSection section:speeds){
                 int prev=previousKmh;previousKmh=section.kmh;
                 if(section.start>progress+700||section.start>=route.length)continue;
                 // No sign at the car (the speed cluster shows it), for a repeat, or stacked on another.
                 if(!MapLayers.showLimitMarker(section.kmh,prev,section.start,lastShown,progress))continue;
-                lastShown=section.start;
+                if(MapLayers.nearManeuver(section.start,turn)||MapLayers.nearManeuver(section.start,secondTurn))continue;
+                lastShown=section.start;shown.add(section.start);
                 point(c,route.at(section.start));if(!Float.isFinite(screen[0])||!Float.isFinite(screen[1])||screen[0]<0||screen[0]>getWidth()||screen[1]<0||screen[1]>getHeight())continue;
                 paint.setStyle(Paint.Style.FILL);paint.setColor(0xffb7232c);canvas.drawCircle(screen[0],screen[1],dp(11),paint);paint.setColor(Color.WHITE);canvas.drawCircle(screen[0],screen[1],dp(8),paint);
                 paint.setColor(0xff192635);paint.setTextSize(dp(9));String t=String.valueOf(metric?section.kmh:(int)Math.round(section.kmh/1.609344));canvas.drawText(t,screen[0]-paint.measureText(t)/2,screen[1]+dp(3),paint);
             }
+            shownLimits=new double[shown.size()];for(int q=0;q<shownLimits.length;q++)shownLimits[q]=shown.get(q);
         }
         List<GeoMath.Point> hazardTrack=hazardTrack();
         if(zoom>=14)for(int[] row:roadside){

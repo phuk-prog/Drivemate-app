@@ -159,6 +159,8 @@ final class MapLibreMapController implements DriveMap {
                 if (disposed || generation != styleGeneration) return;
                 style = loaded;
                 styleLoadedAt = SystemClock.elapsedRealtime();
+                roadLayerIds = null;
+                if (reported == RoadDisplayHealth.State.READY) { reported = null; root.removeCallbacks(healthCheck); root.postDelayed(healthCheck, 1000); }
                 installOverlays(loaded);
                 setBuildings3D(buildings3d);
                 publishAll();
@@ -188,19 +190,23 @@ final class MapLibreMapController implements DriveMap {
         s.addImage("dm-head", arrowHeadBitmap());
         s.addImage("dm-limit", limitBitmap());
         String round = Property.LINE_CAP_ROUND, join = Property.LINE_JOIN_ROUND;
+        // Lines and areas go under the map's own names (like Google Maps/Waze); signs, pin and car stay on top.
+        String names = null;
+        for (Layer l : s.getLayers()) if (l instanceof SymbolLayer && !l.getId().startsWith("dm-")) { names = l.getId(); break; }
+        final String under = names;
         // DriveMate's own road data along the route (and nearby when browsing): drawn even with no map tiles.
         Expression kind = Expression.get("kind");
-        s.addLayer(new FillLayer("dm-scene-area", "dm-scene-areas").withProperties(PropertyFactory.fillColor(
+        below(s, under, new FillLayer("dm-scene-area", "dm-scene-areas").withProperties(PropertyFactory.fillColor(
                 Expression.match(kind, Expression.color(night ? 0xff243c37 : 0xffdce9ce),
                         Expression.stop(NativeMapScene.WATER, Expression.color(night ? 0xff254d6b : 0xffa6d5e9)),
                         Expression.stop(NativeMapScene.BUILDING, Expression.color(night ? 0xff334654 : 0xffd7cbb9))))));
-        s.addLayer(new LineLayer("dm-scene-casing", "dm-scene-lines").withProperties(
+        below(s, under, new LineLayer("dm-scene-casing", "dm-scene-lines").withProperties(
                 PropertyFactory.lineColor(night ? "#10202d" : "#b1b8b9"),
                 PropertyFactory.lineWidth(Expression.match(kind, byZoom(3, 6, 12),
                         Expression.stop(NativeMapScene.MOTORWAY, byZoom(6, 11, 20)), Expression.stop(NativeMapScene.MAIN, byZoom(5, 9, 17)),
                         Expression.stop(NativeMapScene.PATH, byZoom(1, 2.5f, 5)))),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
-        s.addLayer(new LineLayer("dm-scene-road", "dm-scene-lines").withProperties(
+        below(s, under, new LineLayer("dm-scene-road", "dm-scene-lines").withProperties(
                 PropertyFactory.lineColor(Expression.match(kind, Expression.color(night ? 0xff50616d : 0xffffffff),
                         Expression.stop(NativeMapScene.MOTORWAY, Expression.color(night ? 0xffa18b68 : 0xfff1cd9d)),
                         Expression.stop(NativeMapScene.MAIN, Expression.color(night ? 0xff667178 : 0xffffe7a7)))),
@@ -208,19 +214,19 @@ final class MapLibreMapController implements DriveMap {
                         Expression.stop(NativeMapScene.MOTORWAY, byZoom(4.5f, 9, 18)), Expression.stop(NativeMapScene.MAIN, byZoom(3.5f, 7, 15)),
                         Expression.stop(NativeMapScene.PATH, byZoom(.6f, 1.5f, 3)))),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
-        s.addLayer(new LineLayer("dm-route-full", "dm-route").withProperties(
+        below(s, under, new LineLayer("dm-route-full", "dm-route").withProperties(
                 PropertyFactory.lineColor(night ? "#516270" : "#aeb9bb"), PropertyFactory.lineWidth(byZoom(4, 7, 13)),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
-        s.addLayer(new LineLayer("dm-route-casing", "dm-remaining").withProperties(
+        below(s, under, new LineLayer("dm-route-casing", "dm-remaining").withProperties(
                 PropertyFactory.lineColor("#143d64"), PropertyFactory.lineWidth(byZoom(6, 10, 17)),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
-        s.addLayer(new LineLayer("dm-route-line", "dm-remaining").withProperties(
+        below(s, under, new LineLayer("dm-route-line", "dm-remaining").withProperties(
                 PropertyFactory.lineColor("#16a6f4"), PropertyFactory.lineWidth(byZoom(4, 7, 12)),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
-        s.addLayer(new LineLayer("dm-turn-casing", "dm-turn").withProperties(
+        below(s, under, new LineLayer("dm-turn-casing", "dm-turn").withProperties(
                 PropertyFactory.lineColor("#10202d"), PropertyFactory.lineWidth(byZoom(5, 10, 16)),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
-        s.addLayer(new LineLayer("dm-turn-line", "dm-turn").withProperties(
+        below(s, under, new LineLayer("dm-turn-line", "dm-turn").withProperties(
                 PropertyFactory.lineColor("#ffffff"), PropertyFactory.lineWidth(byZoom(3, 6.5f, 11)),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
         s.addLayer(new SymbolLayer("dm-turn-head-layer", "dm-turn-head").withProperties(
@@ -228,12 +234,14 @@ final class MapLibreMapController implements DriveMap {
                 PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
                 PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
                 PropertyFactory.iconSize(byZoom(.35f, .7f, 1.2f)),
-                PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)));
+                PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(false)));
         s.addLayer(new SymbolLayer("dm-limits-layer", "dm-limits").withProperties(
                 PropertyFactory.iconImage("dm-limit"), PropertyFactory.iconSize(.5f),
                 PropertyFactory.textField(Expression.get("label")), PropertyFactory.textFont(new String[]{"Noto Sans Regular"}),
                 PropertyFactory.textSize(11f), PropertyFactory.textColor("#192635"),
-                PropertyFactory.iconAllowOverlap(true), PropertyFactory.textAllowOverlap(true)));
+                // A sign never sits on the turn arrow, the pin or another sign: it gives way instead.
+                PropertyFactory.iconAllowOverlap(false), PropertyFactory.textAllowOverlap(false),
+                PropertyFactory.iconPadding(4f)));
         s.addLayer(new CircleLayer("dm-incidents-layer", "dm-incidents").withProperties(
                 PropertyFactory.circleColor("#bd5426"), PropertyFactory.circleRadius(9f),
                 PropertyFactory.circleStrokeColor("#ffffff"), PropertyFactory.circleStrokeWidth(2f)));
@@ -257,6 +265,10 @@ final class MapLibreMapController implements DriveMap {
                 PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
                 PropertyFactory.iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
                 PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true)));
+    }
+
+    private static void below(Style s, String names, Layer layer) {
+        if (names != null && s.getLayer(names) != null) s.addLayerBelow(layer, names); else s.addLayer(layer);
     }
 
     private static Bitmap pinBitmap() {
@@ -366,6 +378,7 @@ final class MapLibreMapController implements DriveMap {
         lastRemainingProgress = progress;
         set("dm-remaining", route.size() < 2 ? empty() : line(routeGeometry.remaining(progress)));
         publishTurn();
+        publishLimits();   // signs the car has passed disappear
     }
 
     private void publishTurn() {
@@ -417,16 +430,20 @@ final class MapLibreMapController implements DriveMap {
         if (style == null) return;
         List<Feature> out = new ArrayList<>();
         int previous = -1; double lastShown = Double.NaN;
+        double[] offsets = new double[speeds.size()]; int shownCount = 0;
         for (RouteIntelligence.SpeedSection s : speeds) {
             int prev = previous; previous = s.kmh;
             if (s.start >= routeGeometry.length) continue;
             if (!MapLayers.showLimitMarker(s.kmh, prev, s.start, lastShown, progress)) continue;
+            if (MapLayers.nearManeuver(s.start, turn) || MapLayers.nearManeuver(s.start, secondTurn)) continue;
             lastShown = s.start;
+            offsets[shownCount++] = s.start;
             Feature f = Feature.fromGeometry(pt(routeGeometry.at(s.start)));
             f.addStringProperty("label", String.valueOf(metric ? s.kmh : (int) Math.round(s.kmh / 1.609344)));
             out.add(f);
         }
         set("dm-limits", FeatureCollection.fromFeatures(out));
+        shownLimits = java.util.Arrays.copyOf(offsets, shownCount);
     }
 
     private void publishIncidents() {
@@ -518,7 +535,11 @@ final class MapLibreMapController implements DriveMap {
 
     @Override public void setBrowseGeometry(NativeMapScene scene) { browseScene = scene; if (routeScene == null) publishScene(); }
     @Override public void setConfirmedRouteProgress(double p) { progress = Math.max(0, p); publishProgress(); }
-    @Override public void setManeuverOffsets(double a, double b) { turn = a; secondTurn = b; publishTurn(); }
+    @Override public void setManeuverOffsets(double a, double b) {
+        boolean changed = !(a == turn || Double.isNaN(a) && Double.isNaN(turn)) || !(b == secondTurn || Double.isNaN(b) && Double.isNaN(secondTurn));
+        turn = a; secondTurn = b; publishTurn();
+        if (changed) publishLimits();
+    }
     @Override public void setManeuverOffset(double a) { setManeuverOffsets(a, Double.NaN); }
     @Override public void setVehicle(GeoMath.Point p) { vehicle = p; vehicleBearing = Double.NaN; publishVehicle(); }
     @Override public void setUnsnappedVehicle(GeoMath.Point p, double bearing) { vehicle = p; vehicleBearing = bearing; publishVehicle(); }
@@ -542,6 +563,8 @@ final class MapLibreMapController implements DriveMap {
 
     @Override public View view() { return root; }
     @Override public String engineName() { return "MapLibre (GPU)"; }
+    private double[] shownLimits = new double[0];
+    @Override public double[] limitMarkerOffsets() { return shownLimits.clone(); }
     @Override public void setOnUserGesture(Runnable r) { onUserGesture = r; }
     @Override public void warmArea(GeoMath.Point p) { if (!disposed && p != null) worker.execute(() -> tileSource.warm(p)); }
     @Override public boolean nightMode() { return night; }
@@ -589,31 +612,41 @@ final class MapLibreMapController implements DriveMap {
                 map.getCameraPosition().zoom, map.getCameraPosition().target.getLatitude(), map.getCameraPosition().target.getLongitude());
         return "MapLibre GPU · style " + (style != null ? "loaded" : "not loaded") + " · server " + (server == null ? "none" : server.tilesUrl())
                 + " · fetched " + (server == null ? 0 : server.downloadedTiles()) + " · cached " + (server == null ? 0 : server.localHits())
-                + " · errors " + (server == null ? 0 : server.errors()) + " · " + cam + " · roads on screen " + roadsOnScreen();
+                + " · errors " + (server == null ? 0 : server.errors()) + " · " + cam + " · roads at centre " + lastRoadCount;
     }
 
     // ---------------------------------------------------------------- health: report READY once roads are on screen
 
+    private String[] roadLayerIds;
+    private int lastRoadCount;
+
+    /** Cheap, bounded check: a small patch in the middle of the map, never the whole screen. Querying every road on
+     *  a zoomed-out screen copied tens of thousands of features on the UI thread and froze the app (2.3.0 report). */
     private int roadsOnScreen() {
         if (map == null || style == null || mapView.getWidth() == 0) return 0;
-        List<String> ids = new ArrayList<>();
-        for (Layer l : style.getLayers()) {
-            String id = l.getId();
-            if (l instanceof LineLayer && (id.equals("dm-scene-road") || id.startsWith("omt-road") || id.startsWith("uk-road") || id.equals("uk-trunk")
-                    || id.equals("uk-roads") || id.equals("world-roads"))) ids.add(id);
+        if (roadLayerIds == null) {
+            List<String> ids = new ArrayList<>();
+            for (Layer l : style.getLayers()) {
+                String id = l.getId();
+                if (l instanceof LineLayer && (id.equals("dm-scene-road") || id.startsWith("omt-road") || id.startsWith("uk-road")
+                        || id.equals("uk-trunk") || id.equals("uk-roads") || id.equals("world-roads"))) ids.add(id);
+            }
+            roadLayerIds = ids.toArray(new String[0]);
         }
+        float w = mapView.getWidth(), h = mapView.getHeight(), half = Math.min(w, h) * MapLayers.ROAD_PROBE_FRACTION / 2;
         try {
-            return map.queryRenderedFeatures(new RectF(0, 0, mapView.getWidth(), mapView.getHeight()),
-                    ids.toArray(new String[0])).size();
+            lastRoadCount = map.queryRenderedFeatures(new RectF(w / 2 - half, h / 2 - half, w / 2 + half, h / 2 + half), roadLayerIds).size();
         } catch (RuntimeException e) {
-            return 0;
+            lastRoadCount = 0;
         }
+        return lastRoadCount;
     }
 
-    @Override public boolean hasRenderedRoads() { return roadsOnScreen() > 0; }
+    @Override public boolean hasRenderedRoads() { return reported == RoadDisplayHealth.State.READY || roadsOnScreen() > 0; }
 
+    /** Runs until roads first appear (or a style reload), then stops: no work on every camera stop. */
     private void checkRoads() {
-        if (disposed || style == null) return;
+        if (disposed || style == null || reported == RoadDisplayHealth.State.READY) return;
         int roads = roadsOnScreen();
         RoadDisplayHealth.State state = roads > 0 ? RoadDisplayHealth.State.READY
                 : SystemClock.elapsedRealtime() - styleLoadedAt > 15000 ? RoadDisplayHealth.State.FAILED : null;
@@ -623,9 +656,9 @@ final class MapLibreMapController implements DriveMap {
 
     private final Runnable healthCheck = new Runnable() {
         @Override public void run() {
-            if (disposed) return;
+            if (disposed || reported == RoadDisplayHealth.State.READY) return;
             checkRoads();
-            root.postDelayed(this, reported == RoadDisplayHealth.State.READY ? 6000 : 2000);
+            if (reported != RoadDisplayHealth.State.READY) root.postDelayed(this, 2000);
         }
     };
 

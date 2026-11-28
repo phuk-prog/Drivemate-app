@@ -60,6 +60,8 @@ interface DriveMap {
     void prefetch(GeoMath.Point p);
     void prefetchRoute(List<GeoMath.Point> ahead);
     String cacheStats();
+    /** Route offsets (metres) of the speed-limit signs currently on the map; for the drive lab's checks. */
+    double[] limitMarkerOffsets();
 
     void onStart();
     void onResume();
