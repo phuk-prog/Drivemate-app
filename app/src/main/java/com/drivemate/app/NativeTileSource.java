@@ -80,6 +80,14 @@ final class NativeTileSource implements AutoCloseable {
         if(world==null)openWorld();
         return world.tile(z,x,y);
     }
+    /** Raw tile bytes for any zoom from the best source: installed areas, then the CDN, then the UK archive.
+     * Empty array: the tile does not exist (sea, outside coverage). Used by the GPU map's local tile server. */
+    byte[] anyTile(int z,int x,int y)throws IOException{
+        if(z<0||z>14)return null;
+        byte[] local=installedPacks().tile(z,x,y);if(local!=null)return local;
+        byte[] fast=cdn().tile(z,x,y);if(fast!=null)return fast;
+        return ukServer().nativeTile(z,x,y);
+    }
     private static int vertices(List<NativeMapScene.Shape> s){int n=0;for(NativeMapScene.Shape f:s)n+=f.xy.length/2;return n;}
     private List<NativeMapScene.Shape> tile(int z,int x,int y)throws IOException{
         String key=z+"/"+x+"/"+y;

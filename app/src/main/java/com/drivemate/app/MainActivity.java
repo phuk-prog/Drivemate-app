@@ -226,7 +226,9 @@ public final class MainActivity extends Activity implements LocationListener {
                 paused ? CYAN : DARK));
         followButton.setTextColor(paused ? DARK : Color.WHITE);
     }
-    private NativeMapController vectorMap;
+    private DriveMap vectorMap;
+    /** Map engine in use (Settings → Map and display → Map engine). */
+    private String mapEngine = MapEngines.DEFAULT;
     private Bundle vectorSavedState;
     private boolean useLocalMap = true;
     private boolean vectorRoadsReady;
@@ -628,7 +630,7 @@ public final class MainActivity extends Activity implements LocationListener {
         frame.setBackgroundColor(Color.rgb(235, 241, 246));
         FrameLayout mapHost=new FrameLayout(this);
         frame.addView(mapHost,new FrameLayout.LayoutParams(-1,-1));
-        vectorMap=new NativeMapController(this,(status,roads)->{
+        DriveMap.Listener mapHealth=(status,roads)->{
             vectorRoadsReady=status==RoadDisplayHealth.State.READY;
             if(!active&&route==null&&status==RoadDisplayHealth.State.FAILED)
                 setStatus("DriveMate detail unavailable · regional coverage required");
@@ -636,7 +638,15 @@ public final class MainActivity extends Activity implements LocationListener {
             else if(status==RoadDisplayHealth.State.READY&&banner!=null
                     &&banner.getText().toString().startsWith("DriveMate detail unavailable"))
                 setStatus("Map ready");
-        });
+        };
+        mapEngine=MapEngines.normalize(getSharedPreferences(PREFS,MODE_PRIVATE).getString(MapEngines.PREF,MapEngines.DEFAULT));
+        vectorMap=null;
+        if(MapEngines.MAPLIBRE.equals(mapEngine)){
+            // GPU map; if the graphics library cannot start on this phone, fall back to the classic renderer.
+            try{vectorMap=new MapLibreMapController(this,mapHealth);}
+            catch(Throwable failure){android.util.Log.e("DriveMate","GPU map unavailable",failure);vectorMap=null;mapEngine=MapEngines.CLASSIC;}
+        }
+        if(vectorMap==null)vectorMap=new NativeMapController(this,mapHealth);
         mapHost.addView(vectorMap.view(),0,new FrameLayout.LayoutParams(-1,-1));
         useLocalMap=true;autoFallback=false;
         vectorMap.setOnUserGesture(this::disengageFollowForGesture);
@@ -1542,7 +1552,8 @@ public final class MainActivity extends Activity implements LocationListener {
                 "While the voice speaks · " + (voicePausesMusic ? "Pause music" : "Lower music"),
                 "Test navigation voice",
                 "Music controls · " + (MusicControl.accessGranted(this) ? "On" : "Off · allow notification access"),
-                "Map debug overlay · " + (mapDebug ? "On" : "Off")
+                "Map debug overlay · " + (mapDebug ? "On" : "Off"),
+                "Map engine · " + MapEngines.label(mapEngine)
         };
     }
 
@@ -1685,8 +1696,29 @@ public final class MainActivity extends Activity implements LocationListener {
                         case 35: testVoice(); break;
                         case 36: openMusicAccess(); break;
                         case 37: mapDebug = !mapDebug; if (vectorMap != null) vectorMap.setDebug(mapDebug); break;
+                        case 38: selectMapEngine(); break;
                         default: break;
         }
+    }
+
+    /** Switching engine rebuilds the screen; routing and guidance state are kept by the activity restart path. */
+    private void selectMapEngine() {
+        String[] ids = MapEngines.ALL;
+        String[] labels = new String[ids.length];
+        int checked = 0;
+        for (int i = 0; i < ids.length; i++) {
+            labels[i] = MapEngines.label(ids[i]) + "\n" + MapEngines.description(ids[i]);
+            if (ids[i].equals(mapEngine)) checked = i;
+        }
+        new AlertDialog.Builder(this).setTitle("Map engine")
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    d.dismiss();
+                    if (ids[which].equals(mapEngine)) return;
+                    if (active) { showError("Change the map engine after ending navigation."); return; }
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(MapEngines.PREF, ids[which]).apply();
+                    recreate();
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 
     private MusicControl musicControl;
