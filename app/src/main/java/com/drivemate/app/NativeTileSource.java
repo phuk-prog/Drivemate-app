@@ -21,6 +21,17 @@ final class NativeTileSource implements AutoCloseable {
     /** Tiles that could not be loaded in the latest {@link #load}; 0 means the view is complete. */
     private volatile int missing;
     int missingTiles(){return missing;}
+    /** One-line summary of the latest view load, for the map debug overlay. */
+    private volatile String lastStats="";
+    String lastStats(){return lastStats;}
+    /** The nearest cached ancestor (up to 3 levels up) of a tile, once per view. */
+    private List<NativeMapScene.Shape> cachedParent(int z,int x,int y,Set<String> used){
+        for(int up=1;up<=3&&z-up>=0;up++){
+            String key=(z-up)+"/"+(x>>up)+"/"+(y>>up);
+            synchronized(cache){List<NativeMapScene.Shape> hit=cache.get(key);if(hit!=null)return used.add(key)?hit:null;}
+        }
+        return null;
+    }
     NativeTileSource(Context app){this.app=app.getApplicationContext();}
     /** Fetches and decodes tiles of one viewport in parallel; the network, not the CPU, is the slow part. */
     private static final java.util.concurrent.ThreadPoolExecutor POOL=newPool();
@@ -31,7 +42,7 @@ final class NativeTileSource implements AutoCloseable {
     }
     /** How long one viewport load waits for tiles; tiles still arriving are cached for the retry. */
     /** Decoded tiles kept in memory, so panning back and re-opening do not re-decode. */
-    static final int CACHE_TILES=96,CACHE_VERTICES=600000;
+    static final int CACHE_TILES=128,CACHE_VERTICES=1200000;
     /** Show what has arrived after this long; missing tiles keep loading and are retried. */
     static final long LOAD_BUDGET_MS=5000;
     private synchronized DriveTileServer ukServer()throws IOException{if(uk==null)uk=new DriveTileServer(app,false);return uk;}
@@ -82,25 +93,41 @@ final class NativeTileSource implements AutoCloseable {
     }
     NativeMapScene load(GeoMath.Point p,double zoom,int width,int height)throws IOException{
         if(p==null||!Double.isFinite(p.lat)||!Double.isFinite(p.lon)||!Double.isFinite(zoom)||Math.abs(p.lat)>85||Math.abs(p.lon)>180)throw new IOException("Invalid viewport");
-        int z=Math.max(2,Math.min(14,(int)Math.floor(zoom)));
+        // Source zoom by screen density: "zoom" is measured in physical pixels, so a high-density phone shows a
+        // wider area than the number suggests and needs the matching tile detail, not an extra-low level.
+        int z=MapLayers.sourceZoom(zoom,app.getResources().getDisplayMetrics().density);
         double cx=NativeMapProjection.x(p.lon),cy=NativeMapProjection.y(p.lat),scale=256*Math.pow(2,zoom);
         // Rotated viewport diagonal + margin; lower source zoom until tile count is bounded.
         double radius=Math.max(256,Math.hypot(Math.max(1,width),Math.max(1,height))*.85)/scale;
         int a,b,c,d,n;
-        do{n=1<<z;a=Math.max(0,(int)Math.floor((cx-radius)*n));b=Math.min(n-1,(int)Math.floor((cx+radius)*n));c=Math.max(0,(int)Math.floor((cy-radius)*n));d=Math.min(n-1,(int)Math.floor((cy+radius)*n));if((long)(b-a+1)*(d-c+1)<=16||z<=2)break;z--;}while(true);
+        do{n=1<<z;a=Math.max(0,(int)Math.floor((cx-radius)*n));b=Math.min(n-1,(int)Math.floor((cx+radius)*n));c=Math.max(0,(int)Math.floor((cy-radius)*n));d=Math.min(n-1,(int)Math.floor((cy+radius)*n));if((long)(b-a+1)*(d-c+1)<=MapLayers.MAX_VIEW_TILES||z<=2)break;z--;}while(true);
         ArrayList<NativeMapScene.Shape> shapes=new ArrayList<>();int total=0,loadedTiles=0;missing=0;IOException firstFailure=null;
+        // Centre tiles first: if the display budget is reached, it is the edges that are left out.
+        ArrayList<int[]> order=new ArrayList<>();
+        for(int y=c;y<=d;y++)for(int x=a;x<=b;x++)order.add(new int[]{x,y});
+        final double tcx=cx*n,tcy=cy*n;
+        order.sort(Comparator.comparingDouble(t->Math.hypot(t[0]+.5-tcx,t[1]+.5-tcy)));
         // Fetch every tile of the view at once (4 at a time). Draw the ones that arrive within the time
         // budget and report how many are missing; the rest keep downloading into the cache for the retry.
         ArrayList<java.util.concurrent.Future<List<NativeMapScene.Shape>>> pending=new ArrayList<>();
-        for(int y=c;y<=d;y++)for(int x=a;x<=b;x++){final int tz=z,tx=x,ty=y;pending.add(POOL.submit(()->tile(tz,tx,ty)));}
+        for(int[] t:order){final int tz=z,tx=t[0],ty=t[1];pending.add(POOL.submit(()->tile(tz,tx,ty)));}
         final long deadline=android.os.SystemClock.elapsedRealtime()+LOAD_BUDGET_MS;
-        for(java.util.concurrent.Future<List<NativeMapScene.Shape>> f:pending){
+        Set<String> parents=new HashSet<>();int trimmed=0;
+        for(int k=0;k<pending.size();k++){
+            java.util.concurrent.Future<List<NativeMapScene.Shape>> f=pending.get(k);
             List<NativeMapScene.Shape> s;
             try{s=f.get(Math.max(1,deadline-android.os.SystemClock.elapsedRealtime()),java.util.concurrent.TimeUnit.MILLISECONDS);}
-            catch(java.util.concurrent.TimeoutException|java.util.concurrent.ExecutionException unavailable){missing++;if(firstFailure==null)firstFailure=new IOException(String.valueOf(unavailable.getCause()!=null?unavailable.getCause().getMessage():"timed out"));continue;}
+            catch(java.util.concurrent.TimeoutException|java.util.concurrent.ExecutionException unavailable){missing++;if(firstFailure==null)firstFailure=new IOException(String.valueOf(unavailable.getCause()!=null?unavailable.getCause().getMessage():"timed out"));
+                // Never a hole: draw a cached lower-detail tile covering the same area until this one arrives.
+                List<NativeMapScene.Shape> parent=cachedParent(z,order.get(k)[0],order.get(k)[1],parents);
+                if(parent!=null&&total+vertices(parent)<=MapLayers.MAX_VIEW_VERTICES){total+=vertices(parent);shapes.addAll(parent);loadedTiles++;}
+                continue;}
             catch(InterruptedException interrupted){Thread.currentThread().interrupt();missing++;if(firstFailure==null)firstFailure=new IOException("interrupted");continue;}
-            loadedTiles++;total+=vertices(s);if(total>300000||shapes.size()+s.size()>32000)throw new IOException("Viewport exceeds display budget");shapes.addAll(s);
+            // Over budget: keep what is drawn (the centre) rather than throwing the whole view away.
+            if(total+vertices(s)>MapLayers.MAX_VIEW_VERTICES||shapes.size()+s.size()>MapLayers.MAX_VIEW_SHAPES){trimmed++;continue;}
+            loadedTiles++;total+=vertices(s);shapes.addAll(s);
         }
+        lastStats=String.format(java.util.Locale.UK,"tiles z%d · %d/%d · missing %d · trimmed %d · %,d pts",z,loadedTiles,order.size(),missing,trimmed,total);
         if(loadedTiles==0)throw firstFailure!=null?firstFailure:new IOException("No map tiles for this view");
         shapes.sort(Comparator.comparingInt(f->f.bridge?100+f.kind:f.kind));
         return NativeMapScene.tiles(shapes,new double[]{NativeMapProjection.lon(a/(double)n),NativeMapProjection.lat((d+1.0)/n),NativeMapProjection.lon((b+1.0)/n),NativeMapProjection.lat(c/(double)n)});

@@ -17,6 +17,6 @@ final class NavigationStartPolicy {
                 && now-fixTime<=15000;
     }
     static String trafficStatus(String provider) {
-        return "TomTom".equals(provider) ? " · traffic checked" : " · live traffic not verified";
+        return RouteMessages.traffic("TomTom".equals(provider));
     }
 }

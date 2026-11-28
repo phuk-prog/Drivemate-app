@@ -11,8 +11,8 @@ public class NavigationStartPolicyTest {
         assertFalse(NavigationStartPolicy.previewOnly("TomTom"));
     }
     @Test public void trafficIsNotInventedForIndependentRouting() {
-        assertEquals(" · live traffic not verified",NavigationStartPolicy.trafficStatus("DriveMate"));
-        assertEquals(" · traffic checked",NavigationStartPolicy.trafficStatus("TomTom"));
+        assertEquals(" · no live traffic",NavigationStartPolicy.trafficStatus("DriveMate"));
+        assertEquals(" · live traffic",NavigationStartPolicy.trafficStatus("TomTom"));
     }
     @Test public void startRequiresFreshAccurateFix() {
         long now=100000;

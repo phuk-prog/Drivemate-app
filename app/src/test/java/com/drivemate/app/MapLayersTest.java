@@ -37,4 +37,14 @@ public class MapLayersTest {
         assertTrue(MapLayers.baseReloadMetres(13) > MapLayers.baseReloadMetres(17));
         assertEquals(100, MapLayers.baseReloadMetres(20), 1e-9);
     }
+
+    @Test public void sourceZoomFollowsScreenDensity() {
+        // 2.625x phone at "zoom 14.7": zoom-13 tiles, never the sparse zoom-12 fallback of the old 16-tile cap.
+        assertEquals(13, MapLayers.sourceZoom(14.7, 2.625));
+        assertEquals(14, MapLayers.sourceZoom(17, 2.625));   // capped: tiles drawn enlarged beyond 14
+        assertEquals(14, MapLayers.sourceZoom(14.5, 1));
+        assertEquals(2, MapLayers.sourceZoom(1, 3));
+        assertEquals(14, MapLayers.sourceZoom(14.7, Double.NaN));
+        assertFalse(MapLayers.BROWSE_OVERLAY);
+    }
 }

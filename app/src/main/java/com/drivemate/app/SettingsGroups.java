@@ -21,18 +21,18 @@ final class SettingsGroups {
     static final Group[] GROUPS = {
             new Group("Voice and sound", false, 1, 2, 3, 33, 34, 35, 31),
             new Group("Music", false, 36),
-            new Group("Map and display", false, 6, 7, 14, 23, 30, 8),
+            new Group("Map and display", false, 6, 7, 14, 23, 30),
             new Group("Routes and traffic", false, 17, 4, 0),
             new Group("Speed and hazard alerts", false, 16, 18, 15),
             new Group("Places and parking", false, 10, 11, 20, 21, 12),
             new Group("Offline maps", false, 32, 28, 27, 9),
             new Group("Units and language", false, 5),
             new Group("About and diagnostics", false, 13, 22),
-            new Group("Developer", true, 19, 24, 25, 26, 29),
+            new Group("Developer", true, 37, 8, 19, 24, 25, 26, 29),
     };
 
     /** Number of items the activity provides; every index 0..TOTAL-1 is in exactly one group. */
-    static final int TOTAL = 37;
+    static final int TOTAL = 38;
 
     /** Items that act on the map (find parked car, free driving, pilot screen): the settings screen closes first. */
     static final int[] CLOSES_SCREEN = {21, 29, 30};

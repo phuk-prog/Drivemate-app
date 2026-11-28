@@ -54,7 +54,9 @@ final class NativeMapController {
     boolean hasRenderedRoads(){return view.roadsDrawn()>0;}
     double currentZoom(){return view.zoom();}
     void setVisible(boolean v){view.setVisibility(v?View.VISIBLE:View.INVISIBLE);}
-    String geometryDescription(){return current==null?"DriveMate native · regional detail unavailable"+(lastDetailError.isEmpty()?"":" ("+lastDetailError+")"):current.checkedEdges>0?"DriveMate native · verified route roads":"DriveMate native · regional roads";}
+    String debugStats(){return tileSource.lastStats()+" · overlay "+(current==null?"none":current==verifiedRoute?"route":"box")+" · zoom "+String.format(java.util.Locale.UK,"%.1f",view.zoom());}
+    void setDebug(boolean on){view.setDebug(on?this::debugStats:null);}
+        String geometryDescription(){return current==null?"DriveMate native · regional detail unavailable"+(lastDetailError.isEmpty()?"":" ("+lastDetailError+")"):current.checkedEdges>0?"DriveMate native · verified route roads":"DriveMate native · regional roads";}
     String routeAlignmentDiagnostic(){return current!=null&&current.checkedEdges>0?current.checkedEdges+" exact source edges":"unverified";}
     void setHighDetailEnabled(boolean enabled){}
     void setBuildings3D(boolean enabled){view.setBuildings(enabled);}
@@ -115,8 +117,9 @@ final class NativeMapController {
     private GeoMath.Point overlayAt;private boolean overlayBusy;
     private void prefetchOverlay(GeoMath.Point p){
         if(verifiedRoute!=null){if(current!=verifiedRoute){current=verifiedRoute;view.setSceneOnly(current);roadFurniture(current);}return;}
-        if(!route.isEmpty())return;                       // online route: base map only
-        if(view.zoom()<MapLayers.OVERLAY_MIN_ZOOM||overlayBusy)return;
+        // Browsing: the base map alone, identical at every zoom. Drivemate's exact road data is drawn
+        // only along a route (above) and used for free-drive speed limits (setBrowseGeometry).
+        if(!route.isEmpty()||!MapLayers.BROWSE_OVERLAY||view.zoom()<MapLayers.OVERLAY_MIN_ZOOM||overlayBusy)return;
         if(current!=null&&current.covers(p)&&overlayAt!=null&&GeoMath.distance(overlayAt,p)<MapLayers.OVERLAY_RELOAD_METRES)return;
         overlayBusy=true;overlayAt=p;int gen=generation;
         worker.execute(()->{
