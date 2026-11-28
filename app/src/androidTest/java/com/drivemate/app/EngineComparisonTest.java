@@ -42,7 +42,8 @@ public class EngineComparisonTest {
         DmTileEngine.Route sample = region.sample(true);
         GeoMath.Point center = GeoMath.pointAtDistance(sample.points, sample.metres * .4);
         JSONArray results = new JSONArray();
-        for (String engine : MapEngines.ALL) results.put(run(ins, app, engine, center, sample.points));
+        NativeMapScene scene = region.nativeScene(sample);
+        for (String engine : MapEngines.ALL) results.put(run(ins, app, engine, center, sample.points, scene));
         File dir = new File(app.getExternalFilesDir(null), "unified-zoom");
         assertTrue(dir.isDirectory() || dir.mkdirs());
         try (FileOutputStream out = new FileOutputStream(new File(dir, "engine-comparison.json"))) {
@@ -52,7 +53,7 @@ public class EngineComparisonTest {
         DmUnifiedZoomTest.engine(app, MapEngines.DEFAULT);
     }
 
-    private static JSONObject run(Instrumentation ins, Context app, String engine, GeoMath.Point center, List<GeoMath.Point> route) throws Exception {
+    private static JSONObject run(Instrumentation ins, Context app, String engine, GeoMath.Point center, List<GeoMath.Point> route, NativeMapScene scene) throws Exception {
         DmUnifiedZoomTest.engine(app, engine);
         MainActivity a = (MainActivity) ins.startActivitySync(new Intent(app, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         JSONObject r = new JSONObject().put("engine", engine);
@@ -63,7 +64,7 @@ public class EngineComparisonTest {
             assertNotNull(map);
             r.put("name", map.engineName());
             long start = SystemClock.elapsedRealtime();
-            ins.runOnMainSync(() -> { map.setSharedRoute(null, route, NativeRegionalRouter.PROVIDER); map.setCamera(center, 17, 0); });
+            ins.runOnMainSync(() -> { map.setSharedRoute(scene, route, NativeRegionalRouter.PROVIDER); map.setCamera(center, 17, 0); });
             AtomicBoolean roads = new AtomicBoolean();
             long deadline = start + 90000;
             while (SystemClock.elapsedRealtime() < deadline) {

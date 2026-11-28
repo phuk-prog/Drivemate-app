@@ -119,7 +119,8 @@ public class DmUnifiedZoomTest {
             java.lang.reflect.Field field=MainActivity.class.getDeclaredField("vectorMap");field.setAccessible(true);
             DriveMap live=(DriveMap)field.get(a);assertNotNull(live);
             assertTrue("GPU engine not in use: "+live.engineName(),live instanceof MapLibreMapController);
-            ins.runOnMainSync(()->{live.setSharedRoute(null,sample.points,NativeRegionalRouter.PROVIDER);live.setCamera(center,17,0);});
+            NativeMapScene routeScene=region.nativeScene(sample);
+            ins.runOnMainSync(()->{live.setSharedRoute(routeScene,sample.points,NativeRegionalRouter.PROVIDER);live.setCamera(center,17,0);});
             long deadline=SystemClock.elapsedRealtime()+90000;AtomicBoolean roads=new AtomicBoolean();
             while(SystemClock.elapsedRealtime()<deadline){ins.runOnMainSync(()->roads.set(live.hasRenderedRoads()));if(roads.get())break;SystemClock.sleep(1000);}
             java.util.concurrent.atomic.AtomicReference<String> why=new java.util.concurrent.atomic.AtomicReference<>();ins.runOnMainSync(()->why.set(live.cacheStats()));

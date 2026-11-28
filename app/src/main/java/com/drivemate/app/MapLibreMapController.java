@@ -25,6 +25,7 @@ import org.maplibre.android.maps.MapView;
 import org.maplibre.android.maps.Style;
 import org.maplibre.android.style.expressions.Expression;
 import org.maplibre.android.style.layers.CircleLayer;
+import org.maplibre.android.style.layers.FillLayer;
 import org.maplibre.android.style.layers.Layer;
 import org.maplibre.android.style.layers.LineLayer;
 import org.maplibre.android.style.layers.Property;
@@ -36,6 +37,7 @@ import org.maplibre.geojson.Feature;
 import org.maplibre.geojson.FeatureCollection;
 import org.maplibre.geojson.LineString;
 import org.maplibre.geojson.Point;
+import org.maplibre.geojson.Polygon;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -77,6 +79,7 @@ final class MapLibreMapController implements DriveMap {
     private RouteRenderGeometry routeGeometry = new RouteRenderGeometry(Collections.emptyList());
     private double progress, turn = Double.NaN, secondTurn = Double.NaN;
     private double lastRemainingProgress = -1;
+    private NativeMapScene routeScene, browseScene;
     private GeoMath.Point vehicle, destination, entrance, parked;
     private double vehicleBearing = Double.NaN;
     private String destinationLabel = "";
@@ -178,13 +181,33 @@ final class MapLibreMapController implements DriveMap {
     }
 
     private void installOverlays(Style s) {
-        for (String id : new String[]{"dm-route", "dm-remaining", "dm-turn", "dm-turn-head", "dm-limits", "dm-incidents",
+        for (String id : new String[]{"dm-scene-areas", "dm-scene-lines", "dm-route", "dm-remaining", "dm-turn", "dm-turn-head", "dm-limits", "dm-incidents",
                 "dm-destination", "dm-entrance", "dm-parked", "dm-vehicle"}) s.addSource(source(id));
         s.addImage("dm-vehicle", NativeMapController.makeVehicleArrow());
         s.addImage("dm-pin", pinBitmap());
         s.addImage("dm-head", arrowHeadBitmap());
         s.addImage("dm-limit", limitBitmap());
         String round = Property.LINE_CAP_ROUND, join = Property.LINE_JOIN_ROUND;
+        // DriveMate's own road data along the route (and nearby when browsing): drawn even with no map tiles.
+        Expression kind = Expression.get("kind");
+        s.addLayer(new FillLayer("dm-scene-area", "dm-scene-areas").withProperties(PropertyFactory.fillColor(
+                Expression.match(kind, Expression.color(night ? 0xff243c37 : 0xffdce9ce),
+                        Expression.stop(NativeMapScene.WATER, Expression.color(night ? 0xff254d6b : 0xffa6d5e9)),
+                        Expression.stop(NativeMapScene.BUILDING, Expression.color(night ? 0xff334654 : 0xffd7cbb9))))));
+        s.addLayer(new LineLayer("dm-scene-casing", "dm-scene-lines").withProperties(
+                PropertyFactory.lineColor(night ? "#10202d" : "#b1b8b9"),
+                PropertyFactory.lineWidth(Expression.match(kind, byZoom(3, 6, 12),
+                        Expression.stop(NativeMapScene.MOTORWAY, byZoom(6, 11, 20)), Expression.stop(NativeMapScene.MAIN, byZoom(5, 9, 17)),
+                        Expression.stop(NativeMapScene.PATH, byZoom(1, 2.5f, 5)))),
+                PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
+        s.addLayer(new LineLayer("dm-scene-road", "dm-scene-lines").withProperties(
+                PropertyFactory.lineColor(Expression.match(kind, Expression.color(night ? 0xff50616d : 0xffffffff),
+                        Expression.stop(NativeMapScene.MOTORWAY, Expression.color(night ? 0xffa18b68 : 0xfff1cd9d)),
+                        Expression.stop(NativeMapScene.MAIN, Expression.color(night ? 0xff667178 : 0xffffe7a7)))),
+                PropertyFactory.lineWidth(Expression.match(kind, byZoom(2, 4.5f, 10),
+                        Expression.stop(NativeMapScene.MOTORWAY, byZoom(4.5f, 9, 18)), Expression.stop(NativeMapScene.MAIN, byZoom(3.5f, 7, 15)),
+                        Expression.stop(NativeMapScene.PATH, byZoom(.6f, 1.5f, 3)))),
+                PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
         s.addLayer(new LineLayer("dm-route-full", "dm-route").withProperties(
                 PropertyFactory.lineColor(night ? "#516270" : "#aeb9bb"), PropertyFactory.lineWidth(byZoom(4, 7, 13)),
                 PropertyFactory.lineCap(round), PropertyFactory.lineJoin(join)));
@@ -296,7 +319,37 @@ final class MapLibreMapController implements DriveMap {
         return p == null ? empty() : FeatureCollection.fromFeature(Feature.fromGeometry(pt(p)));
     }
 
+    private void publishScene() {
+        if (style == null) return;
+        NativeMapScene sc = routeScene != null ? routeScene : browseScene;
+        List<Feature> lines = new ArrayList<>(), areas = new ArrayList<>();
+        if (sc != null) for (NativeMapScene.Shape f : sc.shapes) {
+            if (f.kind == NativeMapScene.LABEL) continue;
+            for (int j = 0; j < f.parts.length; j++) {
+                int start = f.parts[j], end = j + 1 < f.parts.length ? f.parts[j + 1] : f.xy.length;
+                List<Point> pts = new ArrayList<>();
+                for (int i = start; i + 1 < end; i += 2) pts.add(Point.fromLngLat(NativeMapProjection.lon(f.xy[i]), NativeMapProjection.lat(f.xy[i + 1])));
+                if (f.area) {
+                    if (pts.size() < 3) continue;
+                    if (!pts.get(0).equals(pts.get(pts.size() - 1))) pts.add(pts.get(0));
+                    Feature feature = Feature.fromGeometry(Polygon.fromLngLats(Collections.singletonList(pts)));
+                    feature.addNumberProperty("kind", f.kind);
+                    areas.add(feature);
+                } else if (f.kind >= NativeMapScene.PATH && f.kind <= NativeMapScene.MOTORWAY && pts.size() >= 2) {
+                    Feature feature = Feature.fromGeometry(LineString.fromLngLats(pts));
+                    feature.addNumberProperty("kind", f.kind);
+                    lines.add(feature);
+                }
+            }
+        }
+        // Main roads last so they draw over minor ones.
+        lines.sort((x, y) -> Integer.compare(x.getNumberProperty("kind").intValue(), y.getNumberProperty("kind").intValue()));
+        set("dm-scene-areas", FeatureCollection.fromFeatures(areas));
+        set("dm-scene-lines", FeatureCollection.fromFeatures(lines));
+    }
+
     private void publishAll() {
+        publishScene();
         set("dm-route", line(route));
         lastRemainingProgress = -1;
         publishProgress();
@@ -456,13 +509,14 @@ final class MapLibreMapController implements DriveMap {
     @Override public void setSharedRoute(NativeMapScene scene, List<GeoMath.Point> path) { setSharedRoute(scene, path, ""); }
 
     @Override public void setSharedRoute(NativeMapScene scene, List<GeoMath.Point> path, String provider) {
+        routeScene = scene;
         route = path == null ? Collections.emptyList() : new ArrayList<>(path);
         routeGeometry = new RouteRenderGeometry(route);
         progress = 0; turn = secondTurn = Double.NaN;
         publishAll();
     }
 
-    @Override public void setBrowseGeometry(NativeMapScene scene) { }
+    @Override public void setBrowseGeometry(NativeMapScene scene) { browseScene = scene; if (routeScene == null) publishScene(); }
     @Override public void setConfirmedRouteProgress(double p) { progress = Math.max(0, p); publishProgress(); }
     @Override public void setManeuverOffsets(double a, double b) { turn = a; secondTurn = b; publishTurn(); }
     @Override public void setManeuverOffset(double a) { setManeuverOffsets(a, Double.NaN); }
@@ -545,7 +599,7 @@ final class MapLibreMapController implements DriveMap {
         List<String> ids = new ArrayList<>();
         for (Layer l : style.getLayers()) {
             String id = l.getId();
-            if (l instanceof LineLayer && (id.startsWith("omt-road") || id.startsWith("uk-road") || id.equals("uk-trunk")
+            if (l instanceof LineLayer && (id.equals("dm-scene-road") || id.startsWith("omt-road") || id.startsWith("uk-road") || id.equals("uk-trunk")
                     || id.equals("uk-roads") || id.equals("world-roads"))) ids.add(id);
         }
         try {
