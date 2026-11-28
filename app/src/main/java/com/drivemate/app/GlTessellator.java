@@ -32,10 +32,12 @@ final class GlTessellator {
         int[] lineIndex = new int[0];
         /** x, y, slot per joint (3 shorts): round joins and caps. */
         short[] joints = new short[0];
+        /** Raised buildings: x, y, height (decimetres), shade (0-100) per vertex; plain triangles. */
+        short[] buildings3d = new short[0];
         boolean bridges;
         int areaCount() { return areas.length / 3; }
         int segmentCount() { return lineIndex.length / 6; }
-        int bytes() { return areas.length * 2 + lines.length * 2 + lineIndex.length * 4 + joints.length * 2; }
+        int bytes() { return areas.length * 2 + lines.length * 2 + lineIndex.length * 4 + joints.length * 2 + buildings3d.length * 2; }
     }
 
     private static final class ShortList {
@@ -91,6 +93,12 @@ final class GlTessellator {
                 lines(f, m, lines, index, joints);
             }
         }
+        if (!bridges) {
+            ShortList b3 = new ShortList();
+            for (NativeMapScene.Shape f : shapes)
+                if (f.area && f.kind == NativeMapScene.BUILDING && f.height > 0) building3d(f, m, b3);
+            m.buildings3d = b3.done();
+        }
         m.areas = areas.done(); m.lines = lines.done(); m.lineIndex = index.done(); m.joints = joints.done();
         return m;
     }
@@ -103,13 +111,45 @@ final class GlTessellator {
     private static int qx(Mesh m, double x) { return (int) Math.round((x - m.originX) * m.scale); }
     private static int qy(Mesh m, double y) { return (int) Math.round((y - m.originY) * m.scale); }
 
+    /** Walls (shaded by which way they face, light from the north-west) and a roof at the building's height. */
+    private static void building3d(NativeMapScene.Shape f, Mesh m, ShortList out) {
+        int h = (int) Math.max(1, Math.min(3000, Math.round(f.height * 10)));
+        int start = f.parts[0], end = f.parts.length > 1 ? f.parts[1] : f.xy.length;
+        int n = (end - start) / 2;
+        if (n < 3) return;
+        for (int k = 0; k < n; k++) {
+            int i = start + 2 * k, j = start + 2 * ((k + 1) % n);
+            int ax = qx(m, f.xy[i]), ay = qy(m, f.xy[i + 1]), bx = qx(m, f.xy[j]), by = qy(m, f.xy[j + 1]);
+            if (ax == bx && ay == by) continue;
+            double nx = by - ay, ny = -(bx - ax), len = Math.hypot(nx, ny);
+            int shade = (int) Math.round(72 + 22 * ((-nx - ny) / (len * Math.sqrt(2))));
+            int[][] q = {{ax, ay, 0}, {bx, by, 0}, {bx, by, h}, {ax, ay, 0}, {bx, by, h}, {ax, ay, h}};
+            for (int[] v : q) { out.add(v[0]); out.add(v[1]); out.add(v[2]); out.add(shade); }
+        }
+        ShortList roof = new ShortList();
+        List<int[]> ring = new ArrayList<>();
+        ring.add(new int[]{start, end});
+        triangulate(f.xy, ring, m, 0, roof);
+        for (int i = 0; i + 2 < roof.n; i += 3) { out.add(roof.a[i]); out.add(roof.a[i + 1]); out.add(h); out.add(100); }
+    }
+
+    /** Douglas-Peucker tolerance in mesh units (60000 per group span): ~0.05 px at street zoom, removes
+     *  the many near-collinear points of curved roads without any visible change. */
+    static final double SIMPLIFY_UNITS = 6;
+
     private static void lines(NativeMapScene.Shape f, Mesh m, ShortList out, IntList index, ShortList joints) {
         int slot = lineSlot(f);
         for (int j = 0; j < f.parts.length; j++) {
             int start = f.parts[j], end = j + 1 < f.parts.length ? f.parts[j + 1] : f.xy.length;
+            int n = (end - start) / 2;
+            if (n < 2) continue;
+            int[] xs = new int[n], ys = new int[n];
+            for (int k = 0; k < n; k++) { xs[k] = qx(m, f.xy[start + 2 * k]); ys[k] = qy(m, f.xy[start + 2 * k + 1]); }
+            boolean[] keep = simplify(xs, ys, SIMPLIFY_UNITS);
             int px = 0, py = 0; boolean have = false;
-            for (int i = start; i + 1 < end; i += 2) {
-                int x = qx(m, f.xy[i]), y = qy(m, f.xy[i + 1]);
+            for (int k = 0; k < n; k++) {
+                if (!keep[k]) continue;
+                int x = xs[k], y = ys[k];
                 joints.add(x); joints.add(y); joints.add(slot);
                 if (have && (x != px || y != py)) {
                     int base = out.n / 6;
@@ -122,6 +162,31 @@ final class GlTessellator {
                 px = x; py = y; have = true;
             }
         }
+    }
+
+    /** Douglas-Peucker: which points to keep (first and last always kept). Iterative, no recursion limits. */
+    static boolean[] simplify(int[] xs, int[] ys, double tolerance) {
+        int n = xs.length;
+        boolean[] keep = new boolean[n];
+        if (n == 0) return keep;
+        keep[0] = true; keep[n - 1] = true;
+        if (n < 3) return keep;
+        int[] stack = new int[2 * n]; int top = 0;
+        stack[top++] = 0; stack[top++] = n - 1;
+        double tol2 = tolerance * tolerance;
+        while (top > 0) {
+            int b = stack[--top], a = stack[--top];
+            double dx = xs[b] - xs[a], dy = ys[b] - ys[a], len2 = dx * dx + dy * dy;
+            int best = -1; double bestD = tol2;
+            for (int i = a + 1; i < b; i++) {
+                double ex = xs[i] - xs[a], ey = ys[i] - ys[a], d;
+                if (len2 == 0) d = ex * ex + ey * ey;
+                else { double c = ex * dy - ey * dx; d = c * c / len2; }
+                if (d > bestD) { bestD = d; best = i; }
+            }
+            if (best >= 0) { keep[best] = true; stack[top++] = a; stack[top++] = best; stack[top++] = best; stack[top++] = b; }
+        }
+        return keep;
     }
 
     private static void vertex(ShortList out, int x, int y, int ox, int oy, int side, int slot) {

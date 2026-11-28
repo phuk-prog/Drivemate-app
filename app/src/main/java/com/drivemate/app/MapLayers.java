@@ -87,4 +87,11 @@ final class MapLayers {
     /** Casings only when roads are wide enough to show them; at overview zoom they turn into noise. */
     static boolean casing(int kind,double zoom){return zoom>=14||kind>=NativeMapScene.MAIN&&zoom>=11.5;}
 
+    /** Share of the map's short side, around the centre, used to confirm roads are drawn (bounded cost). */
+    static final float ROAD_PROBE_FRACTION = .3f;
+    /** Speed-limit signs are not drawn this close to a turn: the turn arrow owns that spot. */
+    static final double LIMIT_CLEAR_OF_TURN_METRES = 45;
+    static boolean nearManeuver(double limitStart, double maneuverOffset) {
+        return Double.isFinite(limitStart) && Double.isFinite(maneuverOffset) && Math.abs(limitStart - maneuverOffset) < LIMIT_CLEAR_OF_TURN_METRES;
+    }
 }

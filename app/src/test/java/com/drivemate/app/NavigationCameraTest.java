@@ -71,7 +71,8 @@ public final class NavigationCameraTest {
                 north, driver, 450, 550, 5, 1536, 480, 120);
         assertTrue(near.zoom > far.zoom);
         assertTrue(near.tiltDegrees < far.tiltDegrees);
-        assertTrue(near.tiltDegrees >= 28);
+        // 100 m out the view is already well on its way to the near-overhead junction view.
+        assertTrue(near.tiltDegrees >= NavigationCamera.NEAR_TURN_TILT && near.tiltDegrees < 30);
         assertTrue(far.tiltDegrees <= NavigationCamera.MAX_TILT);
     }
 

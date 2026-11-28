@@ -52,6 +52,8 @@ interface DriveMap {
     void setParkedCar(GeoMath.Point p);
     void setRouteEvents(List<RouteIntelligence.SpeedSection> speeds, List<RouteIntelligence.TrafficSection> traffic, boolean metric, long fetchedAt);
     void setTraffic(boolean v);
+    /** Lane data along the route: the map shows a lane board at the next turn where lanes are trusted. */
+    void setLanes(List<RouteIntelligence.LaneSection> lanes);
     boolean supportsLiveIncidents();
     void setLiveIncidents(List<LiveTrafficIncidents.Event> rows, long at);
     void setSharedRoute(NativeMapScene scene, List<GeoMath.Point> path);
@@ -60,6 +62,8 @@ interface DriveMap {
     void prefetch(GeoMath.Point p);
     void prefetchRoute(List<GeoMath.Point> ahead);
     String cacheStats();
+    /** Route offsets (metres) of the speed-limit signs currently on the map; for the drive lab's checks. */
+    double[] limitMarkerOffsets();
 
     void onStart();
     void onResume();
