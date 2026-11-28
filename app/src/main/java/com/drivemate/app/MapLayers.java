@@ -14,6 +14,8 @@ final class MapLayers {
     static final boolean BROWSE_OVERLAY = false;
     /** Shortest gap between base map loads; later requests wait, they are never dropped. */
     static final long BASE_MIN_INTERVAL_MS = 350;
+    /** When a view has more detail than the budget, load up to this many levels coarser instead of leaving holes. */
+    static final int MAX_DETAIL_STEPS_DOWN = 2;
     /** While a finger drags the map, ask for tiles this often so new areas fill in before release. */
     static final long DRAG_LOAD_INTERVAL_MS = 400;
     /** Street zoom where the exact local road overlay would be loaded in free browsing. */

@@ -48,7 +48,7 @@ public final class DriveTileServer implements AutoCloseable {
     private final File ranges;
     private final Context context;
     private final ServerSocket socket;
-    private final ExecutorService connections = Executors.newFixedThreadPool(4);
+    private final ExecutorService connections = Executors.newFixedThreadPool(6);
     private final ExecutorService prefetcher = Executors.newSingleThreadExecutor();
     private final RangeSource source;
     private volatile PmTilesReader archive;
@@ -76,6 +76,10 @@ public final class DriveTileServer implements AutoCloseable {
         if(listen){Thread acceptor=new Thread(this::accept,"drivemate-local-map");acceptor.setDaemon(true);acceptor.start();}
     }
 
+    /** Where served tiles come from; null means this archive only. The GPU map serves DriveMate's full chain. */
+    interface TileProvider { byte[] tile(int z, int x, int y) throws IOException; }
+    private volatile TileProvider provider;
+    void setTileProvider(TileProvider p) { provider = p; }
     public int port() { return socket.getLocalPort(); }
     public String tilesUrl() {
         return "http://127.0.0.1:" + port() + "/tiles/{z}/{x}/{y}.pbf";
@@ -126,7 +130,8 @@ public final class DriveTileServer implements AutoCloseable {
                 return;
             }
             try {
-                byte[] tile = fetchTile(z, x, y);
+                TileProvider p = provider;
+                byte[] tile = p != null ? p.tile(z, x, y) : fetchTile(z, x, y);
                 respond(out, tile == null ? 404 : 200, tile);
             } catch (IOException e) {
                 failures.incrementAndGet();

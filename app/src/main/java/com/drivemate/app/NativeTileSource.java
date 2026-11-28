@@ -80,6 +80,16 @@ final class NativeTileSource implements AutoCloseable {
         if(world==null)openWorld();
         return world.tile(z,x,y);
     }
+    /** Raw tile bytes for any zoom from the best source: installed areas, then the CDN, then the UK archive.
+     * Empty array: the tile does not exist (sea, outside coverage). Used by the GPU map's local tile server. */
+    byte[] anyTile(int z,int x,int y)throws IOException{
+        if(z<0||z>14)return null;
+        byte[] local=installedPacks().tile(z,x,y);if(local!=null)return local;
+        byte[] fast=cdn().tile(z,x,y);if(fast!=null)return fast;
+        // Overview zooms come from the bundled world map (its own style source); never block on the archive.
+        if(z<7)return null;
+        return ukServer().nativeTile(z,x,y);
+    }
     private static int vertices(List<NativeMapScene.Shape> s){int n=0;for(NativeMapScene.Shape f:s)n+=f.xy.length/2;return n;}
     private List<NativeMapScene.Shape> tile(int z,int x,int y)throws IOException{
         String key=z+"/"+x+"/"+y;
@@ -96,6 +106,15 @@ final class NativeTileSource implements AutoCloseable {
         // Source zoom by screen density: "zoom" is measured in physical pixels, so a high-density phone shows a
         // wider area than the number suggests and needs the matching tile detail, not an extra-low level.
         int z=MapLayers.sourceZoom(zoom,app.getResources().getDisplayMetrics().density);
+        // Too much detail for one view (trimmed tiles leave holes): step down a level rather than show gaps.
+        for(int attempt=0;;attempt++){
+            NativeMapScene scene=loadAt(p,zoom,width,height,z);
+            if(lastTrimmed==0||attempt>=MapLayers.MAX_DETAIL_STEPS_DOWN||z<=2)return scene;
+            z--;
+        }
+    }
+    private volatile int lastTrimmed;
+    private NativeMapScene loadAt(GeoMath.Point p,double zoom,int width,int height,int z)throws IOException{
         double cx=NativeMapProjection.x(p.lon),cy=NativeMapProjection.y(p.lat),scale=256*Math.pow(2,zoom);
         // Rotated viewport diagonal + margin; lower source zoom until tile count is bounded.
         double radius=Math.max(256,Math.hypot(Math.max(1,width),Math.max(1,height))*.85)/scale;
@@ -112,7 +131,7 @@ final class NativeTileSource implements AutoCloseable {
         ArrayList<java.util.concurrent.Future<List<NativeMapScene.Shape>>> pending=new ArrayList<>();
         for(int[] t:order){final int tz=z,tx=t[0],ty=t[1];pending.add(POOL.submit(()->tile(tz,tx,ty)));}
         final long deadline=android.os.SystemClock.elapsedRealtime()+LOAD_BUDGET_MS;
-        Set<String> parents=new HashSet<>();int trimmed=0;
+        Set<String> parents=new HashSet<>();int trimmed=0;ArrayList<List<NativeMapScene.Shape>> groups=new ArrayList<>();
         for(int k=0;k<pending.size();k++){
             java.util.concurrent.Future<List<NativeMapScene.Shape>> f=pending.get(k);
             List<NativeMapScene.Shape> s;
@@ -120,17 +139,19 @@ final class NativeTileSource implements AutoCloseable {
             catch(java.util.concurrent.TimeoutException|java.util.concurrent.ExecutionException unavailable){missing++;if(firstFailure==null)firstFailure=new IOException(String.valueOf(unavailable.getCause()!=null?unavailable.getCause().getMessage():"timed out"));
                 // Never a hole: draw a cached lower-detail tile covering the same area until this one arrives.
                 List<NativeMapScene.Shape> parent=cachedParent(z,order.get(k)[0],order.get(k)[1],parents);
-                if(parent!=null&&total+vertices(parent)<=MapLayers.MAX_VIEW_VERTICES){total+=vertices(parent);shapes.addAll(parent);loadedTiles++;}
+                if(parent!=null&&total+vertices(parent)<=MapLayers.MAX_VIEW_VERTICES){total+=vertices(parent);shapes.addAll(parent);groups.add(parent);loadedTiles++;}
                 continue;}
             catch(InterruptedException interrupted){Thread.currentThread().interrupt();missing++;if(firstFailure==null)firstFailure=new IOException("interrupted");continue;}
             // Over budget: keep what is drawn (the centre) rather than throwing the whole view away.
             if(total+vertices(s)>MapLayers.MAX_VIEW_VERTICES||shapes.size()+s.size()>MapLayers.MAX_VIEW_SHAPES){trimmed++;continue;}
-            loadedTiles++;total+=vertices(s);shapes.addAll(s);
+            loadedTiles++;total+=vertices(s);shapes.addAll(s);groups.add(s);
         }
-        lastStats=String.format(java.util.Locale.UK,"tiles z%d · %d/%d · missing %d · trimmed %d · %,d pts",z,loadedTiles,order.size(),missing,trimmed,total);
+        lastTrimmed=trimmed;lastStats=String.format(java.util.Locale.UK,"tiles z%d · %d/%d · missing %d · trimmed %d · %,d pts",z,loadedTiles,order.size(),missing,trimmed,total);
         if(loadedTiles==0)throw firstFailure!=null?firstFailure:new IOException("No map tiles for this view");
         shapes.sort(Comparator.comparingInt(f->f.bridge?100+f.kind:f.kind));
-        return NativeMapScene.tiles(shapes,new double[]{NativeMapProjection.lon(a/(double)n),NativeMapProjection.lat((d+1.0)/n),NativeMapProjection.lon((b+1.0)/n),NativeMapProjection.lat(c/(double)n)});
+        NativeMapScene result=NativeMapScene.tiles(shapes,new double[]{NativeMapProjection.lon(a/(double)n),NativeMapProjection.lat((d+1.0)/n),NativeMapProjection.lon((b+1.0)/n),NativeMapProjection.lat(c/(double)n)});
+        result.groups=groups;
+        return result;
     }
     public void close(){synchronized(cache){cache.clear();}if(uk!=null)uk.close();if(packs!=null)packs.close();try{if(worldStream!=null)worldStream.close();if(worldAsset!=null)worldAsset.close();}catch(IOException ignored){}}
 }

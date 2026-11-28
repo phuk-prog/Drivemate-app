@@ -1,0 +1,4150 @@
+{
+ "version": 8,
+ "name": "DriveMate GPU map (day)",
+ "glyphs": "asset://glyphs/{fontstack}/{range}.pbf",
+ "sources": {
+  "world": {
+   "type": "vector",
+   "url": "pmtiles://asset://world-z0-6.pmtiles",
+   "minzoom": 0,
+   "maxzoom": 6
+  },
+  "dm": {
+   "type": "vector",
+   "tiles": [
+    "__TILE_URL__"
+   ],
+   "minzoom": 0,
+   "maxzoom": 14,
+   "attribution": "© OpenStreetMap contributors (ODbL 1.0)"
+  }
+ },
+ "layers": [
+  {
+   "id": "background",
+   "type": "background",
+   "paint": {
+    "background-color": "#F3F6F3"
+   }
+  },
+  {
+   "id": "world-earth",
+   "type": "fill",
+   "source": "world",
+   "source-layer": "earth",
+   "paint": {
+    "fill-color": "#e0ead8"
+   }
+  },
+  {
+   "id": "world-water",
+   "type": "fill",
+   "source": "world",
+   "source-layer": "water",
+   "paint": {
+    "fill-color": "#73b8d6"
+   }
+  },
+  {
+   "id": "world-roads",
+   "type": "line",
+   "source": "world",
+   "source-layer": "roads",
+   "minzoom": 3,
+   "maxzoom": 7,
+   "paint": {
+    "line-color": "#FFFFFF",
+    "line-width": 1.1
+   }
+  },
+  {
+   "id": "uk-land",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "land",
+   "paint": {
+    "fill-color": [
+     "match",
+     [
+      "get",
+      "kind"
+     ],
+     [
+      "forest",
+      "wood"
+     ],
+     "#a9cba3",
+     [
+      "grass",
+      "meadow",
+      "grassland",
+      "park",
+      "garden",
+      "golf_course",
+      "recreation_ground",
+      "village_green",
+      "playground"
+     ],
+     "#c8dfad",
+     [
+      "farmland",
+      "farmyard",
+      "orchard",
+      "vineyard",
+      "allotments"
+     ],
+     "#e9e3c9",
+     [
+      "residential",
+      "garages"
+     ],
+     "#e4dfd8",
+     [
+      "industrial",
+      "railway",
+      "commercial",
+      "retail",
+      "quarry"
+     ],
+     "#c8c7d2",
+     [
+      "school",
+      "college",
+      "university"
+     ],
+     "#ded1e3",
+     "hospital",
+     "#edd1c6",
+     [
+      "parking",
+      "bicycle_parking"
+     ],
+     "#d6dceb",
+     [
+      "construction",
+      "brownfield"
+     ],
+     "#dbc9a7",
+     "#e0ead8"
+    ]
+   }
+  },
+  {
+   "id": "uk-ocean",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "ocean",
+   "paint": {
+    "fill-color": "#73b8d6"
+   }
+  },
+  {
+   "id": "uk-water",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "water_polygons",
+   "paint": {
+    "fill-color": "#73b8d6"
+   }
+  },
+  {
+   "id": "omt-landcover",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "landcover",
+   "paint": {
+    "fill-color": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     "wood",
+     "#a9cba3",
+     [
+      "grass",
+      "park"
+     ],
+     "#c8dfad",
+     "farmland",
+     "#e9e3c9",
+     "#c8dfad"
+    ],
+    "fill-opacity": 0.9
+   }
+  },
+  {
+   "id": "omt-landuse",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "landuse",
+   "minzoom": 9,
+   "paint": {
+    "fill-color": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "residential",
+      "suburb",
+      "neighbourhood"
+     ],
+     "#e4dfd8",
+     [
+      "industrial",
+      "commercial",
+      "retail",
+      "railway"
+     ],
+     "#c8c7d2",
+     "#e4dfd8"
+    ],
+    "fill-opacity": 0.6
+   }
+  },
+  {
+   "id": "omt-park",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "park",
+   "paint": {
+    "fill-color": "#c8dfad"
+   }
+  },
+  {
+   "id": "omt-water",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "water",
+   "paint": {
+    "fill-color": "#73b8d6"
+   }
+  },
+  {
+   "id": "omt-waterway",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "waterway",
+   "minzoom": 10,
+   "paint": {
+    "line-color": "#73b8d6",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     10,
+     0.6,
+     14,
+     1.6,
+     18,
+     4.0
+    ]
+   }
+  },
+  {
+   "id": "uk-water-lines",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "water_lines",
+   "minzoom": 11,
+   "filter": [
+    "!=",
+    [
+     "get",
+     "tunnel"
+    ],
+    true
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#73b8d6",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     11,
+     0.6,
+     14,
+     1.6,
+     18,
+     5,
+     19,
+     7
+    ]
+   }
+  },
+  {
+   "id": "uk-park",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "sites",
+   "paint": {
+    "fill-color": [
+     "match",
+     [
+      "get",
+      "kind"
+     ],
+     [
+      "forest",
+      "wood"
+     ],
+     "#a9cba3",
+     [
+      "grass",
+      "meadow",
+      "grassland",
+      "park",
+      "garden",
+      "golf_course",
+      "recreation_ground",
+      "village_green",
+      "playground"
+     ],
+     "#c8dfad",
+     [
+      "farmland",
+      "farmyard",
+      "orchard",
+      "vineyard",
+      "allotments"
+     ],
+     "#e9e3c9",
+     [
+      "residential",
+      "garages"
+     ],
+     "#e4dfd8",
+     [
+      "industrial",
+      "railway",
+      "commercial",
+      "retail",
+      "quarry"
+     ],
+     "#c8c7d2",
+     [
+      "school",
+      "college",
+      "university"
+     ],
+     "#ded1e3",
+     "hospital",
+     "#edd1c6",
+     [
+      "parking",
+      "bicycle_parking"
+     ],
+     "#d6dceb",
+     [
+      "construction",
+      "brownfield"
+     ],
+     "#dbc9a7",
+     "#e0ead8"
+    ],
+    "fill-opacity": 0.8
+   }
+  },
+  {
+   "id": "uk-pedestrian-areas",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "street_polygons",
+   "minzoom": 14,
+   "filter": [
+    "in",
+    [
+     "coalesce",
+     [
+      "get",
+      "kind"
+     ],
+     ""
+    ],
+    [
+     "literal",
+     [
+      "pedestrian",
+      "service",
+      "runway",
+      "taxiway"
+     ]
+    ]
+   ],
+   "paint": {
+    "fill-color": [
+     "match",
+     [
+      "get",
+      "kind"
+     ],
+     [
+      "runway",
+      "taxiway"
+     ],
+     "#a6b2b8",
+     "service",
+     "#d6dceb",
+     "#eef0ec"
+    ],
+    "fill-opacity": 0.9
+   }
+  },
+  {
+   "id": "uk-pier-polygons",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "pier_polygons",
+   "minzoom": 12,
+   "paint": {
+    "fill-color": "#e4dfd8"
+   }
+  },
+  {
+   "id": "uk-dam-polygons",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "dam_polygons",
+   "minzoom": 12,
+   "paint": {
+    "fill-color": "#a6b2b8"
+   }
+  },
+  {
+   "id": "uk-pier-lines",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "pier_lines",
+   "minzoom": 12,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#a6b2b8",
+    "line-width": 2
+   }
+  },
+  {
+   "id": "uk-dam-lines",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "dam_lines",
+   "minzoom": 12,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#a6b2b8",
+    "line-width": 3
+   }
+  },
+  {
+   "id": "uk-boundaries",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "boundaries",
+   "minzoom": 4,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#9696a4",
+    "line-width": 1.2,
+    "line-dasharray": [
+     3,
+     2
+    ],
+    "line-opacity": 0.7
+   }
+  },
+  {
+   "id": "uk-ferries",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "ferries",
+   "minzoom": 8,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#437da3",
+    "line-width": 1.8,
+    "line-dasharray": [
+     3,
+     2
+    ]
+   }
+  },
+  {
+   "id": "uk-aerialways",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "aerialways",
+   "minzoom": 13,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#a6b2b8",
+    "line-width": 1.4,
+    "line-dasharray": [
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "id": "uk-buildings",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "buildings",
+   "minzoom": 13,
+   "paint": {
+    "fill-color": "#c5d0d2",
+    "fill-outline-color": "#a8b7b9"
+   },
+   "maxzoom": 15
+  },
+  {
+   "id": "omt-building",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "building",
+   "minzoom": 13,
+   "paint": {
+    "fill-color": "#c5d0d2",
+    "fill-outline-color": "#a8b7b9"
+   }
+  },
+  {
+   "id": "uk-bridges",
+   "type": "fill",
+   "source": "dm",
+   "source-layer": "bridges",
+   "minzoom": 14,
+   "paint": {
+    "fill-color": "#E6EAE6",
+    "fill-opacity": 0.8
+   }
+  },
+  {
+   "id": "uk-rail",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 10,
+   "filter": [
+    "in",
+    [
+     "get",
+     "kind"
+    ],
+    [
+     "literal",
+     [
+      "rail",
+      "light_rail",
+      "tram",
+      "subway",
+      "narrow_gauge"
+     ]
+    ]
+   ],
+   "paint": {
+    "line-color": "#9AA4AA",
+    "line-dasharray": [
+     3,
+     2
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     10,
+     0.6,
+     14,
+     1.4,
+     18,
+     3,
+     19,
+     3.6
+    ]
+   }
+  },
+  {
+   "id": "uk-paths",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 15,
+   "filter": [
+    "in",
+    [
+     "get",
+     "kind"
+    ],
+    [
+     "literal",
+     [
+      "footway",
+      "path",
+      "cycleway",
+      "steps",
+      "pedestrian",
+      "bridleway"
+     ]
+    ]
+   ],
+   "paint": {
+    "line-color": "#B9C2BE",
+    "line-dasharray": [
+     2,
+     1.5
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     15,
+     0.7,
+     18,
+     1.8,
+     19,
+     2.4
+    ]
+   }
+  },
+  {
+   "id": "uk-road-casing",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 7,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     7,
+     1.2,
+     12,
+     3.8,
+     14,
+     7.3,
+     16,
+     11,
+     18,
+     19,
+     19,
+     25
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ],
+     0.38,
+     1
+    ]
+   },
+   "filter": [
+    "all",
+    [
+     "all",
+     [
+      "!",
+      [
+       "in",
+       [
+        "get",
+        "kind"
+       ],
+       [
+        "literal",
+        [
+         "footway",
+         "path",
+         "cycleway",
+         "steps",
+         "pedestrian",
+         "bridleway",
+         "rail",
+         "light_rail",
+         "tram",
+         "subway",
+         "narrow_gauge",
+         "funicular",
+         "monorail",
+         "disused",
+         "platform"
+        ]
+       ]
+      ]
+     ],
+     [
+      "!",
+      [
+       "any",
+       [
+        "==",
+        [
+         "coalesce",
+         [
+          "get",
+          "link"
+         ],
+         false
+        ],
+        true
+       ],
+       [
+        "in",
+        [
+         "coalesce",
+         [
+          "get",
+          "kind"
+         ],
+         ""
+        ],
+        [
+         "literal",
+         [
+          "motorway_link",
+          "trunk_link",
+          "primary_link",
+          "secondary_link",
+          "tertiary_link"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "bridge"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "uk-roads",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 7,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": [
+     "match",
+     [
+      "get",
+      "kind"
+     ],
+     [
+      "service",
+      "living_street"
+     ],
+     "#b8c4c6",
+     "#a6b2b8"
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     7,
+     0.9,
+     12,
+     2.7,
+     14,
+     5.6,
+     16,
+     8.5,
+     18,
+     15,
+     19,
+     20
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ],
+     0.38,
+     1
+    ]
+   },
+   "filter": [
+    "all",
+    [
+     "all",
+     [
+      "!",
+      [
+       "in",
+       [
+        "get",
+        "kind"
+       ],
+       [
+        "literal",
+        [
+         "footway",
+         "path",
+         "cycleway",
+         "steps",
+         "pedestrian",
+         "bridleway",
+         "rail",
+         "light_rail",
+         "tram",
+         "subway",
+         "narrow_gauge",
+         "funicular",
+         "monorail",
+         "disused",
+         "platform"
+        ]
+       ]
+      ]
+     ],
+     [
+      "!",
+      [
+       "any",
+       [
+        "==",
+        [
+         "coalesce",
+         [
+          "get",
+          "link"
+         ],
+         false
+        ],
+        true
+       ],
+       [
+        "in",
+        [
+         "coalesce",
+         [
+          "get",
+          "kind"
+         ],
+         ""
+        ],
+        [
+         "literal",
+         [
+          "motorway_link",
+          "trunk_link",
+          "primary_link",
+          "secondary_link",
+          "tertiary_link"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "bridge"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "uk-secondary-roads",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 11,
+   "filter": [
+    "all",
+    [
+     "all",
+     [
+      "any",
+      [
+       "==",
+       [
+        "get",
+        "kind"
+       ],
+       "secondary"
+      ],
+      [
+       "==",
+       [
+        "get",
+        "kind"
+       ],
+       "tertiary"
+      ]
+     ],
+     [
+      "!",
+      [
+       "any",
+       [
+        "==",
+        [
+         "coalesce",
+         [
+          "get",
+          "link"
+         ],
+         false
+        ],
+        true
+       ],
+       [
+        "in",
+        [
+         "coalesce",
+         [
+          "get",
+          "kind"
+         ],
+         ""
+        ],
+        [
+         "literal",
+         [
+          "motorway_link",
+          "trunk_link",
+          "primary_link",
+          "secondary_link",
+          "tertiary_link"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "bridge"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#9faeb2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     2.7,
+     14,
+     5.3,
+     18,
+     13.8,
+     19,
+     19.5
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ],
+     0.38,
+     1
+    ]
+   }
+  },
+  {
+   "id": "uk-trunk",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 6,
+   "filter": [
+    "all",
+    [
+     "all",
+     [
+      "any",
+      [
+       "==",
+       [
+        "get",
+        "kind"
+       ],
+       "motorway"
+      ],
+      [
+       "==",
+       [
+        "get",
+        "kind"
+       ],
+       "trunk"
+      ],
+      [
+       "==",
+       [
+        "get",
+        "kind"
+       ],
+       "primary"
+      ]
+     ],
+     [
+      "!",
+      [
+       "any",
+       [
+        "==",
+        [
+         "coalesce",
+         [
+          "get",
+          "link"
+         ],
+         false
+        ],
+        true
+       ],
+       [
+        "in",
+        [
+         "coalesce",
+         [
+          "get",
+          "kind"
+         ],
+         ""
+        ],
+        [
+         "literal",
+         [
+          "motorway_link",
+          "trunk_link",
+          "primary_link",
+          "secondary_link",
+          "tertiary_link"
+         ]
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "bridge"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": [
+     "match",
+     [
+      "match",
+      [
+       "get",
+       "kind"
+      ],
+      [
+       "motorway",
+       "motorway_link"
+      ],
+      "motorway",
+      [
+       "trunk",
+       "trunk_link"
+      ],
+      "trunk",
+      [
+       "primary",
+       "primary_link"
+      ],
+      "primary",
+      [
+       "secondary",
+       "secondary_link"
+      ],
+      "secondary",
+      [
+       "tertiary",
+       "tertiary_link"
+      ],
+      "tertiary",
+      "other"
+     ],
+     "motorway",
+     "#9b8cc5",
+     "trunk",
+     "#85b39a",
+     "#c4ae85"
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     7,
+     1.7,
+     12,
+     4.5,
+     14,
+     8.4,
+     16,
+     12.5,
+     18,
+     20,
+     19,
+     25
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ],
+     0.38,
+     1
+    ]
+   }
+  },
+  {
+   "id": "uk-road-link-casing",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 12,
+   "filter": [
+    "all",
+    [
+     "any",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "link"
+       ],
+       false
+      ],
+      true
+     ],
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "motorway_link",
+        "trunk_link",
+        "primary_link",
+        "secondary_link",
+        "tertiary_link"
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "bridge"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     3.4,
+     14,
+     8.2,
+     18,
+     20,
+     19,
+     26
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ],
+     0.4,
+     1
+    ]
+   }
+  },
+  {
+   "id": "uk-road-links",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 12,
+   "filter": [
+    "all",
+    [
+     "any",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "link"
+       ],
+       false
+      ],
+      true
+     ],
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "motorway_link",
+        "trunk_link",
+        "primary_link",
+        "secondary_link",
+        "tertiary_link"
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "bridge"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": [
+     "match",
+     [
+      "match",
+      [
+       "get",
+       "kind"
+      ],
+      [
+       "motorway",
+       "motorway_link"
+      ],
+      "motorway",
+      [
+       "trunk",
+       "trunk_link"
+      ],
+      "trunk",
+      [
+       "primary",
+       "primary_link"
+      ],
+      "primary",
+      [
+       "secondary",
+       "secondary_link"
+      ],
+      "secondary",
+      [
+       "tertiary",
+       "tertiary_link"
+      ],
+      "tertiary",
+      "other"
+     ],
+     "motorway",
+     "#9b8cc5",
+     "trunk",
+     "#85b39a",
+     "primary",
+     "#c4ae85",
+     "#a6b2b8"
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     2.5,
+     14,
+     5.8,
+     18,
+     16,
+     19,
+     21
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ],
+     0.4,
+     1
+    ]
+   }
+  },
+  {
+   "id": "uk-tunnel-detail",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 13,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#9aa7b0",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     1.5,
+     16,
+     4,
+     20,
+     8
+    ],
+    "line-dasharray": [
+     2,
+     2
+    ],
+    "line-opacity": 0.85
+   },
+   "filter": [
+    "all",
+    [
+     "!",
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "footway",
+        "path",
+        "cycleway",
+        "steps",
+        "pedestrian",
+        "bridleway",
+        "rail",
+        "light_rail",
+        "tram",
+        "subway",
+        "narrow_gauge",
+        "funicular",
+        "monorail",
+        "disused",
+        "platform",
+        "runway",
+        "taxiway"
+       ]
+      ]
+     ]
+    ],
+    [
+     "==",
+     [
+      "coalesce",
+      [
+       "get",
+       "tunnel"
+      ],
+      false
+     ],
+     true
+    ]
+   ]
+  },
+  {
+   "id": "uk-unpaved",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 16,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#9e8259",
+    "line-width": 2,
+    "line-dasharray": [
+     2,
+     2
+    ]
+   },
+   "filter": [
+    "all",
+    [
+     "!",
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "footway",
+        "path",
+        "cycleway",
+        "steps",
+        "pedestrian",
+        "bridleway",
+        "rail",
+        "light_rail",
+        "tram",
+        "subway",
+        "narrow_gauge",
+        "funicular",
+        "monorail",
+        "disused",
+        "platform",
+        "runway",
+        "taxiway"
+       ]
+      ]
+     ]
+    ],
+    [
+     "in",
+     [
+      "coalesce",
+      [
+       "get",
+       "surface"
+      ],
+      ""
+     ],
+     [
+      "literal",
+      [
+       "unpaved",
+       "gravel",
+       "fine_gravel",
+       "dirt",
+       "ground",
+       "earth",
+       "sand",
+       "mud",
+       "compacted"
+      ]
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "uk-service-detail",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 15,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#c3bdb3",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     15,
+     1.5,
+     19,
+     5
+    ]
+   },
+   "filter": [
+    "all",
+    [
+     "==",
+     [
+      "get",
+      "kind"
+     ],
+     "service"
+    ],
+    [
+     "in",
+     [
+      "coalesce",
+      [
+       "get",
+       "service"
+      ],
+      ""
+     ],
+     [
+      "literal",
+      [
+       "driveway",
+       "parking_aisle",
+       "alley"
+      ]
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "uk-bridge-casing",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 13,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f8f6ed",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     4,
+     16,
+     12,
+     19,
+     25
+    ]
+   },
+   "filter": [
+    "all",
+    [
+     "!",
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "footway",
+        "path",
+        "cycleway",
+        "steps",
+        "pedestrian",
+        "bridleway",
+        "rail",
+        "light_rail",
+        "tram",
+        "subway",
+        "narrow_gauge",
+        "funicular",
+        "monorail",
+        "disused",
+        "platform",
+        "runway",
+        "taxiway"
+       ]
+      ]
+     ]
+    ],
+    [
+     "==",
+     [
+      "coalesce",
+      [
+       "get",
+       "bridge"
+      ],
+      false
+     ],
+     true
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "uk-bridge-road",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 13,
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": [
+     "match",
+     [
+      "match",
+      [
+       "get",
+       "kind"
+      ],
+      [
+       "motorway",
+       "motorway_link"
+      ],
+      "motorway",
+      [
+       "trunk",
+       "trunk_link"
+      ],
+      "trunk",
+      [
+       "primary",
+       "primary_link"
+      ],
+      "primary",
+      [
+       "secondary",
+       "secondary_link"
+      ],
+      "secondary",
+      [
+       "tertiary",
+       "tertiary_link"
+      ],
+      "tertiary",
+      "other"
+     ],
+     "motorway",
+     "#9b8cc5",
+     "trunk",
+     "#85b39a",
+     "primary",
+     "#c4ae85",
+     "#a6b2b8"
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     2.5,
+     16,
+     8,
+     19,
+     19
+    ]
+   },
+   "filter": [
+    "all",
+    [
+     "!",
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "footway",
+        "path",
+        "cycleway",
+        "steps",
+        "pedestrian",
+        "bridleway",
+        "rail",
+        "light_rail",
+        "tram",
+        "subway",
+        "narrow_gauge",
+        "funicular",
+        "monorail",
+        "disused",
+        "platform",
+        "runway",
+        "taxiway"
+       ]
+      ]
+     ]
+    ],
+    [
+     "==",
+     [
+      "coalesce",
+      [
+       "get",
+       "bridge"
+      ],
+      false
+     ],
+     true
+    ],
+    [
+     "!",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "tunnel"
+       ],
+       false
+      ],
+      true
+     ]
+    ]
+   ]
+  },
+  {
+   "id": "omt-path",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 15,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "path"
+     ]
+    ]
+   ],
+   "paint": {
+    "line-color": "#B9C2BE",
+    "line-dasharray": [
+     2,
+     1.5
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     15,
+     0.7,
+     18,
+     1.8,
+     19,
+     2.4
+    ]
+   }
+  },
+  {
+   "id": "omt-rail",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 10,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "rail",
+      "transit"
+     ]
+    ]
+   ],
+   "paint": {
+    "line-color": "#9AA4AA",
+    "line-dasharray": [
+     3,
+     2
+    ],
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     10,
+     0.6,
+     14,
+     1.4,
+     18,
+     3.0
+    ]
+   }
+  },
+  {
+   "id": "omt-casing-0",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 14,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "service",
+      "track"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     14,
+     2.6,
+     16,
+     5.6,
+     18,
+     10.6,
+     19,
+     13.6
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-casing-1",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 11,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "minor"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     11,
+     2.1,
+     12,
+     3.2,
+     14,
+     7.2,
+     16,
+     10.1,
+     18,
+     16.6,
+     19,
+     21.6
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-casing-2",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 11,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "primary",
+      "secondary",
+      "tertiary"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     2.2,
+     12,
+     5.0,
+     14,
+     8.6,
+     16,
+     12.6,
+     18,
+     21.6,
+     19,
+     27.6
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-casing-3",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 11,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "trunk"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     2.2,
+     12,
+     5.0,
+     14,
+     8.6,
+     16,
+     12.6,
+     18,
+     21.6,
+     19,
+     27.6
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-casing-4",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 7,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "motorway"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#f5f8f2",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     2.6,
+     10,
+     3.8,
+     12,
+     6.1,
+     14,
+     10.0,
+     16,
+     14.6,
+     18,
+     25.6,
+     19,
+     31.6
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-road-0",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 14,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "service",
+      "track"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#b8c4c6",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     14,
+     1.0,
+     16,
+     4.0,
+     18,
+     9.0,
+     19,
+     12.0
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-road-1",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 11,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "minor"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#a6b2b8",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     11,
+     0.5,
+     12,
+     1.6,
+     14,
+     5.6,
+     16,
+     8.5,
+     18,
+     15.0,
+     19,
+     20.0
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-road-2",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 8,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "primary",
+      "secondary",
+      "tertiary"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#c4ae85",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     0.6,
+     12,
+     3.4,
+     14,
+     7.0,
+     16,
+     11.0,
+     18,
+     20.0,
+     19,
+     26.0
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-road-3",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 6,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "trunk"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#85b39a",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     0.6,
+     12,
+     3.4,
+     14,
+     7.0,
+     16,
+     11.0,
+     18,
+     20.0,
+     19,
+     26.0
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "omt-road-4",
+   "type": "line",
+   "source": "dm",
+   "source-layer": "transportation",
+   "minzoom": 5,
+   "filter": [
+    "in",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "literal",
+     [
+      "motorway"
+     ]
+    ]
+   ],
+   "layout": {
+    "line-cap": "round",
+    "line-join": "round"
+   },
+   "paint": {
+    "line-color": "#9b8cc5",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     1.0,
+     10,
+     2.2,
+     12,
+     4.5,
+     14,
+     8.4,
+     16,
+     13.0,
+     18,
+     24.0,
+     19,
+     30.0
+    ],
+    "line-opacity": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "brunnel"
+      ],
+      "tunnel"
+     ],
+     0.45,
+     1
+    ]
+   }
+  },
+  {
+   "id": "uk-buildings-3d",
+   "type": "fill-extrusion",
+   "source": "dm",
+   "source-layer": "buildings",
+   "minzoom": 14.5,
+   "paint": {
+    "fill-extrusion-color": "#c5d0d2",
+    "fill-extrusion-height": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     14.5,
+     0,
+     15.4,
+     6
+    ],
+    "fill-extrusion-base": 0,
+    "fill-extrusion-opacity": 0.88
+   }
+  },
+  {
+   "id": "omt-building-3d",
+   "type": "fill-extrusion",
+   "source": "dm",
+   "source-layer": "building",
+   "minzoom": 14.5,
+   "paint": {
+    "fill-extrusion-color": "#c5d0d2",
+    "fill-extrusion-height": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     14.5,
+     0,
+     15.4,
+     [
+      "coalesce",
+      [
+       "get",
+       "render_height"
+      ],
+      6
+     ]
+    ],
+    "fill-extrusion-base": [
+     "coalesce",
+     [
+      "get",
+      "render_min_height"
+     ],
+     0
+    ],
+    "fill-extrusion-opacity": 0.88
+   }
+  },
+  {
+   "id": "uk-oneway-arrows",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "streets",
+   "minzoom": 17,
+   "layout": {
+    "symbol-placement": "line",
+    "symbol-spacing": 95,
+    "text-field": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "oneway_reverse"
+       ],
+       false
+      ],
+      true
+     ],
+     "←",
+     "→"
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 13,
+    "text-rotation-alignment": "map",
+    "text-keep-upright": false
+   },
+   "paint": {
+    "text-color": "#344e60",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 1.3
+   },
+   "filter": [
+    "all",
+    [
+     "!",
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "footway",
+        "path",
+        "cycleway",
+        "steps",
+        "pedestrian",
+        "bridleway",
+        "rail",
+        "light_rail",
+        "tram",
+        "subway",
+        "narrow_gauge",
+        "funicular",
+        "monorail",
+        "disused",
+        "platform",
+        "runway",
+        "taxiway"
+       ]
+      ]
+     ]
+    ],
+    [
+     "==",
+     [
+      "coalesce",
+      [
+       "get",
+       "oneway"
+      ],
+      false
+     ],
+     true
+    ]
+   ]
+  },
+  {
+   "id": "uk-street-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "street_labels",
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     10,
+     16,
+     13,
+     19,
+     15
+    ],
+    "symbol-placement": "line",
+    "text-rotation-alignment": "map",
+    "symbol-spacing": 270
+   },
+   "paint": {
+    "text-color": "#203a4e",
+    "text-halo-color": "#f1f6ea",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "uk-boundary-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "boundary_labels",
+   "minzoom": 5,
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 12
+   },
+   "paint": {
+    "text-color": "#344e60",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 1.3
+   },
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "!=",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ]
+   ]
+  },
+  {
+   "id": "uk-polygon-street-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "streets_polygons_labels",
+   "minzoom": 16,
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11
+   },
+   "paint": {
+    "text-color": "#344e60",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 1.3
+   },
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "!=",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ]
+   ]
+  },
+  {
+   "id": "uk-place-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "place_labels",
+   "minzoom": 6,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     11,
+     14,
+     14,
+     19,
+     16
+    ]
+   },
+   "paint": {
+    "text-color": "#394E60",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.7
+   }
+  },
+  {
+   "id": "uk-water-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "water_lines_labels",
+   "minzoom": 13,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     12,
+     10,
+     16,
+     12.5,
+     19,
+     14
+    ],
+    "symbol-placement": "line",
+    "symbol-spacing": 320
+   },
+   "paint": {
+    "text-color": "#3F7E9C",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.5
+   }
+  },
+  {
+   "id": "uk-water-area-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "water_polygons_labels",
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 12
+   },
+   "paint": {
+    "text-color": "#3F7E9C",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.5
+   }
+  },
+  {
+   "id": "uk-housenumbers",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "addresses",
+   "minzoom": 17,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "housenumber"
+     ],
+     [
+      "get",
+      "housename"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 10.5
+   },
+   "paint": {
+    "text-color": "#8A979F",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.5
+   }
+  },
+  {
+   "id": "uk-pois-dots",
+   "type": "circle",
+   "source": "dm",
+   "source-layer": "pois",
+   "minzoom": 16,
+   "filter": [
+    "all",
+    [
+     "all",
+     [
+      "has",
+      "name"
+     ],
+     [
+      "!",
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "fuel",
+         "charging_station",
+         "parking"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "any",
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "fuel"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "charging_station"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "parking"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "hospital",
+         "clinic",
+         "doctors"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "restaurant",
+         "fast_food",
+         "cafe",
+         "food_court"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "shop"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "supermarket",
+         "convenience",
+         "mall"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "highway"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "services",
+         "rest_area"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "tourism"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "hotel",
+         "motel",
+         "guest_house"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "shop"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "car_repair",
+         "tyres"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "aeroway"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "aerodrome"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "ferry_terminal"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "kind"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "station",
+         "halt",
+         "tram_stop"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "paint": {
+    "circle-color": "#8C9BA3",
+    "circle-radius": 3.2,
+    "circle-stroke-color": "#FFFFFF",
+    "circle-stroke-width": 1
+   }
+  },
+  {
+   "id": "uk-pois-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "pois",
+   "minzoom": 16,
+   "filter": [
+    "all",
+    [
+     "all",
+     [
+      "has",
+      "name"
+     ],
+     [
+      "!",
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "fuel",
+         "charging_station",
+         "parking"
+        ]
+       ]
+      ]
+     ]
+    ],
+    [
+     "!",
+     [
+      "any",
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "fuel"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "charging_station"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "parking"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "hospital",
+         "clinic",
+         "doctors"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "restaurant",
+         "fast_food",
+         "cafe",
+         "food_court"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "shop"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "supermarket",
+         "convenience",
+         "mall"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "highway"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "services",
+         "rest_area"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "tourism"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "hotel",
+         "motel",
+         "guest_house"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "shop"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "car_repair",
+         "tyres"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "aeroway"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "aerodrome"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "amenity"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "ferry_terminal"
+        ]
+       ]
+      ],
+      [
+       "in",
+       [
+        "coalesce",
+        [
+         "get",
+         "kind"
+        ],
+        ""
+       ],
+       [
+        "literal",
+        [
+         "station",
+         "halt",
+         "tram_stop"
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11,
+    "text-anchor": "left",
+    "text-offset": [
+     0.7,
+     0
+    ],
+    "text-optional": true,
+    "text-max-width": 9
+   },
+   "paint": {
+    "text-color": "#4F606C",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.5
+   }
+  },
+  {
+   "id": "uk-bus-stops",
+   "type": "circle",
+   "source": "dm",
+   "source-layer": "public_transport",
+   "minzoom": 16,
+   "filter": [
+    "==",
+    [
+     "get",
+     "kind"
+    ],
+    "bus_stop"
+   ],
+   "paint": {
+    "circle-color": "#4D7BD1",
+    "circle-radius": 2.8,
+    "circle-stroke-color": "#FFFFFF",
+    "circle-stroke-width": 1
+   }
+  },
+  {
+   "id": "uk-stations-dots",
+   "type": "circle",
+   "source": "dm",
+   "source-layer": "public_transport",
+   "minzoom": 13,
+   "filter": [
+    "in",
+    [
+     "get",
+     "kind"
+    ],
+    [
+     "literal",
+     [
+      "station",
+      "halt",
+      "tram_stop"
+     ]
+    ]
+   ],
+   "paint": {
+    "circle-color": "#4D7BD1",
+    "circle-radius": 4.2,
+    "circle-stroke-color": "#FFFFFF",
+    "circle-stroke-width": 1.4
+   },
+   "layout": {
+    "visibility": "none"
+   }
+  },
+  {
+   "id": "uk-stations-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "public_transport",
+   "minzoom": 14,
+   "filter": [
+    "in",
+    [
+     "get",
+     "kind"
+    ],
+    [
+     "literal",
+     [
+      "station",
+      "halt",
+      "tram_stop"
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name"
+     ],
+     ""
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11.5,
+    "text-anchor": "top",
+    "text-offset": [
+     0,
+     0.8
+    ],
+    "text-optional": true,
+    "visibility": "none"
+   },
+   "paint": {
+    "text-color": "#2F4F86",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.5
+   }
+  },
+  {
+   "id": "uk-driving-pois-dots",
+   "type": "circle",
+   "source": "dm",
+   "source-layer": "pois",
+   "minzoom": 13,
+   "filter": [
+    "in",
+    [
+     "coalesce",
+     [
+      "get",
+      "amenity"
+     ],
+     ""
+    ],
+    [
+     "literal",
+     [
+      "fuel",
+      "charging_station",
+      "parking"
+     ]
+    ]
+   ],
+   "paint": {
+    "circle-color": "#E8892B",
+    "circle-radius": 4.6,
+    "circle-stroke-color": "#FFFFFF",
+    "circle-stroke-width": 1.4
+   },
+   "layout": {
+    "visibility": "none"
+   }
+  },
+  {
+   "id": "uk-driving-pois-labels",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "pois",
+   "minzoom": 14,
+   "filter": [
+    "in",
+    [
+     "coalesce",
+     [
+      "get",
+      "amenity"
+     ],
+     ""
+    ],
+    [
+     "literal",
+     [
+      "fuel",
+      "charging_station",
+      "parking"
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "case",
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "amenity"
+       ],
+       ""
+      ],
+      "fuel"
+     ],
+     [
+      "coalesce",
+      [
+       "get",
+       "name"
+      ],
+      "Fuel"
+     ],
+     [
+      "==",
+      [
+       "coalesce",
+       [
+        "get",
+        "amenity"
+       ],
+       ""
+      ],
+      "charging_station"
+     ],
+     [
+      "coalesce",
+      [
+       "get",
+       "name"
+      ],
+      "EV charging"
+     ],
+     [
+      "coalesce",
+      [
+       "get",
+       "name"
+      ],
+      "P"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11.5,
+    "text-anchor": "left",
+    "text-offset": [
+     0.8,
+     0
+    ],
+    "text-optional": true,
+    "text-max-width": 9,
+    "visibility": "none"
+   },
+   "paint": {
+    "text-color": "#7A4A12",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.5
+   }
+  },
+  {
+   "id": "uk-driving-landmarks",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "pois",
+   "minzoom": 14,
+   "filter": [
+    "all",
+    [
+     "has",
+     "name"
+    ],
+    [
+     "any",
+     [
+      "has",
+      "historic"
+     ],
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "tourism"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "attraction",
+        "museum",
+        "viewpoint"
+       ]
+      ]
+     ],
+     [
+      "in",
+      [
+       "coalesce",
+       [
+        "get",
+        "kind"
+       ],
+       ""
+      ],
+      [
+       "literal",
+       [
+        "landmark",
+        "attraction",
+        "museum",
+        "monument"
+       ]
+      ]
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 12,
+    "text-max-width": 9,
+    "text-padding": 8
+   },
+   "paint": {
+    "text-color": "#203a4e",
+    "text-halo-color": "#f1f6ea",
+    "text-halo-width": 1.6
+   }
+  },
+  {
+   "id": "omt-road-ref",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "transportation_name",
+   "minzoom": 9,
+   "filter": [
+    "all",
+    [
+     "has",
+     "ref"
+    ],
+    [
+     "in",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "literal",
+      [
+       "motorway",
+       "trunk",
+       "primary"
+      ]
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "get",
+     "ref"
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11,
+    "symbol-placement": "line",
+    "symbol-spacing": 400,
+    "text-rotation-alignment": "viewport"
+   },
+   "paint": {
+    "text-color": "#ffffff",
+    "text-halo-color": "#9b8cc5",
+    "text-halo-width": 3
+   }
+  },
+  {
+   "id": "omt-road-names",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "transportation_name",
+   "minzoom": 13,
+   "filter": [
+    "has",
+    "name"
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:en"
+     ],
+     [
+      "get",
+      "name:latin"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "symbol-placement": "line",
+    "text-max-angle": 30,
+    "text-size": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     13,
+     10,
+     17,
+     13,
+     19,
+     15
+    ]
+   },
+   "paint": {
+    "text-color": "#203a4e",
+    "text-halo-color": "#f1f6ea",
+    "text-halo-width": 1.9
+   }
+  },
+  {
+   "id": "omt-water-names",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "water_name",
+   "minzoom": 12,
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:en"
+     ],
+     [
+      "get",
+      "name:latin"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 11
+   },
+   "paint": {
+    "text-color": "#2c6f92",
+    "text-halo-color": "#f1f6ea",
+    "text-halo-width": 1.4
+   }
+  },
+  {
+   "id": "omt-housenumbers",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "housenumber",
+   "minzoom": 17,
+   "layout": {
+    "text-field": [
+     "get",
+     "housenumber"
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-size": 10
+   },
+   "paint": {
+    "text-color": "#203a4e",
+    "text-halo-color": "#f1f6ea",
+    "text-halo-width": 1.2
+   }
+  },
+  {
+   "id": "omt-places",
+   "type": "symbol",
+   "source": "dm",
+   "source-layer": "place",
+   "filter": [
+    "!",
+    [
+     "in",
+     [
+      "get",
+      "class"
+     ],
+     [
+      "literal",
+      [
+       "country",
+       "state",
+       "continent"
+      ]
+     ]
+    ]
+   ],
+   "layout": {
+    "text-field": [
+     "coalesce",
+     [
+      "get",
+      "name:en"
+     ],
+     [
+      "get",
+      "name:latin"
+     ],
+     [
+      "get",
+      "name"
+     ]
+    ],
+    "text-font": [
+     "Noto Sans Regular"
+    ],
+    "text-padding": 6,
+    "symbol-sort-key": [
+     "coalesce",
+     [
+      "get",
+      "rank"
+     ],
+     10
+    ],
+    "text-size": [
+     "match",
+     [
+      "get",
+      "class"
+     ],
+     "city",
+     16,
+     "town",
+     14,
+     [
+      "village",
+      "suburb"
+     ],
+     12,
+     11
+    ]
+   },
+   "paint": {
+    "text-color": "#394E60",
+    "text-halo-color": "#FFFFFF",
+    "text-halo-width": 1.7
+   }
+  }
+ ]
+}

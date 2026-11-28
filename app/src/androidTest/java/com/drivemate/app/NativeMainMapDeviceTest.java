@@ -23,6 +23,7 @@ public class NativeMainMapDeviceTest {
         }
         DmUnifiedRegion region=new DmUnifiedRegion(app,true);DmTileEngine.Route path=region.sample(true);
         NativeMapScene scene=region.nativeScene(path);
+        DmUnifiedZoomTest.engine(app,MapEngines.CLASSIC);
         MainActivity a=(MainActivity)ins.startActivitySync(new Intent(app,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         try{
             Field field=MainActivity.class.getDeclaredField("vectorMap");field.setAccessible(true);

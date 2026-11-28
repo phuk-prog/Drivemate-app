@@ -20,7 +20,7 @@ assert "new DriveTileServer(app,false)" in (src/"NativeTileSource.java").read_te
 assert "TomTomApi.liveIncidents(key,p)" in main
 assert "incident_enhancement_consent" in main and "NativeEnhancementPolicy.enabled" in main
 assert "http://" not in native and "https://" not in native
-for name in ("drivemate_vector_style.json","drivemate_vector_style_night.json","dm_unified_day.json","dm_unified_night.json"):
+for name in ("drivemate_vector_style.json","drivemate_vector_style_night.json","dm_unified_day.json","dm_unified_night.json","dm_gl_day.json","dm_gl_night.json"):
     style=json.loads((assets/name).read_text())
     assert "tomtom" not in json.dumps(style).lower(),name
     assert "https://" not in json.dumps(style),name
@@ -29,3 +29,14 @@ print("PASS: DriveMate-owned base routes/search/styles; external traffic area ov
 assert 'org.osmdroid:' not in (root/'app/build.gradle').read_text()
 assert 'org.osmdroid:' not in (root/'app/gradle.lockfile').read_text()
 assert not any('import org.osmdroid.' in p.read_text() for p in src.glob('*.java'))
+
+# MapLibre (owner-approved 2.3.0) is a display engine only: no routing, search or provider adapters, and only
+# MapLibreMapController may import it. Routing/guidance/search above stay DriveMate-owned.
+for p in src.glob('*.java'):
+    if p.name!='MapLibreMapController.java':
+        assert 'import org.maplibre' not in p.read_text(),p.name
+gl=(src/'MapLibreMapController.java').read_text()
+for forbidden in ('TomTomApi.route(','TomTomApi.search(','https://'):
+    assert forbidden not in gl,forbidden
+assert 'new NativeMapController(this,mapHealth)' in main   # classic engine stays as the fallback
+print("PASS: MapLibre is display-only; DriveMate classic renderer kept as fallback")

@@ -42,7 +42,9 @@ final class NativeMapView extends View {
     void setScene(NativeMapScene value){scene=value;changed();route=new RouteRenderGeometry(value==null?Collections.emptyList():value.route);if(value!=null&&!value.route.isEmpty()){center=route.at(route.length*.4);vehicle=center;}invalidate();}
     void setSceneOnly(NativeMapScene value){scene=value;changed();invalidate();}
     /** Base tiles drawn under the scene: areas everywhere, roads only where the scene has none. */
-    void setBackgroundScene(NativeMapScene value){background=value;changed();invalidate();}
+    void setBackgroundScene(NativeMapScene value){if(background!=null&&background!=value)previous=background;background=value;changed();invalidate();}
+    /** The last base map, kept under the new one so areas already seen never blank out while tiles load. */
+    private NativeMapScene previous;
     void setLoading(boolean value){if(loading!=value){loading=value;invalidate();}}
     private java.util.function.Supplier<String> debug;
     void setDebug(java.util.function.Supplier<String> value){debug=value;invalidate();}
@@ -76,7 +78,7 @@ final class NativeMapView extends View {
     void setCamera(GeoMath.Point p,double z,double bearing,double tilt){if(p==null)return;if(flingVx!=0||flingVy!=0)stopFling();center=p;zoom=Math.max(2,Math.min(21,z));this.bearing=bearing;this.tilt=tilt;invalidate();}
     void setProgress(double value,GeoMath.Point vehicle,double turnOffset){progress=Math.max(0,value);this.vehicle=vehicle;turn=turnOffset;invalidate();}
     double bearing(){return bearing;}
-    int roadsDrawn(){return roadsDrawn;}int routeDrawn(){return routeDrawn;}int buildingsDrawn(){return buildingsDrawn;}
+    int roadsDrawn(){return gpu!=null?gpu.roadsDrawn():roadsDrawn;}int routeDrawn(){return routeDrawn;}int buildingsDrawn(){return buildingsDrawn;}
     private float dp(float n){return n*getResources().getDisplayMetrics().density;}
     private int color(int day,int dark){return night?dark:day;}
     private NativeMapProjection.Camera camera(){return new NativeMapProjection.Camera(center.lat,center.lon,zoom,bearing,tilt,getWidth(),getHeight());}
@@ -104,14 +106,33 @@ final class NativeMapView extends View {
     void setLabelInsets(int top,int bottom){if(top!=labelTop||bottom!=labelBottom){labelTop=top;labelBottom=bottom;changed();invalidate();}}
     private NativeBaseRenderer.Frame frame(NativeMapProjection.Camera c){
         NativeBaseRenderer.Frame f=new NativeBaseRenderer.Frame();
-        f.camera=c;f.scene=scene;f.background=background;f.zoom=zoom;f.tilt=tilt;f.width=getWidth();f.height=getHeight();
+        f.camera=c;f.scene=scene;f.background=background;f.previous=previous;f.zoom=zoom;f.tilt=tilt;f.width=getWidth();f.height=getHeight();
         f.density=getResources().getDisplayMetrics().density;f.night=night;f.showBuildings=showBuildings;f.extrude=extrude;
         f.labelTop=labelTop;f.labelBottom=labelBottom;return f;
     }
     private static boolean same(NativeMapProjection.Camera a,NativeMapProjection.Camera b){
         return a!=null&&b!=null&&a.cx==b.cx&&a.cy==b.cy&&a.scale==b.scale&&a.cos==b.cos&&a.sin==b.sin&&a.pitch==b.pitch;
     }
+    /** DriveMate's own GPU engine draws areas and roads underneath this view; this view then draws names only. */
+    interface GpuBase{
+        void frame(NativeMapProjection.Camera camera,List<NativeMapScene> scenes,double zoom,boolean night);
+        int roadsDrawn();
+        String stats();
+    }
+    private GpuBase gpu;
+    void setGpuBase(GpuBase base){gpu=base;changed();invalidate();}
+    GpuBase gpuBase(){return gpu;}
     private void drawBase(Canvas canvas,NativeMapProjection.Camera c){
+        if(gpu!=null){
+            ArrayList<NativeMapScene> layers=new ArrayList<>(3);
+            if(previous!=null&&previous!=background)layers.add(previous);
+            if(background!=null)layers.add(background);
+            if(scene!=null&&scene!=background)layers.add(scene);
+            gpu.frame(c,layers,zoom,night);
+            NativeBaseRenderer.Frame f=frame(c);f.labelsOnly=true;
+            uiRenderer.render(canvas,f);roadsDrawn=gpu.roadsDrawn();buildingsDrawn=0;
+            return;
+        }
         int w=getWidth(),h=getHeight();
         // Flat map (browsing, route preview): reuse the last bitmap, moved to where the camera is now.
         boolean flat=tilt<.5;
@@ -135,7 +156,7 @@ final class NativeMapView extends View {
         if(target==null||target.getWidth()!=f.width||target.getHeight()!=f.height)target=Bitmap.createBitmap(f.width,f.height,Bitmap.Config.ARGB_8888);
         final Bitmap into=target;
         renderThread.execute(()->{
-            try{workRenderer.render(new Canvas(into),f);}catch(RuntimeException e){android.util.Log.w("DriveMate","map render",e);}
+            try{workRenderer.render(new Canvas(into),f);}catch(Throwable e){android.util.Log.w("DriveMate","map render",e);}
             final int roads=workRenderer.roadsDrawn(),blds=workRenderer.buildingsDrawn();
             post(()->{rendering=false;spare=front;front=into;frontCamera=f.camera;frontVersion=version;roadsDrawn=roads;buildingsDrawn=blds;invalidate();});
         });
@@ -160,7 +181,7 @@ final class NativeMapView extends View {
     @Override protected void onDraw(Canvas canvas){
         long frameStart=System.nanoTime();
         super.onDraw(canvas);routeDrawn=0;
-        if(center==null||getWidth()==0){canvas.drawColor(color(0xffeef1e9,0xff132634));return;}
+        if(center==null||getWidth()==0){if(gpu==null)canvas.drawColor(color(0xffeef1e9,0xff132634));return;}
         NativeMapProjection.Camera c=camera();paint.setStrokeCap(Paint.Cap.ROUND);paint.setStrokeJoin(Paint.Join.ROUND);
         drawBase(canvas,c);
         if(route!=null){boolean full=routePath(canvas,c,route.full(),color(0xffaeb9bb,0xff516270),6);List<GeoMath.Point> remaining=route.remaining(progress);routePath(canvas,c,remaining,0xff143d64,8);boolean ahead=routePath(canvas,c,remaining,0xff16a6f4,5);
