@@ -12,6 +12,10 @@ final class MapLayers {
 
     /** Off: in free browsing the base map is drawn alone, so every zoom looks the same. */
     static final boolean BROWSE_OVERLAY = false;
+    /** Shortest gap between base map loads; later requests wait, they are never dropped. */
+    static final long BASE_MIN_INTERVAL_MS = 350;
+    /** While a finger drags the map, ask for tiles this often so new areas fill in before release. */
+    static final long DRAG_LOAD_INTERVAL_MS = 400;
     /** Street zoom where the exact local road overlay would be loaded in free browsing. */
     static final double OVERLAY_MIN_ZOOM = 15;
     /** The overlay box is reloaded once the centre has moved this far. */
@@ -72,4 +76,13 @@ final class MapLayers {
         if (kmh == previousKmh) return false;
         return !(Double.isFinite(lastShownStart) && start - lastShownStart < LIMIT_MARKER_GAP_METRES);
     }
+    /** Road line width in dp for a kind at a view zoom: thin at overview zoom so towns stay readable. */
+    static float roadWidth(int kind,double zoom){
+        float base=kind==NativeMapScene.MOTORWAY?7:kind==NativeMapScene.MAIN?5:kind==NativeMapScene.LOCAL?3.4f:1.2f;
+        float k=(float)Math.max(.3,Math.min(1.6,1+(zoom-16)*.16));
+        return Math.max(kind==NativeMapScene.PATH?.6f:.9f,base*k);
+    }
+    /** Casings only when roads are wide enough to show them; at overview zoom they turn into noise. */
+    static boolean casing(int kind,double zoom){return zoom>=14||kind>=NativeMapScene.MAIN&&zoom>=11.5;}
+
 }

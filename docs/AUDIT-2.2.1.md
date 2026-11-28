@@ -48,3 +48,14 @@ Clean-slate audit of the app as of 2.2.0. Each finding lists where it lives, wha
 ## Tests
 - New: `RouteMessagesTest`, `MapLayersTest.sourceZoomFollowsScreenDensity`.
 - Updated: `NavigationStartPolicyTest` (traffic wording).
+
+## 2.2.2 follow-up (from the 2.2.1 home-screen screenshot)
+
+| # | Finding | Fix |
+|---|---------|-----|
+| F1 | Roads looked "beaded": every road piece drew its own grey casing over the previous piece's fill, so dark rings showed at every join and tile edge. | `NativeBaseRenderer` batches each road class into one path; all casings are drawn before any fill. |
+| F2 | Overview zoom was a mass of thick yellow lines. | `MapLayers.roadWidth` thins roads below street zoom; `MapLayers.casing` drops casings on minor roads below z14. |
+| F3 | Place names in white boxes, some cut by the search bar and the bottom panel (Chapel Field, Prestwich, Sal…, Baguley). | Names drawn with a soft halo, no box; names kept out of the area under full-width overlays (measured from the layout). |
+| F4 | Panning felt heavy: the whole map (hundreds of thousands of points) was redrawn on the UI thread for every finger movement. | Flat map is drawn on a background thread into a bitmap; while you drag or pinch, the last bitmap is moved/scaled instantly and refreshed behind the scenes. |
+| F5 | No momentum: the map stopped dead on release. | Fling with smooth decay. |
+| F6 | New areas only loaded after the finger lifted, and a load requested within 1 s of the previous one was silently dropped (map stayed part-empty). | Tiles are requested every 400 ms while dragging/flinging; throttled requests are deferred, never dropped (350 ms gap). |
