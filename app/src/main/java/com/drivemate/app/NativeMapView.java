@@ -47,6 +47,8 @@ final class NativeMapView extends View {
     /** Base tiles drawn under the scene: areas everywhere, roads only where the scene has none. */
     void setBackgroundScene(NativeMapScene value){background=value;invalidate();}
     void setLoading(boolean value){if(loading!=value){loading=value;invalidate();}}
+    private java.util.function.Supplier<String> debug;
+    void setDebug(java.util.function.Supplier<String> value){debug=value;invalidate();}
     void setRoute(List<GeoMath.Point> value){route=new RouteRenderGeometry(value);progress=0;turn=secondTurn=Double.NaN;invalidate();}
     void setVehicle(GeoMath.Point p,double direction){vehicle=p;vehicleBearing=direction;invalidate();}
     void setMarkers(GeoMath.Point d,GeoMath.Point e,GeoMath.Point p){destination=d;entrance=e;parked=p;invalidate();}
@@ -209,6 +211,12 @@ final class NativeMapView extends View {
             RectF chip=new RectF(getWidth()/2f-w/2-dp(12),getHeight()*.5f-dp(16),getWidth()/2f+w/2+dp(12),getHeight()*.5f+dp(14));
             paint.setColor(color(0xee0f2236,0xee0f2236));canvas.drawRoundRect(chip,dp(15),dp(15),paint);
             paint.setColor(Color.WHITE);canvas.drawText(t,chip.left+dp(12),chip.bottom-dp(10),paint);paint.setTypeface(Typeface.DEFAULT);
+        }
+        if(debug!=null){
+            String t=debug.get()+String.format(java.util.Locale.UK," · draw %.1f ms",(System.nanoTime()-frameStart)/1e6);
+            paint.setTextSize(dp(10));paint.setTypeface(Typeface.MONOSPACE);paint.setStyle(Paint.Style.FILL);float w=paint.measureText(t);
+            paint.setColor(0xcc000000);float dy=getHeight()*.42f;canvas.drawRect(0,dy-dp(13),Math.min(getWidth(),w+dp(12)),dy+dp(4),paint);
+            paint.setColor(Color.WHITE);canvas.drawText(t,dp(6),dy,paint);paint.setTypeface(Typeface.DEFAULT);
         }
         long elapsed=System.nanoTime()-frameStart;frameCount++;drawTotalNanos+=elapsed;drawMaxNanos=Math.max(drawMaxNanos,elapsed);
         if(paintListener!=null)paintListener.run();

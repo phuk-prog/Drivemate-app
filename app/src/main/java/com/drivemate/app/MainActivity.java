@@ -845,7 +845,7 @@ public final class MainActivity extends Activity implements LocationListener {
         saveButton.setOnClickListener(v -> saveCurrentDestination());
         navActions.addView(saveButton, new LinearLayout.LayoutParams(0, dp(45), 1));
         previewParkingButton = chip("🅿 Nearby");
-        previewParkingButton.setContentDescription("Find verified parking near destination");
+        previewParkingButton.setContentDescription("Find parking near the destination");
         previewParkingButton.setVisibility(View.GONE);
         previewParkingButton.setOnClickListener(v -> findNearbyParking());
         navActions.addView(previewParkingButton,
@@ -1236,7 +1236,7 @@ public final class MainActivity extends Activity implements LocationListener {
         // Full colour like Waze's: it should never look disabled.
         findParkingButton.setBackgroundTintList(android.content.res.ColorStateList.valueOf(CYAN));
         findParkingButton.setTextColor(DARK);
-        findParkingButton.setContentDescription("Find verified parking near destination while stopped");
+        findParkingButton.setContentDescription("Find parking near the destination");
         findParkingButton.setOnClickListener(v -> findNearbyParking());
         arrivalRow.addView(findParkingButton, new LinearLayout.LayoutParams(dp(98), dp(38)));
         arrivalRow.setTag("arrival");
@@ -1404,10 +1404,10 @@ public final class MainActivity extends Activity implements LocationListener {
                 name.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 row.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
                 if (currentLocation != null && item.point != null) {
-                    // Straight-line distance from the live GPS fix, shown on the right.
-                    TextView distance = text(NavigationUnits.displayDistance(
-                            GeoMath.distance(gpsPoint(currentLocation), item.point),
-                            metricUnits), 13, Color.rgb(143, 176, 192), false);
+                    // Straight-line distance from the live GPS fix, shown on the right; "Here" when there.
+                    double away = GeoMath.distance(gpsPoint(currentLocation), item.point);
+                    TextView distance = text(away < 80 ? "Here" : NavigationUnits.displayDistance(away, metricUnits),
+                            13, Color.rgb(143, 176, 192), false);
                     distance.setPadding(dp(8), 0, 0, 0);
                     row.addView(distance);
                 }
@@ -1504,7 +1504,7 @@ public final class MainActivity extends Activity implements LocationListener {
     /** Every setting's label, in the order {@link #runSetting} handles them. */
     private String[] settingsLabels() {
         return new String[] {
-                "DriveMate native routing · coverage",
+                "Routing · online key and coverage",
                 voiceMode == DrivingVoicePolicy.SILENT ? "Enable voice guidance" : "Mute voice guidance",
                 "Voice guidance · " + voiceModeName(),
                 "Voice volume · " + Math.round(guidanceVolume * 100) + "%",
@@ -1532,16 +1532,17 @@ public final class MainActivity extends Activity implements LocationListener {
                 "DriveMate routing and search",
                 "Journey map review · " + mapReview.snapshot().size() + " findings",
                 "Independent map survey drafts",
-                "Offline routing · regional coverage",
+                "Offline routing areas",
                 "Offline visual map · download full UK",
                 "DriveMate original stack · Wells pilot",
                 "Free driving · "+(freeDriving?"On":"Off"),
                 "Advance speed-limit voice · "+(advanceSpeedVoice?"On":"Off"),
-                "Map areas · fast offline detail",
+                "Download map areas · faster, works offline",
                 "Play navigation voice through · " + VoiceRouting.label(voiceOutputMode()),
                 "While the voice speaks · " + (voicePausesMusic ? "Pause music" : "Lower music"),
                 "Test navigation voice",
-                "Music controls · " + (MusicControl.accessGranted(this) ? "On" : "Off · allow notification access")
+                "Music controls · " + (MusicControl.accessGranted(this) ? "On" : "Off · allow notification access"),
+                "Map debug overlay · " + (mapDebug ? "On" : "Off")
         };
     }
 
@@ -1683,11 +1684,14 @@ public final class MainActivity extends Activity implements LocationListener {
                             getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean("voice_pauses_music", voicePausesMusic).apply(); break;
                         case 35: testVoice(); break;
                         case 36: openMusicAccess(); break;
+                        case 37: mapDebug = !mapDebug; if (vectorMap != null) vectorMap.setDebug(mapDebug); break;
                         default: break;
         }
     }
 
     private MusicControl musicControl;
+    /** Developer overlay: tile zoom, tiles loaded/missing/trimmed, points, overlay and draw time. */
+    private boolean mapDebug;
     private LinearLayout musicHomeBar, musicDriveBar;
     private double musicUntilTurn = -1;
 
@@ -2618,7 +2622,7 @@ public final class MainActivity extends Activity implements LocationListener {
                 ? fix.getSpeed() : 0f;
         speedCluster.setSpeed(filteredSpeed, metricUnits);
         if (!active && !routing && destination == null && fix.hasAccuracy()) {
-            setStatus((freeDriving?"Free driving · road limits not verified · GPS ±":"GPS ready · accuracy ±") + Math.round(fix.getAccuracy()) + " m"
+            setStatus((freeDriving?"Free driving · GPS ±":"GPS ready · accuracy ±") + Math.round(fix.getAccuracy()) + " m"
                     + satelliteSuffix());
         }
         if (!active && followLocation) {
@@ -2774,7 +2778,7 @@ public final class MainActivity extends Activity implements LocationListener {
         if(freeDriving)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         setHomeVisible(true);
-        setStatus(freeDriving?"Free driving · GPS and mapped features · road limits not verified":"Map browsing");
+        setStatus(freeDriving?"Free driving":"Map browsing");
         if(currentLocation!=null)centreOnLocation(true);
     }
 
@@ -2992,7 +2996,7 @@ public final class MainActivity extends Activity implements LocationListener {
         } else {
             detail += NavigationStartPolicy.trafficStatus(calculated.provider);
         }
-        return detail + "\n" + RouteMapPolicy.description(calculated.provider, calculated.nativeScene != null);
+        return detail;
     }
 
     private void showPreview(TomTomApi.Route calculated) {
@@ -3022,10 +3026,8 @@ public final class MainActivity extends Activity implements LocationListener {
         stopButton.setContentDescription("Cancel route preview");
         stopButton.setVisibility(View.VISIBLE);
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        setStatus(NavigationStartPolicy.previewOnly(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked and ready"
-                + ("TomTom".equals(calculated.provider) ? " · TomTom live traffic"
-                : onlineKey().isEmpty() ? " · offline route (add TomTom key in Settings)"
-                : OnlineFirst.lastProblem.isEmpty() ? " · offline route" : " · offline route (online: " + OnlineFirst.lastProblem + ")"));
+        setStatus(NavigationStartPolicy.previewOnly(calculated.provider)?"Offline route preview · NOT FOR DRIVING":"Route ready · tap Start when parked"
+                + ("TomTom".equals(calculated.provider) ? " · live traffic" : " · offline route"));
     }
 
     private void startNavigation() {
@@ -3066,7 +3068,7 @@ public final class MainActivity extends Activity implements LocationListener {
         applyDrivingControls();
         stopButton.setText("End");
         stopButton.setContentDescription("End navigation");
-        setStatus("Navigating with "+route.provider+" · "+RouteMapPolicy.description(route.provider, route.nativeScene != null));
+        setStatus("Navigating" + ("TomTom".equals(route.provider) ? " · live traffic" : ""));
         mapReview.clear(); comparisonRoute=null; comparisonBusy=false; comparisonRequestedAt=0; reviewGeneration++; requestComparison();
         guidancePositionConfirmed=false;confirmedSinceRouteInstall=false;joiningRoute=false;lastJoinCameraAt=-1;
         nextInstruction="";
@@ -3185,7 +3187,28 @@ public final class MainActivity extends Activity implements LocationListener {
     }
 
     /** Parking information is requested only on demand and never guessed. */
-    private void findNearbyParking(){showError("Native parking search is not yet validated. No external search fallback.");}
+    /** Car parks within 1 km of the destination: online search when available, else offline names. Tap one to drive there. */
+    private void findNearbyParking(){
+        if(destination==null||destination.point==null){showError("Pick a destination first.");return;}
+        final TomTomApi.Destination target=destination;final GeoMath.Point near=target.point;
+        setStatus("Finding parking near "+target.title+"…");
+        network.execute(()->{
+            List<TomTomApi.Destination> found=OnlineFirst.search(onlineKey(),"car park",near,hasNetwork());
+            if(found==null)try{found=new NativeRegionalRouter(this).search("car park",near);}catch(Exception ignored){found=null;}
+            final List<TomTomApi.Destination> parks=new ArrayList<>();
+            if(found!=null)for(TomTomApi.Destination d:found)if(d.point!=null&&GeoMath.distance(d.point,near)<=1000)parks.add(d);
+            parks.sort((x,y)->Double.compare(GeoMath.distance(x.point,near),GeoMath.distance(y.point,near)));
+            runOnUiThread(()->{
+                if(isFinishing())return;
+                if(parks.isEmpty()){showError("No car parks found within 1 km of "+target.title+".");return;}
+                String[] labels=new String[Math.min(8,parks.size())];
+                for(int i=0;i<labels.length;i++)labels[i]=parks.get(i).title+" · "+NavigationUnits.displayDistance(GeoMath.distance(parks.get(i).point,near),metricUnits)+" from "+target.title;
+                new AlertDialog.Builder(this).setTitle("Parking near "+target.title)
+                        .setItems(labels,(d,which)->selectDestination(parks.get(which)))
+                        .setNegativeButton("Close",null).show();
+            });
+        });
+    }
 
     private void offerSaveParkedCar() {
         new AlertDialog.Builder(this).setTitle("Save where you parked?")
@@ -3404,13 +3427,13 @@ public final class MainActivity extends Activity implements LocationListener {
                             // When the old ETA is stale, an alternative is a choice, not an
                             // automatically faster route. Never silently switch on that basis.
                             showPendingRoute(calculated, start, 0);
-                            setStatus("Updated route · time saving unverified");
+                            setStatus("Different route available · choose Switch or Keep");
                             return;
                         } else if (verdict == RouteUpdatePolicy.Compare.RETAIN_NEAR_MANOEUVRE) {
                             setStatus("Faster route ignored · next turn is close");
                             return;
                         } else if (verdict == RouteUpdatePolicy.Compare.RETAIN_NO_SAVING) {
-                            setStatus("Current route retained · no verified time saving");
+                            setStatus("Keeping current route");
                             return;
                         }
                         // INSTALL: automatic mode with a verified improvement, or not genuinely different.
@@ -3428,11 +3451,12 @@ public final class MainActivity extends Activity implements LocationListener {
                         long retrySeconds = ReroutePolicy.retryGapMs(active ? rerouteFailures : 0) / 1000;
                         setStatus("Update failed · following last known route"
                                 + (active ? " · retrying in " + retrySeconds + " s" : "")
-                                + (coverage ? " · outside installed regions: download a regional pack" : ""));
-                        Toast.makeText(this, "Route update unavailable: " + error.getMessage(),
+                                + (coverage ? " · outside offline routing area" : ""));
+                        Toast.makeText(this, "Route update unavailable · "
+                                + RouteMessages.friendly(error.getMessage(), coverage, hasNetwork()),
                                 Toast.LENGTH_LONG).show();
                     } else {
-                        showError(error.getMessage());
+                        showError(RouteMessages.friendly(error.getMessage(), coverage, hasNetwork()));
                         stopButton.setVisibility(View.GONE);
                     }
                 });
@@ -4428,6 +4452,42 @@ public final class MainActivity extends Activity implements LocationListener {
         gpsHandler.postDelayed(gpsWatchdog, 5000);
         if (active) startSmoothLoop();
         if (musicControl != null) musicControl.start();
+        maybeOfferMapPack();
+    }
+
+    /**
+     * Once, on Wi-Fi, when no map area is installed: offer the download that makes the map complete,
+     * fast and identical with or without signal.
+     */
+    private void maybeOfferMapPack() {
+        if (active || route != null || !homeMode) return;
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean("map_pack_offered", false) || !unmeteredNetwork()) return;
+        packWorker.execute(() -> {
+            boolean none;
+            try { none = new MapPacks(this).installedFiles().isEmpty(); } catch (Exception e) { return; }
+            if (!none) return;
+            runOnUiThread(() -> {
+                if (isFinishing() || active || route != null) return;
+                prefs.edit().putBoolean("map_pack_offered", true).apply();
+                new AlertDialog.Builder(this).setTitle("Download your area's map?")
+                        .setMessage("A map area download makes the map complete and quick to load, and it works without signal. "
+                                + "Areas are 70–420 MB; best on Wi-Fi. You can do this later in Settings › Offline maps.")
+                        .setPositiveButton("Choose area", (d, w) -> showMapAreas())
+                        .setNegativeButton("Not now", null).show();
+            });
+        });
+    }
+
+    private boolean unmeteredNetwork() {
+        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null) return false;
+        try {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(cm.getActiveNetwork());
+            return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED);
+        } catch (SecurityException ignored) {
+            return false;
+        }
     }
 
     @Override public void onPause() {
